@@ -1,0 +1,167 @@
+// SPDX-License-Identifier: MIT
+
+// The GameCube as game mode emulates it: Gekko running the game's code (including its OS), main memory and ARAM, the
+// DSP running the game's DSP program, and the hardware that the OS and the sound code use. A Disc provides the disc's
+// data.
+//
+// The system boots the game's main.dol from its entry point. It starts in the state that the IPL and the apploader
+// leave: the OS globals in low memory, the BATs that map main memory, and the disc's file system table at the top of
+// main memory.
+
+#pragma once
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <set>
+#include <string>
+
+#include "common/common_types.h"
+#include "dsp/dsp.h"
+#include "dsp/main_memory.h"
+#include "gc/di.h"
+#include "gc/dsp_interface.h"
+#include "gc/exi.h"
+#include "ppc/cpu.h"
+
+namespace gcsf::gc
+{
+
+// The registers that System models itself. A snapshot of the system copies them (see System::Save).
+class SystemRegisters
+{
+protected:
+    // Registers that only store what's written to them, big-endian. They cover the blocks that the system doesn't model
+    // further.
+    template <std::size_t N>
+    struct RegisterFile
+    {
+        std::array<uint8_t, N> bytes{};
+
+        uint32_t Read(uint32_t offset, int size) const;
+        void Write(uint32_t offset, int size, uint32_t value);
+    };
+
+    uint32_t pi_mask_ = 0;
+    uint32_t ai_control_ = 0;
+    uint32_t ai_volume_ = 0;
+    uint32_t ai_interrupt_timing_ = 0;
+    uint32_t ai_samples_ = 0;
+    double ai_next_count_ = 0.0; // the CPU cycle of the counter's next count
+    double ai_period_ = 0.0;     // and the cycles between counts
+    uint64_t vi_next_field_ = 0; // the CPU cycle of the video interface's next field
+    uint32_t vi_fields_ = 0;     // the fields so far
+    RegisterFile<0x100> pi_{};
+    RegisterFile<0x100> vi_{};
+    RegisterFile<0x100> mi_{};
+    RegisterFile<0x100> cp_{};
+    RegisterFile<0x100> pe_{};
+    RegisterFile<0x400> si_{};
+};
+
+class System final : public ppc::Bus, private SystemRegisters
+{
+public:
+    // The CPU's clock, and the bus clock that times the hardware.
+    static constexpr uint32_t kCpuClock = 486'000'000;
+    static constexpr uint32_t kBusClock = 162'000'000;
+
+    // The whole system's state between runs: memory, the CPU, the DSP and the devices. It can only be restored to the
+    // system it came from.
+    struct Snapshot
+    {
+        MainMemory::Snapshot memory;
+        ppc::Cpu::Snapshot cpu;
+        dsp::Dsp dsp;
+        DspInterface::Snapshot dsp_interface;
+        DiscInterface::Snapshot disc_interface;
+        Exi::Snapshot exi;
+        SystemRegisters registers;
+    };
+
+    explicit System(Disc& disc);
+
+    // Puts the system, with the game's code in memory, in the state in which the apploader starts the game at `entry`.
+    // That covers the OS globals, the disc's file system table and the CPU's registers. Throws std::runtime_error if
+    // the disc's header or file system table can't be read.
+    void Start(uint32_t entry);
+
+    // Runs for `cycles` CPU cycles, or until the CPU stops. Returns why it stopped.
+    ppc::StopReason Run(uint64_t cycles);
+
+    // Takes a snapshot between runs, and restores one. A snapshot shares its unchanged memory pages with `previous`.
+    Snapshot Save(const Snapshot* previous = nullptr) const;
+    void Restore(const Snapshot& snapshot);
+
+    ppc::Cpu& Cpu()
+    {
+        return cpu_;
+    }
+
+    MainMemory& Memory()
+    {
+        return memory_;
+    }
+
+    dsp::Dsp& Dsp()
+    {
+        return dsp_;
+    }
+
+    DspInterface& DspRegisters()
+    {
+        return dsp_interface_;
+    }
+
+    // Called with a line of text the first time each unmodelled hardware register is accessed. Useful when bringing up
+    // games.
+    std::function<void(const std::string&)> on_unknown_io;
+
+    // ppc::Bus.
+    uint8_t* RamPage(PAddr page) override;
+    bool ReadIo(PAddr address, int size, uint32_t& value) override;
+    bool WriteIo(PAddr address, int size, uint32_t value) override;
+
+private:
+    void LoadLowMemory();
+
+    // The processor interface's registers (physical 0x0C003000) and its interrupt causes.
+    uint32_t ReadPi(uint32_t offset);
+    void WritePi(uint32_t offset, uint32_t value);
+    uint32_t InterruptCauses() const;
+    void UpdateInterrupt();
+
+    // The audio interface's registers (physical 0x0C006C00). The sample counter (for disc streaming) counts at the
+    // streaming rate while playback is on. Counting starts a period after playback starts or the rate changes. The OS
+    // times the counter at boot.
+    uint32_t ReadAi(uint32_t offset);
+    void WriteAi(uint32_t offset, uint32_t value);
+    void AdvanceSampleCounter();
+
+    // The video interface's display interrupts (physical 0x0C002030-0x0C00203F). The OS sets two of them to come once a
+    // frame each: DI0 at the start of the second field and DI1 at the start of the first. Every field raises the one
+    // whose turn it is, if it's enabled. Its handler clears it and counts a retrace.
+    void Field();
+    bool DisplayInterruptPending() const;
+
+    // The serial interface's registers (physical 0x0C006400). Nothing is connected. Transfers finish at once.
+    void WriteSi(uint32_t offset, int size, uint32_t value);
+
+    // The next device event, and the device events due by now.
+    uint64_t NextEvent() const;
+    void Advance();
+
+    void ReportUnknown(PAddr address, int size, bool write, uint32_t value);
+
+    Disc& disc_;
+    MainMemory memory_;
+    ppc::Cpu cpu_{*this};
+    dsp::Dsp dsp_{memory_};
+    DspInterface dsp_interface_{dsp_, memory_, cpu_};
+    DiscInterface disc_interface_{disc_, memory_};
+    Exi exi_{memory_};
+    std::set<PAddr> reported_;
+};
+
+} // namespace gcsf::gc
