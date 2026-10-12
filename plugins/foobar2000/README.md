@@ -4,8 +4,8 @@ foobar2000 input component for GCSF rips (`.minigcsf`). It uses the same player 
 the game's code on an emulated GameCube: the game's OS, its sound library and its DSP program.
 
 **Status:** the component builds with Apple Clang for foobar2000 on macOS. It's set up to build with clang-cl (or MSVC)
-for 32-bit and 64-bit foobar2000 on Windows, like 3SF's component. The Windows build hasn't been tested in foobar2000
-yet. `ctest` covers the player core.
+for 32-bit and 64-bit foobar2000 on Windows. The Windows build hasn't been tested in foobar2000 yet. `ctest` covers the
+player core.
 
 ## Features
 
@@ -30,7 +30,7 @@ yet. `ctest` covers the player core.
 
 You need the foobar2000 SDK, from <https://www.foobar2000.org/SDK>. Unpack it and use the folder containing `pfc` and
 `foobar2000` as the SDK path below. A newer SDK than the one the component was last built with may require changes to
-`plugins/foobar2000/CMakeLists.txt`.
+`xsflib_add_foobar2000_component` in `externals/xsflib/cmake/XsflibApps.cmake`.
 
 **On macOS:** you need the Xcode command line tools (`xcode-select --install`), CMake 3.20 or later, and the SDK
 unpacked somewhere (macOS's `tar -xf SDK-<date>.7z` unpacks it).
@@ -65,7 +65,7 @@ selects MSVC. MSVC should produce the same audio. Its build runs more slowly.
 The build compiles the SDK's `pfc`, `foobar2000/SDK` and `foobar2000/foobar2000_component_client` sources directly. On
 Windows it links `foobar2000/shared/shared-<arch>.lib` (or `shared.lib`). On macOS it compiles the parts of
 `foobar2000/shared` and the Objective-C++ files that the SDK's Xcode projects build. If the SDK layout has changed,
-adjust `plugins/foobar2000/CMakeLists.txt`.
+adjust `xsflib_add_foobar2000_component`.
 
 On Windows everything is built with the static C runtime (`/MT`). The component then requires no runtime DLLs. On macOS
 it uses only the system's libraries.
@@ -78,5 +78,6 @@ if your other components support them.
 
 ## Licence
 
-Like the rest of GCSF, the component is MIT-licensed. It uses zlib. Ship `LICENSE` and `THIRD-PARTY-NOTICES.md` (or their
-text) with a build. Nothing in it is GPL. It can therefore be distributed as a foobar2000 component.
+Like the rest of GCSF, the component is MIT-licensed. It contains xsflib and ntdlib (both MIT) and uses zlib. Ship
+`LICENSE` and `THIRD-PARTY-NOTICES.md` (or their text) with a build. `THIRD-PARTY-NOTICES.md` holds the licences of
+xsflib and ntdlib. Nothing in the component is GPL. It can therefore be distributed as a foobar2000 component.

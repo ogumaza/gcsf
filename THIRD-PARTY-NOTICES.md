@@ -4,6 +4,10 @@ GCSF is under the MIT licence (`LICENSE`). Its dependencies have the following l
 
 | Component | Licence | Use in GCSF |
 |---|---|---|
+| xsflib, Copyright (c) 2026 the xsflib authors | MIT | A library for players and rippers of PSF-family formats. GCSF takes from it the PSF container and the descriptors' checks, the player framework, and the frames of the ripper and the player tool. A Git submodule in `externals/xsflib`, built into GCSF's programs. It finds or downloads the libraries below. |
+| ntdlib, Copyright (c) 2026 the ntdlib authors | MIT | A library for the hardware and formats of Nintendo's consoles. GCSF takes from it the PowerPC interpreter, the DSP and its coefficient ROM, the GameCube's devices and the base of its machine, the readers of disc images, the readers of JAudio's sound files, and the length analysis of JAudio's sounds. Twilight Princess's driver includes ntdlib's start-up of the game's sound layer. A Git submodule in `externals/ntdlib`, built into GCSF's programs. |
+| Data from [Unicode](https://www.unicode.org), Copyright © 1991-2026 Unicode, Inc. | Unicode-3.0 | ntdlib's `src/disc/jis0208.h`, a mapping of JIS X 0208 to Unicode derived from Unicode's JIS0208.TXT. ntdlib's disc readers decode the Shift-JIS text of GameCube discs with it: the titles of Japanese discs and the names in a disc's file system. Built into `gcsfrip`. |
+| seqlib, Copyright (c) 2026 the seqlib authors | MIT (`externals/xsflib/externals/seqlib/LICENSE`) | In `externals/xsflib/externals/seqlib`, a submodule of xsflib. Only the tests use it: their checks come from it, through `xsflib::testing`. |
 | [zlib](https://zlib.net), Copyright (C) 1995-2024 Jean-loup Gailly and Mark Adler | zlib | The PSF container, and GCZ disc images. The installed copy is used if there is one. Otherwise v1.3.1 is downloaded when configuring. |
 | [Zstandard](https://github.com/facebook/zstd), Copyright (c) Meta Platforms, Inc. and affiliates | BSD-3-Clause | RVZ disc images. The installed copy is used if there is one. Otherwise v1.5.7 is downloaded when configuring. |
 | [liblzma](https://tukaani.org/xz/) from XZ Utils | 0BSD | LZMA and LZMA2 in WIA and RVZ disc images. The installed copy is used if there is one. Otherwise v5.8.1 is downloaded when configuring. |
@@ -11,22 +15,20 @@ GCSF is under the MIT licence (`LICENSE`). Its dependencies have the following l
 | [libFLAC](https://xiph.org/flac/), Copyright the Xiph.Org Foundation | BSD-3-Clause | FLAC output in `gcsfplay`. The installed copy is used if there is one. Otherwise 1.5.0 is downloaded when configuring. |
 | [foobar2000 SDK](https://www.foobar2000.org/SDK), Copyright Peter Pawlowski | BSD-style (the SDK's `sdk-license.txt`, and `pfc-license.txt` for its pfc library) | Only for `plugins/foobar2000`. Not included here. The SDK is supplied when building the component. |
 
-Binary distributions must include GCSF's MIT notice, the Zstandard notice when Zstandard is linked in, and the libFLAC
-notice when libFLAC is linked in. Shipping `LICENSE` and this file does that. The licence texts are at the end of this
-file. The licences of zlib, liblzma and bzip2, and those of the foobar2000 SDK and its pfc library, require no notice in
-binaries.
-
-## Code from WSF
-
-GCSF started from the code of WSF, the Wii's rip format in the same family. WSF is under the MIT licence too. `LICENSE`
-keeps WSF's copyright notice for that code.
+Binary distributions must include the MIT notices of GCSF, xsflib and ntdlib. Every program contains xsflib and
+ntdlib. The Zstandard notice is required when Zstandard is linked in: `gcsfrip` links it, and `gcsfplay` and the
+foobar2000 component don't. The libFLAC notice is required when libFLAC is linked in: `gcsfplay` links it, and
+`gcsfrip` and the foobar2000 component don't. The Unicode License v3's notice is required where Unicode's data is linked
+in: `gcsfrip` contains it, and `gcsfplay` and the foobar2000 component don't. Shipping `LICENSE` and this file meets all
+six requirements. The licence texts are at the end of this file. The licences of zlib, liblzma and bzip2, and those of
+the foobar2000 SDK and its pfc library, require no notice in binaries. seqlib's checks go only into tests.
 
 ## Reference material (no code taken)
 
-- [Dolphin](https://github.com/dolphin-emu/dolphin) (GPL-2.0-or-later) is the reference for how the DSP behaves. No code
-  is taken from it. Where GCSF follows Dolphin's behaviour, the code was written from a description of that behaviour.
-  The writer hadn't read Dolphin's source for that part. Dolphin's documentation of the WIA and RVZ formats
-  (`docs/WiaAndRvz.md`) describes those formats and the generator of the padding data on GameCube and Wii discs.
+- [Dolphin](https://github.com/dolphin-emu/dolphin) (GPL-2.0-or-later) is the reference for how the DSP in ntdlib
+  behaves. No code is taken from it. Where GCSF follows Dolphin's behaviour, the code was written from a description of
+  that behaviour. The writer hadn't read Dolphin's source for that part. Dolphin's documentation of the WIA and RVZ
+  formats (`docs/WiaAndRvz.md`) describes those formats and the generator of the padding data on GameCube and Wii discs.
 - [Wiimm's ISO Tools](https://wit.wiimm.de) document the WDF and CISO formats.
 - YAGCD (Yet Another GameCube Documentation) documents the GameCube's hardware and disc format.
 
@@ -35,10 +37,63 @@ keeps WSF's copyright notice for that code.
 Nothing in this repository licenses game data. Rips (`.gcsflib`) contain a game's code and sound files. These belong to
 their copyright holders.
 
-`src/dsp/coef_rom.h` holds the DSP's coefficient ROM. Every GameCube and Wii has the same ROM. It holds 4-tap filters:
-128 phases for each of three cutoffs. The player uses the exact values to reproduce the console's output.
+ntdlib's `include/ntdlib/dsp/coef_rom.h` holds the DSP's coefficient ROM. Every GameCube and Wii has the same ROM. It
+holds 4-tap filters: 128 phases for each of three cutoffs. The player uses the exact values to reproduce the console's
+output.
 
 ## Licence texts
+
+### xsflib
+
+```
+MIT License
+
+Copyright (c) 2026 the xsflib authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### ntdlib
+
+```
+MIT License
+
+Copyright (c) 2026 the ntdlib authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 ### Zstandard
 
@@ -197,4 +252,48 @@ Julian Seward, jseward@acm.org
 bzip2/libbzip2 version 1.0.8 of 13 July 2019
 
 --------------------------------------------------------------------------
+```
+
+### Unicode License v3
+
+```
+UNICODE LICENSE V3
+
+COPYRIGHT AND PERMISSION NOTICE
+
+Copyright © 1991-2026 Unicode, Inc.
+
+NOTICE TO USER: Carefully read the following legal agreement. BY
+DOWNLOADING, INSTALLING, COPYING OR OTHERWISE USING DATA FILES, AND/OR
+SOFTWARE, YOU UNEQUIVOCALLY ACCEPT, AND AGREE TO BE BOUND BY, ALL OF THE
+TERMS AND CONDITIONS OF THIS AGREEMENT. IF YOU DO NOT AGREE, DO NOT
+DOWNLOAD, INSTALL, COPY, DISTRIBUTE OR USE THE DATA FILES OR SOFTWARE.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of data files and any associated documentation (the "Data Files") or
+software and any associated documentation (the "Software") to deal in the
+Data Files or Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, and/or sell
+copies of the Data Files or Software, and to permit persons to whom the
+Data Files or Software are furnished to do so, provided that either (a)
+this copyright and permission notice appear with all copies of the Data
+Files or Software, or (b) this copyright and permission notice appear in
+associated Documentation.
+
+THE DATA FILES AND SOFTWARE ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF
+THIRD PARTY RIGHTS.
+
+IN NO EVENT SHALL THE COPYRIGHT HOLDER OR HOLDERS INCLUDED IN THIS NOTICE
+BE LIABLE FOR ANY CLAIM, OR ANY SPECIAL INDIRECT OR CONSEQUENTIAL DAMAGES,
+OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THE DATA
+FILES OR SOFTWARE.
+
+Except as contained in this notice, the name of a copyright holder shall
+not be used in advertising or otherwise to promote the sale, use or other
+dealings in these Data Files or Software without prior written
+authorization of the copyright holder.
 ```

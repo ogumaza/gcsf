@@ -7,23 +7,16 @@
 
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
 
-#include "dsp/main_memory.h"
+#include "ntdlib/flipper/disc.h"
+
+#include "gc/memory.h"
 
 namespace gcsf::gc
 {
 
-// The data on the disc in the form that the drive reads.
-class Disc
-{
-public:
-    virtual ~Disc() = default;
-
-    // Reads `size` bytes at byte `offset` of the disc. Returns false if any of them lies past the disc's end.
-    virtual bool Read(uint64_t offset, void* out, std::size_t size) = 0;
-};
+using ntdlib::flipper::Disc;
 
 // The interface's registers and the command in progress. A snapshot of the system copies them (see
 // DiscInterface::Save).

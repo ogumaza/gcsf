@@ -5,7 +5,8 @@ A GCSF rip holds the game's code. A player runs that code on an emulated GameCub
 its DSP program. The game plays the sound itself. The rip is therefore exact.
 
 GCSF works like 2SF for the DS. A rip requires a driver profile for the game (see "Ripping"). Version 1 rips games
-whose sound library is JAudio2. JAudio2 is the sound library of Nintendo EAD's JSystem.
+whose sound library is JAudio, in either of its generations: JAudio1 or JAudio2. JAudio is the sound library of
+Nintendo EAD's JSystem. Version 1 also rips games whose sound library is MusyX, Factor 5's sound library.
 
 ## Files
 
@@ -130,11 +131,36 @@ Nothing else changes memory while the CPU runs. The result is therefore the same
 
 ## Driver
 
-Rips contain GCSF's driver, `driver/driver.c`. The driver is loaded at 0x81700000. Its entry point is at the same
-address. The rip patches the game's `main` to branch to it. The driver calls the game's functions to do what the game's
-start-up does for sound. It leaves out the graphics. It sets up the video interface, JSystem's heaps and ARAM manager,
+Rips contain one of GCSF's drivers. Each driver calls the functions of one game's sound layer. The game's profile names
+the driver. Four Swords Adventures' driver is `driver/driver.c`. Mario Golf: Toadstool Tour's driver is
+`driver/mario_golf.c`. A driver is loaded at 0x81700000. Its entry point is at the same address. The rip patches the
+game's `main` to branch to it. The driver calls the game's functions to do what the game's start-up does for sound. It
+leaves out the graphics. Four Swords Adventures' driver sets up the video interface, JSystem's heaps and ARAM manager,
 the game's audio object and disc thread, and the game's audio set-up. It loads every wave bank into ARAM. Then it starts
 the sound by its JAudio sound ID. From then on it calls the game's audio frame process once per video retrace.
+
+Twilight Princess's driver is `driver/twilight_princess.c`. It sets up the video interface, JSystem's heaps, ARAM
+manager and thread switch manager, the game's heaps and disc thread, and the game's audio set-up. It loads the wave
+groups of the wave list (see below) as the game's scene manager loads them. Then it starts the sound. From then on it
+calls the audio manager's frame process every second video retrace. The game's frames are a 30th of a second. An entry
+of its wave list holds a wave bank in its high 16 bits and a group of that bank's wave system in its low 16 bits.
+
+The Wind Waker's driver is `driver/zel.c`. It sets up the video interface, JSystem's heaps and ARAM manager, and the
+game's disc thread, as the game's machine set-up does. Then it calls the game's audio process once a frame until the
+sound library is up. The library loads its start-up archive and the waves that stay loaded. It starts the effects
+sequence. The driver then loads the waves that the `.minigcsf` names. It gives the sound library back its default
+camera, which stays still. The game's sound set-up clears the camera, and the game's camera process sets it once a
+frame. The sound library reads it for an effect with a Doppler shift. Then the driver starts the sound by its JAudio
+sound ID. From then on it calls the audio process once a frame. A frame is two video retraces, as in the game. The
+game gives the sound library 0xA00000 bytes of ARAM and graphics 0x5CE000. The driver gives the sound library all but
+64 KiB of both, 0xFBE000 bytes. A rip draws nothing. The Wind Waker HD's waves that stay loaded take more than the
+game's share for sound.
+
+Mario Golf: Toadstool Tour's driver sets up the video interface, the OS's arena and heap, the ARAM and the game's heaps.
+The game's sound set-up then starts MusyX, and the driver loads the game's two MusyX sound groups. The driver starts the
+song by its number in the game's song table, or the jingle by its number in the jingle table. The game starts a jingle
+from another thread. The jingle sounds half a second later. The driver's thread then sleeps. The song plays from the
+audio and DSP interrupts.
 
 Its parameter block is at **0x81700010**. The block's words are big-endian:
 
@@ -148,8 +174,28 @@ Its parameter block is at **0x81700010**. The block's words are big-endian:
            addresses of the game's functions and the offsets of their objects (see driver.c)
 ```
 
-A `.minigcsf` patches only the sound ID: a 4-byte `MEM` chunk at 0x8170001C. After applying all `MEM` chunks, a version
-1 player checks the driver block. If the block has the expected magic, the player rejects versions other than 1.
+A game's waves may not fit in the audio memory. A driver for such a game loads only the waves that the sound uses. Its
+block has a wave list after the handle, and its game profile after the list:
+
+```
+0x14   u32  the number of waves that the sound uses, at most 64
+0x18   u32  the waves: 64 entries. The driver's source says what an entry means
+0x118  ...  game profile (see the driver's source)
+```
+
+The Wind Waker's driver has a wave list. An entry gives a wave system's number in its high 16 bits and a group of the
+system in its low 16 bits. The driver skips a wave system that the sound library has loaded already. Each of the
+game's wave systems has one group.
+
+Mario Golf's driver doesn't use the handle. The top byte of a Mario Golf sound ID gives the table, and its low 16 bits
+give the song's number in that table. Table 0 holds the songs, and table 1 the jingles.
+
+A `.minigcsf` patches the sound ID: a 4-byte `MEM` chunk at 0x8170001C. For a driver with a wave list, it also patches
+the list: a `MEM` chunk at 0x81700024 with the number of waves and the waves. A sequence that no sound plays also
+requires a `FILE` chunk (see "Ripping"). After applying all `MEM` chunks, a version 1 player checks the driver block. If
+the block has the expected magic, the player rejects versions other than 1. Every driver's block is version 1, whatever
+its layout after the status word. A player reads only the magic, the version and the status word. The driver reads the
+rest. A version 1 player therefore plays the rips of every game, including games that later releases add.
 
 The descriptor's status address points at the status word (0x81700018). A player uses it at both ends of the sound:
 
@@ -174,25 +220,104 @@ before the fade.
 
 `gcsfrip` builds sets from a GameCube disc image or an extracted disc. A game requires a driver profile. Profiles
 (function addresses) are specific to each game and version. They're matched by game ID and the SHA-1 of `main.dol`.
-Version 1 supports The Legend of Zelda: Four Swords Adventures (USA).
+Version 1 supports The Legend of Zelda: Four Swords Adventures (USA) and its Japanese release, The Legend of Zelda:
+Four Swords Plus, The Legend of Zelda: Twilight Princess (USA) and The Legend of Zelda: The Wind Waker (USA). It also
+supports Mario Golf: Toadstool Tour (USA).
 
 The `.gcsflib` contains:
 
-- the sections of the game's `main.dol`, with `main` patched to branch to the driver;
+- the sections of the game's `main.dol`, with `main` patched to branch to the driver, and the profile's other patches
+  (Mario Golf's `ClearArena` returns at once);
 - the driver and its parameter block with the game profile;
-- the disc's header (`sys/boot.bin`), the sound library's start-up archive (a BAA), the sequence archive, and every wave
-  archive (`.aw`) that the start-up archive's wave systems name, as `FILE` chunks;
+- for a JAudio game, the disc's header (`sys/boot.bin`), the sound library's start-up archive (a BAA, or an AAF in The
+  Wind Waker), the sequence archive, and wave archives (`.aw`), as `FILE` chunks. For Mario Golf, the disc's header, the
+  files of its two MusyX sound groups and every song's file (an SNG), as `FILE` chunks;
 - a process descriptor.
 
+The wave archives are every one that the start-up archive's wave systems name, unless the game loads its wave groups as
+its scenes require them. Twilight Princess and The Wind Waker do. The Wind Waker's library also holds the archives that
+the sound library loads at start-up. A wave system lists a wave bank's waves in groups, and each group is one wave
+archive. A wave can be in several groups. For such a game, the library holds the archives of the groups that the
+rip's sounds use, and each `.minigcsf` lists its sound's groups (see "Wave groups").
+
 Each `.minigcsf` selects one sound by its JAudio sound ID. The sound table in the start-up archive lists the sounds and
-names them. A sound's ID gives its section in the top byte, its group in the next byte and its index in the low 16
-bits. `--bgm` selects the sounds of the section named BGM. `--only` selects the sounds whose names match a regular
-expression.
+names them. In a BAA's table, a sound's ID gives its section in the top byte, its group in the next byte and its
+index in the low 16 bits. `--bgm` selects the sounds of the section named BGM. `--only` selects the sounds whose names
+match a regular expression.
+
+The Wind Waker's start-up archive is JAudio1's AAF. Its sound table lists the effects in categories, then the music. It
+names no sound. An effect is named after its category and index, for example `se4-0123`. A piece of music is named after
+its file in the sequence archive. An effect's ID gives its category in bits 12 to 19 and its index in the low 10 bits.
+Its bit 11 is set. The game sets that bit for most effects. With it, the sound library plays the effect to its end. A
+piece of music's ID is 0x80000000 plus its index. The table's first piece is the effects sequence. The sound library
+plays it all along. The ripper leaves it out.
+
+Some of The Wind Waker's effects make no sound in a rip, and the ripper skips them. Most are empty: their code
+returns at once, and the game plays nothing for them either. 34 others read a port that the game sets when it starts
+the effect, and they play nothing while the port holds 0:
+
+- **Port 6** holds the low 16 bits of the map information that the game passes with the effect, such as the material
+  of the ground under a footstep. The driver passes 0. These effects read it: se2-0003 to 0005, se2-0051 to 0052,
+  se2-0085, se2-0111, se2-0122 to 0123, se3-0000 to 0003, se3-0010 to 0012, se3-0021, se3-0024, se3-0038 to 0041,
+  se3-0043 to 0048 and se5-0301.
+- **Port 9** holds a value that the game gives the effect. These effects read it: se3-0049 to 0050, se4-0254 to 0255
+  and se4-0327.
+
+The sequence archive can hold sequences that no sound of the table plays. The game never plays them. The ripper rips
+each one after the table's sounds, as music, named after its file without the extension. Its `.minigcsf` selects the
+table's first sound that plays a file of the sequence archive. It also holds a `FILE` chunk with a copy of the start-up
+archive. The copy replaces the library's. In the copy, that sound plays the sequence instead, at the volume that most of
+the table's music has.
+
+The sound table lays out a sound's data in one of two ways. A type with bit 0x40 set has the later layout (Twilight
+Princess). The data's second byte is the sound's volume, and its 16 bits at +2 give a resource. A sound of type 0x60
+to 0x6f plays the sequence archive's file with that id. In the earlier layout (Four Swords Adventures), the data's
+third byte is the volume. A sound of type 0x11 plays a file of the sequence archive, and the low 16 bits of its data's
+word at +8 give the file's id. An AAF's entry gives the file's id at +6 and the volume at +0xc. The Wind Waker's table
+plays every file of its sequence archive. A sequence archive can be compressed with Yaz0. Twilight Princess's is.
+
+Mario Golf's code lists its songs in two tables: 38 songs and 9 jingles. Each entry names the song's file. A `.minigcsf`
+selects a song by its table and number (see "Driver"). `--bgm` takes every song and jingle. A song's name is its file's
+name without the extension.
+
+### Wave groups
+
+For a game that loads its wave groups as its scenes require them, the ripper finds the groups that each sound requires.
+It plays the sound with no group loaded. Each note still looks up its wave in its wave bank. The ripper watches the
+lookups: the bank and the wave's id. It plays the sound as far as the length analysis would (see "Lengths"), with a
+lookup counting as a sound. Then it picks groups from the bank's wave system. The group that holds the most of the
+sound's waves comes first, then the group that holds the most of the rest, and so on. Of two groups that hold as many,
+the lower group goes first. The `.minigcsf` lists the groups. The driver loads them before it starts the sound. The
+length analysis then plays the sound with them loaded. The ripper finds the groups with `--no-length` too.
+
+### Another release's sound files
+
+`--sound-files DIR` makes the ripper read three kinds of file from another release of the game: the start-up archive,
+the sequence archive and the wave archives. Everything else comes from the input, the game's code and the disc's header
+included. The ripper looks for a file with the name of the profile's start-up archive (`Z2Sound.baa`) anywhere in
+`DIR`. The folder that holds it stands for the folder of the profile's start-up archive (`Audiores/`). The sequence
+archive and the wave archives are read from their places relative to it. A `DIR` with no such file, or with more than
+one, is an error. A sound file that `DIR` lacks belongs to the other release. The ripper doesn't read the disc's file
+in its place.
+
+The sound table and the wave systems are then the other release's. A wave group whose archive `DIR` lacks is taken out
+of the sounds' lists of groups, with a warning. Those sounds play without the group's waves. The library's `FILE`
+chunks keep the disc's paths. A rip from another release's files therefore plays like any other.
+
+A sequence archive that `DIR` lacks can come from a sequence table: one `.bdt` file in the folder where the archive
+would be. The Wind Waker HD keeps its sequences that way (`Seqs/JaiSeq.bdt`). The table is a 32-bit count, zeros up to
+0x20, and then a 32-bit offset and size for each sequence. A sequence's index in the table is its file's id in the
+GameCube's archive. The ripper reads the disc's archive and replaces each file's data with the table's entry for the
+file's id. The game's code finds a sequence by its file's id. The archive therefore keeps the disc's names and ids.
+Each file's data starts on a 32-byte boundary.
 
 ### Lengths
 
 The ripper plays each sound in game mode to work out its length. Sound means a sample louder than 8 of 32,767 (-72 dB).
-The ripper watches the sound library's sequence parser. It sees each command that each of the sound's tracks runs.
+The ripper watches the sound library's sequence parser. It sees each command that each of the sound's tracks runs. In
+The Wind Waker, the effects sequence plays all along. Each effect plays in one of its tracks. There the ripper
+takes only the sound's root track and the tracks below it: a piece of music's tracks, or the effect's track and the
+tracks that the effect opens.
 
 - A sound ends when the game releases it. Its notes can sound on after that: the output runs behind the game, and a
   release fades on. A sound that ends plays until half a second after its last sound.
@@ -213,11 +338,19 @@ The ripper watches the sound library's sequence parser. It sees each command tha
 - A sound that stays busy without a sound for 180 seconds ended at its last sound.
 - A sound still playing at 600 seconds gets a length of 600 seconds and the fade.
 
+A MusyX game's songs follow other rules. MusyX keeps a slot for each of a song's tracks. A slot's first word is the tick
+at which its track's next region starts. That tick falls when the song loops. A looping song's length runs to the end of
+its second loop, plus the fade. A song that ends leaves MusyX's lists of playing songs. The rip of such a song plays
+until half a second after the last sound. MusyX's output keeps a constant level on each channel after a song has
+stopped. For these songs, a sample therefore counts as sound when it differs by more than 8 from its channel's average
+over about the last 50 milliseconds. The rules above for loops before the first sound, loops without a sound, 180
+seconds without a sound and the 600-second limit still apply.
+
 The ripper lists and skips the sounds that never make a sound. `--no-length` leaves out the analysis. Without the
 analysis, no sound is skipped and the files have no length tags.
 
-Tags written by `gcsfrip`: `title` and `gcsf_sound` (the sound's name), `game`, `length` and `fade`, `gcsf_mode`,
-`gcsfby`, `utf8=1`, and optionally `artist`, `year` and `copyright`.
+Tags written by `gcsfrip`: `title` and `gcsf_sound` (the sound's name, or the file's name for a sequence that no sound
+plays), `game`, `length` and `fade`, `gcsf_mode`, `gcsfby`, `utf8=1`, and optionally `artist`, `year` and `copyright`.
 
 ## Copyright
 

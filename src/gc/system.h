@@ -10,57 +10,49 @@
 
 #pragma once
 
-#include <array>
-#include <cstddef>
 #include <cstdint>
-#include <functional>
-#include <set>
-#include <string>
 
-#include "common/common_types.h"
-#include "dsp/dsp.h"
-#include "dsp/main_memory.h"
+#include "ntdlib/dsp/dsp.h"
+#include "ntdlib/flipper/dsp_interface.h"
+#include "ntdlib/flipper/exi.h"
+#include "ntdlib/flipper/machine.h"
+#include "ntdlib/flipper/registers.h"
+#include "ntdlib/ppc/cpu.h"
+#include "ntdlib/types.h"
+
 #include "gc/di.h"
-#include "gc/dsp_interface.h"
-#include "gc/exi.h"
-#include "ppc/cpu.h"
+#include "gc/memory.h"
+
+namespace gcsf
+{
+
+namespace ppc = ntdlib::ppc;
+
+} // namespace gcsf
 
 namespace gcsf::gc
 {
 
-// The registers that System models itself. A snapshot of the system copies them (see System::Save).
-class SystemRegisters
+// The devices with the GameCube's memory.
+using DspInterface = ntdlib::flipper::DspInterface<MainMemory>;
+using Exi = ntdlib::flipper::Exi<MainMemory>;
+
+// The registers that System models itself. A snapshot of the system copies them (see System::Save). The base class
+// holds the blocks that the GameCube shares with the Wii. SystemRegisters gives it the GameCube's rates for the audio
+// interface and adds the video interface's fields.
+class SystemRegisters : public ntdlib::flipper::SharedRegisters
 {
-protected:
-    // Registers that only store what's written to them, big-endian. They cover the blocks that the system doesn't model
-    // further.
-    template <std::size_t N>
-    struct RegisterFile
+public:
+    SystemRegisters() : SharedRegisters(ntdlib::flipper::kGameCubeAudioInterface)
     {
-        std::array<uint8_t, N> bytes{};
+    }
 
-        uint32_t Read(uint32_t offset, int size) const;
-        void Write(uint32_t offset, int size, uint32_t value);
-    };
-
-    uint32_t pi_mask_ = 0;
-    uint32_t ai_control_ = 0;
-    uint32_t ai_volume_ = 0;
-    uint32_t ai_interrupt_timing_ = 0;
-    uint32_t ai_samples_ = 0;
-    double ai_next_count_ = 0.0; // the CPU cycle of the counter's next count
-    double ai_period_ = 0.0;     // and the cycles between counts
+protected:
     uint64_t vi_next_field_ = 0; // the CPU cycle of the video interface's next field
     uint32_t vi_fields_ = 0;     // the fields so far
-    RegisterFile<0x100> pi_{};
-    RegisterFile<0x100> vi_{};
-    RegisterFile<0x100> mi_{};
-    RegisterFile<0x100> cp_{};
-    RegisterFile<0x100> pe_{};
-    RegisterFile<0x400> si_{};
 };
 
-class System final : public ppc::Bus, private SystemRegisters
+class System final : public ntdlib::flipper::MachineBase<System>, private SystemRegisters
 {
 public:
     // The CPU's clock, and the bus clock that times the hardware.
@@ -71,12 +63,8 @@ public:
     // system it came from.
     struct Snapshot
     {
-        MainMemory::Snapshot memory;
-        ppc::Cpu::Snapshot cpu;
-        dsp::Dsp dsp;
-        DspInterface::Snapshot dsp_interface;
+        ntdlib::flipper::DeviceSnapshot<MainMemory> devices;
         DiscInterface::Snapshot disc_interface;
-        Exi::Snapshot exi;
         SystemRegisters registers;
     };
 
@@ -87,10 +75,8 @@ public:
     // the disc's header or file system table can't be read.
     void Start(uint32_t entry);
 
-    // Runs for `cycles` CPU cycles, or until the CPU stops. Returns why it stopped.
-    ppc::StopReason Run(uint64_t cycles);
-
     // Takes a snapshot between runs, and restores one. A snapshot shares its unchanged memory pages with `previous`.
+    // MachineBase provides Run and on_unknown_io.
     Snapshot Save(const Snapshot* previous = nullptr) const;
     void Restore(const Snapshot& snapshot);
 
@@ -104,7 +90,7 @@ public:
         return memory_;
     }
 
-    dsp::Dsp& Dsp()
+    dsp::Dsp<MainMemory>& Dsp()
     {
         return dsp_;
     }
@@ -114,30 +100,15 @@ public:
         return dsp_interface_;
     }
 
-    // Called with a line of text the first time each unmodelled hardware register is accessed. Useful when bringing up
-    // games.
-    std::function<void(const std::string&)> on_unknown_io;
-
-    // ppc::Bus.
-    uint8_t* RamPage(PAddr page) override;
-    bool ReadIo(PAddr address, int size, uint32_t& value) override;
-    bool WriteIo(PAddr address, int size, uint32_t value) override;
+    // ppc::Bus. MachineBase provides RamPage.
+    bool ReadIo(ntdlib::PAddr address, int size, uint32_t& value) override;
+    bool WriteIo(ntdlib::PAddr address, int size, uint32_t value) override;
 
 private:
-    void LoadLowMemory();
+    friend class ntdlib::flipper::MachineBase<System>;
 
-    // The processor interface's registers (physical 0x0C003000) and its interrupt causes.
-    uint32_t ReadPi(uint32_t offset);
-    void WritePi(uint32_t offset, uint32_t value);
+    // The interrupt causes of the processor interface (physical 0x0C003000).
     uint32_t InterruptCauses() const;
-    void UpdateInterrupt();
-
-    // The audio interface's registers (physical 0x0C006C00). The sample counter (for disc streaming) counts at the
-    // streaming rate while playback is on. Counting starts a period after playback starts or the rate changes. The OS
-    // times the counter at boot.
-    uint32_t ReadAi(uint32_t offset);
-    void WriteAi(uint32_t offset, uint32_t value);
-    void AdvanceSampleCounter();
 
     // The video interface's display interrupts (physical 0x0C002030-0x0C00203F). The OS sets two of them to come once a
     // frame each: DI0 at the start of the second field and DI1 at the start of the first. Every field raises the one
@@ -145,23 +116,17 @@ private:
     void Field();
     bool DisplayInterruptPending() const;
 
-    // The serial interface's registers (physical 0x0C006400). Nothing is connected. Transfers finish at once.
-    void WriteSi(uint32_t offset, int size, uint32_t value);
-
     // The next device event, and the device events due by now.
     uint64_t NextEvent() const;
     void Advance();
 
-    void ReportUnknown(PAddr address, int size, bool write, uint32_t value);
-
     Disc& disc_;
     MainMemory memory_;
     ppc::Cpu cpu_{*this};
-    dsp::Dsp dsp_{memory_};
-    DspInterface dsp_interface_{dsp_, memory_, cpu_};
+    dsp::Dsp<MainMemory> dsp_{memory_};
+    DspInterface dsp_interface_{dsp_, memory_, cpu_, ntdlib::flipper::kGameCubeDspInterface};
     DiscInterface disc_interface_{disc_, memory_};
-    Exi exi_{memory_};
-    std::set<PAddr> reported_;
+    Exi exi_{memory_, ntdlib::flipper::kGameCubeExi};
 };
 
 } // namespace gcsf::gc

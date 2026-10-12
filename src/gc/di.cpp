@@ -6,7 +6,7 @@
 #include <array>
 #include <cstdint>
 
-#include "dsp/main_memory.h"
+#include "gc/memory.h"
 
 namespace gcsf::gc
 {
