@@ -2,7 +2,7 @@
 
 // GCSF player core. Loads a .gcsflib/.minigcsf set and produces its audio. It runs the game's code, including its sound
 // code and OS, on an emulated GameCube, with the game's DSP program on the emulated DSP. Portable C++ with no platform
-// audio or UI. The CLI renderer and the foobar2000 component use it.
+// audio or UI. The CLI renderer, the foobar2000 component and the XMPlay plugin use it.
 
 #pragma once
 

@@ -23,6 +23,7 @@ piece of music after its file.
 | `gcsfrip [options] <input>...` | Rips each input into a `.gcsflib` and a `.minigcsf` per sound. The output goes in a folder next to the input. The folder has the input's name with `_gcsf` added. An input is a GameCube disc image or an extracted disc. An extracted disc is a folder with `sys/main.dol` and `files/`, either directly or in a `DATA` folder. Dolphin extracts discs in these layouts. `--list` lists a game's sounds. `--only` and `--bgm` choose what to rip. Sounds that make no sound are listed and skipped. Streams are left out. The sequence archive can hold music that no sound of the game plays. Each such sequence gets a `.minigcsf` too, named after its file. `--sound-files` takes the sound files from another release of the game (see below). `--help` shows the rest. |
 | `gcsfplay [options] <file>...` | Renders each `.minigcsf` to a WAV file next to it at 32,028 Hz. The length and fade come from the file's tags. `-o FILE` writes FILE instead. Its extension selects WAV or FLAC. `--length` and `--fade` override the tags. `--info` shows a file's tags and libraries. `--help` shows the rest. |
 | `plugins/foobar2000` | foobar2000 input component: `foo_input_gcsf.component` for macOS and `foo_input_gcsf.dll` for Windows. Both are built with the foobar2000 SDK (see its [README](plugins/foobar2000/README.md)). |
+| `plugins/xmplay` | XMPlay input plugin: `xmp-gcsf.dll`, a 32-bit DLL for XMPlay on Windows, built with clang-cl and the XMPlay plugin SDK (see its [README](plugins/xmplay/README.md)). |
 
 `gcsfrip` reads disc images in every common format: ISO (`.iso`, `.gcm`), NKit (`.nkit.iso`), RVZ, WIA, GCZ, CISO and
 WDF, whole or split into pieces.
@@ -67,8 +68,11 @@ were resampled from 16,000 Hz to 28,000 Hz. Some new ones play at 44,100 Hz.
 
 ### Downloads
 
-The Releases page has `gcsfrip` and `gcsfplay` for 64-bit Windows, and the foobar2000 component for 64-bit and 32-bit
-foobar2000 on Windows. On macOS, build GCSF from source (see "Building").
+The Releases page has `gcsfrip` and `gcsfplay` for 64-bit Windows, the foobar2000 component for 64-bit and 32-bit
+foobar2000 on Windows, and the XMPlay plugin. On macOS, build GCSF from source (see "Building").
+
+To install the XMPlay plugin, unzip `xmp-gcsf-X.Y.Z.zip` and put `xmp-gcsf.dll` in XMPlay's folder, or in a folder
+inside it. Then restart XMPlay.
 
 ### Drag and drop
 
@@ -95,8 +99,8 @@ built along with GCSF when they aren't installed.
 - **macOS on Apple Silicon:** the Xcode command line tools (`xcode-select --install`) and CMake (`brew install cmake`).
   `brew install zstd xz flac` saves building those three.
 
-Linux, Intel Macs, MSVC and 32-bit Windows aren't supported. The one exception is the 32-bit foobar2000 component. Build
-it with clang-cl, configured with `-A Win32 -T ClangCL`.
+Linux, Intel Macs, MSVC and 32-bit Windows aren't supported. The exceptions are the 32-bit foobar2000 component and the
+XMPlay plugin. Build them with clang-cl, configured with `-A Win32 -T ClangCL`.
 
 ```sh
 cmake -S . -B build
@@ -120,6 +124,7 @@ src/gcsf/     the format and the player
 src/rip/      the ripper, the game profiles, the length analysis and the drivers' images
 src/cli/      gcsfrip and gcsfplay
 plugins/foobar2000/  the foobar2000 component
+plugins/xmplay/      the XMPlay plugin
 driver/       the drivers' sources and the script that builds them
 docs/         the format's specification and the release notes
 tests/        ctest suites
