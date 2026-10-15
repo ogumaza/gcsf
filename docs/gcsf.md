@@ -249,6 +249,21 @@ returns the sound manager. The driver waits until the wave archive is in ARAM. T
 the sound manager without a position. The menu starts its effects that way. From then on the driver calls the sound
 manager's frame work once a frame.
 
+Final Fantasy Crystal Chronicles' driver is `driver/crystal_chronicles.c`. The game plays its music and its effects
+through Square's Red driver, on the SDK's AX. The driver sets up the game's memory manager, sound manager and file
+manager in the order of the game's system set-up. The sound manager starts Red and Red's threads. For a piece of music,
+the driver then reads the piece's file and loads the wave bank that the file names. The game's scripts load that bank
+before the piece. The driver loads the piece and plays it through the game's functions. For an effect, the driver loads
+what the game has loaded when it plays the effect. An effect numbered below 4000 is in one of four blocks of effects.
+The game loads the blocks as it starts, with the two wave banks that their effects use. Those banks take Red's first two
+slots for banks. A track of any effect can pick a wave from either slot. So for every effect, the driver first calls the
+game's function that loads the blocks and the two banks. An effect from 4000 on is a SEP file of its own. The driver
+then reads the file and loads the wave bank that the file names. Next, the driver loads the file through the game's
+function. The game's scripts load both before the effect. The driver plays the effect through the game's function, with
+the pan, the volume and the fade-in that the game's code passes. The driver's thread then sleeps. The sound plays on
+Red's threads. The audio interrupt drives them. The game's memory manager gives its heap the memory up to 0x81780000 and
+fills it. The rip patches the manager's set-up to end the heap at 0x81700000, below the driver.
+
 Its parameter block is at **0x81700010**. The block's words are big-endian:
 
 ```
@@ -284,6 +299,11 @@ table 0. It holds the jingles too. The driver plays them as songs.
 
 WarioWare's driver doesn't use the handle either. A WarioWare sound ID is MusyX's song ID: the song's MusyX song
 group in the top byte and its number in the low 16 bits.
+
+Crystal Chronicles' driver doesn't use the handle either. The top byte of a Crystal Chronicles sound ID gives the kind
+of sound: 0 for a piece of music and 1 for an effect. Its low 24 bits give the sound's number. A piece's number is the
+number in its file's name. An effect's number is the game's. Below 4000, it's the block's number times 1000 plus the
+effect's place in the block. From 4000 on, it's the number in the name of the effect's file.
 
 The game starts its music by the sequence's file name. A Pikmin 2 sound ID is 0x80000000 plus the piece's number in the
 driver's table of pieces. The table gives each piece's file, how the game makes the piece's object, the conductor of a
@@ -324,13 +344,14 @@ Version 1 supports The Legend of Zelda: Four Swords Adventures (USA) and its Jap
 Swords Plus, The Legend of Zelda: Twilight Princess (USA), The Legend of Zelda: The Wind Waker (USA), Luigi's Mansion
 (USA), Super Mario Sunshine (USA), Pikmin (USA), Donkey Kong Jungle Beat (USA) and Mario Kart: Double Dash!! (USA). It
 also supports Mario Golf: Toadstool Tour (USA), Mario Power Tennis (USA), WarioWare, Inc.: Mega Party Game$! (USA),
-Pikmin 2 (USA), Pac-Man Vs. (USA) and the menu of The Legend of Zelda: Collector's Edition (USA).
+Pikmin 2 (USA), Pac-Man Vs. (USA), the menu of The Legend of Zelda: Collector's Edition (USA) and Final Fantasy
+Crystal Chronicles (USA).
 
 The `.gcsflib` contains:
 
 - the sections of the game's `main.dol`, with `main` patched to branch to the driver, and the profile's other patches
   (they skip the clear of the OS's arena: Mario Golf's `ClearArena` and the same code inside Mario Power Tennis's
-  `OSInit`);
+  `OSInit`. Final Fantasy Crystal Chronicles' patch ends the memory manager's heap below the driver);
 - the driver and its parameter block with the game profile;
 - for a JAudio game, the disc's header (`sys/boot.bin`), the sound library's start-up archive (a BAA, or an AAF in The
   Wind Waker, Luigi's Mansion, Super Mario Sunshine, Pikmin 2 and Pac-Man Vs.), the sequence archive if the game has
@@ -342,7 +363,10 @@ The `.gcsflib` contains:
   name. Pikmin 2's library also holds the other files that the game's sound layer reads: the conductors
   (`Conductor.arc`), `Key.arc`, the lists of music and streams, and the track maps. For Mario Golf and Mario Power
   Tennis, the disc's header, the files of the game's two MusyX sound groups and every song's file (an SNG), as `FILE`
-  chunks;
+  chunks. For Final Fantasy Crystal Chronicles, the disc's header, every piece's file (`dvd/sound/Music/*.bgm`), the
+  four blocks of effects that the game loads (blocks 0 to 3 in `dvd/sound/SE/Block/`), the effects' SEP files from
+  number 4000 on (`dvd/sound/SE/Sep/*.sep`) and the wave banks that the pieces and the effects name
+  (`dvd/sound/Wave/*.wd`), as `FILE` chunks;
 - a process descriptor.
 
 The wave archives are every one that the start-up archive's wave systems name, unless the game loads its wave groups as
@@ -463,6 +487,31 @@ one stream. A rip keeps the table's names, such as `JA_SE_TR_OC_CURSOR_L`. The s
 The piece, `JA_BGM_DUMMY`, plays it. The menu's code never starts the piece. The disc's other programs are out of
 scope: the four games that the disc emulates, and a demo of The Wind Waker.
 
+Final Fantasy Crystal Chronicles keeps each piece of music in a file of its own in `dvd/sound/Music/`. The file's name
+is `music` and the piece's number in three digits, for example `music100.bgm`. The game's disc library matches names in
+any case. The ripper lists those files: 60 pieces. A piece's name is its file's name without the extension, for example
+`music100`. A `.minigcsf` selects a piece by its number (see "Driver"). `--bgm` takes every piece. A piece's file starts
+with `BGM `. It gives the piece's number and its wave bank's number in big-endian halves at 4 and 6. The bank is a file
+in `dvd/sound/Wave/`. Its name is `wave` and the bank's number in four digits, for example `wave0100.wd`. The pieces
+name 44 banks. One piece makes no sound. Its only note plays at a volume of 0. Its other tracks stop at once. The ripper
+skips it. The game streams 21 more pieces, from `dvd/sound/Stream/`. GCSF doesn't rip streams.
+
+The game's effects are in `dvd/sound/SE/`. The game plays an effect by its number. It takes a number below 4000 as an
+effect in one of four blocks of effects, numbered 0 to 3. A block is a file in `Block/`. Its name is `se` and the
+block's number in three digits, with the extension `.seb`. A block's file starts with `SeBlock`. A big-endian half at 10
+gives its number of places. A table of big-endian words at 16 gives each place's effect, or -1 for none. The block's
+number times 1000 plus the effect's place gives the effect's number. A rip names such an effect after the block's file
+and the place, for example `se000-001`. An effect from 4000 on is a SEP file in `Sep/`. Its name is `se` and the
+effect's number in six digits, for example `se010001.sep`. A rip names the effect after its file, for example
+`se010001`. A SEP file starts with `SeSep`. The effect's wave bank's number is a little-endian half at 0x11. An effect
+of a block gives its bank the same way, at the second byte of its information. The blocks' effects use banks 0 and 500.
+The game loads those two banks with the blocks, into Red's first two slots for banks. A track's command 0x21 picks a
+wave from a slot. Effects of SEP files use the command too. The game can't play the five SEP files numbered below 4000.
+The ripper leaves them out. It also leaves out a fifth block, `se012.seb`. The game never loads it. The ripper lists 261
+effects in blocks and 2,137 in SEP files. The library holds the four blocks, the SEP files from 4000 on and the 113
+banks that the effects name. The ripper skips 262 effects that make no sound. 258 of them start no note. The other four
+play their notes on waves that their bank leaves empty.
+
 ### Wave groups
 
 For a game that loads its wave groups as its scenes require them, the ripper finds the groups that each sound requires.
@@ -549,6 +598,19 @@ until half a second after the last sound. MusyX's output keeps a constant level 
 stopped. For these songs, a sample therefore counts as sound when it differs by more than 8 from its channel's average
 over about the last 50 milliseconds. The rules above for loops before the first sound, loops without a sound, 180
 seconds without a sound and the 600-second limit still apply.
+
+Final Fantasy Crystal Chronicles' pieces follow the MusyX rules, with Red's state in place of MusyX's. Red plays a
+piece in one of its three music controls. A piece's loop command takes all of its tracks back to their state at the
+start of the loop. The ripper watches the code that does that. A looping piece's length runs to the end of its second
+loop, plus the fade. A piece that ends leaves its control. Its rip plays until half a second after the last sound.
+Sound is a sample that differs by more than 8 from its channel's average over about the last 50 milliseconds.
+
+The game's effects follow the same rules. Red plays an effect on the tracks of its fourth control. Each track loops on
+its own. A track's last command can take it back to the start of a loop for ever. The ripper watches the code that does
+that. The first track that loops gives the effect's loops. Another track that is still busy holds the fade back until it
+has looped twice too. Red can also vary a track's steps at random. It takes the random numbers from a fixed table, one
+after another. A rip plays the steps that the first numbers give. Such an effect's loops differ from pass to pass. The
+ripper measures each loop as it plays.
 
 The ripper lists and skips the sounds that never make a sound. `--no-length` leaves out the analysis. Without the
 analysis, no sound is skipped and the files have no length tags.

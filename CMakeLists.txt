@@ -3,7 +3,7 @@
 cmake_minimum_required(VERSION 3.20)
 # Shared version for gcsfrip, gcsfplay, the foobar2000 component, the XMPlay plugin, Windows file properties and macOS
 # bundles (xsflib_add_version below). For a release, update it here and add notes in docs/release-notes/.
-project(gcsf VERSION 1.3.0 LANGUAGES C CXX)
+project(gcsf VERSION 1.4.0 LANGUAGES C CXX)
 
 # xsflib, a library for players and rippers of the PSF family, is the submodule externals/xsflib. Its
 # XsflibProject.cmake sets what a project built on it starts with: C++20, a release build by default, the static C

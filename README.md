@@ -3,7 +3,8 @@
 GCSF is a PSF-family music rip format for Nintendo GameCube sequenced audio. It covers the music and sound effects
 that GameCube games play through JAudio, the sound library of Nintendo EAD's JSystem. GCSF reads both of JAudio's
 generations: JAudio1 and JAudio2. MusyX is Factor 5's sound library. GCSF also covers the songs that a game plays
-through it. GCSF is the GameCube counterpart of the DS formats 2SF and NCSF.
+through it. Final Fantasy Crystal Chronicles plays its music and its sound effects through Square's Red driver. GCSF
+covers them too. GCSF is the GameCube counterpart of the DS formats 2SF and NCSF.
 
 A GCSF rip contains the game's code. The player runs that code on an emulated GameCube: the game's OS, its sound
 library and its DSP program. The game plays the sound itself. The mixing, filtering and resampling therefore match the
@@ -14,18 +15,22 @@ Japanese release, The Legend of Zelda: Four Swords Plus, The Legend of Zelda: Tw
 Zelda: The Wind Waker (USA), Luigi's Mansion (USA), Super Mario Sunshine (USA), Pikmin (USA), Donkey Kong Jungle Beat
 (USA) and Mario Kart: Double Dash!! (USA). It also supports the 38 songs and 9 jingles of Mario Golf: Toadstool Tour
 (USA), the 111 songs and jingles of Mario Power Tennis (USA), the 231 pieces in the Sound Room of WarioWare, Inc.: Mega
-Party Game$! (USA) and the sequenced music and sound effects of Pikmin 2 (USA). Pac-Man Vs. (USA) and The Legend of
-Zelda: Collector's Edition (USA) stream their music. GCSF rips the sequenced sound effects of Pac-Man Vs. and of the
-menu of Collector's Edition. The menu's sound table also lists one sequenced piece of music, `JA_BGM_DUMMY`. The menu's
-code never starts it. GCSF rips it too. Navi Trackers, a mode that only Four Swords Plus has, plays its music from
-streams. So does Mario Kart: Double Dash!! on its courses. GCSF doesn't rip streams. The Wind Waker, Luigi's Mansion and
-Pac-Man Vs. name none of their sounds. A rip names an effect after its category and index, for example `se4-0123`, and a
-piece of music after its file. Super Mario Sunshine keeps a table of its sounds' names. A rip of it takes its names from
-that table, for example `MSD_BGM_DOLPIC`. Pikmin's code lists its pieces of music by their files' names. A rip of Pikmin
-names a piece after its file, for example `select`. The game plays the music of its cutscenes as parts of one piece. A
-rip names a part after the piece and the part's number, for example `demobgm-5`. The rip leaves out the game's sound
-effects and the game's streamed music. Pikmin 2's pieces of music are named after their files too. The game keeps a
-table of its effects' names. A rip of an effect takes its name from that table, for example `PSSE_SY_MENU_CURSOR`.
+Party Game$! (USA), the sequenced music and sound effects of Pikmin 2 (USA) and those of Final Fantasy Crystal
+Chronicles (USA). Pac-Man Vs. (USA) and The Legend of Zelda: Collector's Edition (USA) stream
+their music. GCSF rips the sequenced sound effects of Pac-Man Vs. and of the menu of Collector's Edition. The menu's
+sound table also lists one sequenced piece of music, `JA_BGM_DUMMY`. The menu's code never starts it. GCSF rips it too.
+Navi Trackers, a mode that only Four Swords Plus has, plays its music from streams. So does Mario Kart: Double Dash!! on
+its courses. GCSF doesn't rip streams. The Wind Waker, Luigi's Mansion and Pac-Man Vs. name none of their sounds. A rip
+names an effect after its category and index, for example `se4-0123`, and a piece of music after its file. Super Mario
+Sunshine keeps a table of its sounds' names. A rip of it takes its names from that table, for example `MSD_BGM_DOLPIC`.
+Pikmin's code lists its pieces of music by their files' names. A rip of Pikmin names a piece after its file, for example
+`select`. The game plays the music of its cutscenes as parts of one piece. A rip names a part after the piece and the
+part's number, for example `demobgm-5`. The rip leaves out the game's sound effects and the game's streamed music.
+Pikmin 2's pieces of music are named after their files too. The game keeps a table of its effects' names. A rip of an
+effect takes its name from that table, for example `PSSE_SY_MENU_CURSOR`. A rip of Final Fantasy Crystal Chronicles
+names a piece or an effect after its file, for example `music100` or `se010001`. An effect in one of the game's blocks
+of effects takes the block's name and its place in the block, for example `se000-001`. The game's streamed music isn't
+ripped.
 
 ## Tools
 
@@ -152,7 +157,8 @@ A driver runs on the emulated GameCube. `driver/build.py` builds one for PowerPC
 `driver_jungle_beat_blob.h` for Donkey Kong Jungle Beat, `driver_double_dash_blob.h` for Mario Kart: Double Dash!!,
 `driver_mario_golf_blob.h` for Mario Golf: Toadstool Tour and Mario Power Tennis, `driver_warioware_blob.h` for
 WarioWare, Inc.: Mega Party Game$!, `driver_pikmin2_blob.h` for Pikmin 2, `driver_pacman_vs_blob.h` for Pac-Man Vs. and
-`driver_collectors_edition_blob.h` for The Legend of Zelda: Collector's Edition. Building GCSF itself requires no
+`driver_collectors_edition_blob.h` for The Legend of Zelda: Collector's Edition and `driver_crystal_chronicles_blob.h`
+for Final Fantasy Crystal Chronicles. Building GCSF itself requires no
 PowerPC toolchain.
 
 ## Licence

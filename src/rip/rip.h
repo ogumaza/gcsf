@@ -55,6 +55,9 @@ enum class Driver : uint8_t
     kPikmin2,  // driver/pikmin2.c: Pikmin 2's sound scenes. It makes a piece's object as the game does.
     kPacManVs, // driver/pacman_vs.c: Pac-Man Vs.'s wrapper of a JAIBasic. The sound library loads every wave system.
     kCollectorsEdition, // driver/collectors_edition.c: Collector's Edition's sound manager. Its set-up loads the waves.
+    // driver/crystal_chronicles.c: Final Fantasy Crystal Chronicles' managers. It loads the wave bank that a piece or
+    // an effect names, or the blocks of effects.
+    kCrystalChronicles,
 };
 
 // A game's sound library. The format of the start-up archive and the commands of the sequences depend on it.
@@ -64,6 +67,7 @@ enum class SoundLibrary : uint8_t
     kJAudio1, // a start-up archive in AAF
     kMusyX,   // songs in SNG files, which tables in the game's code list
     kJac,     // an early JAudio1 that the game runs through its C functions: a sequence index in the game's code
+    kRed,     // Square's Red driver: pieces in BGM files, effects in SEP and SEB files, wave banks in WD files
 };
 
 // The most waves that a .minigcsf can name, for a driver that loads only the waves that a sound uses.
@@ -236,15 +240,40 @@ struct GameProfile
     // loops.
     uint32_t track_slots = 0, track_slot_size = 0, track_slot_count = 0;
     std::array<uint32_t, 2> song_lists = {};
+
+    // A Red game's pieces of music: the BGM files in `music_folder`, each named "music" and the piece's number in three
+    // digits or more. A piece's file names its wave bank: the WD file in `wave_folder` named "wave" and the bank's
+    // number in four digits or more. The game's disc library matches the folders' names in any case. The length
+    // analysis reads Red's sound controls. The word at `red_controls` points at them, `red_control_size` bytes each.
+    // The first `red_music_controls` of them play music. A control's word at `red_music_offset` holds the number of the
+    // piece that it plays, or -1. The CPU reaches `red_loop` each time a piece goes back to the start of its loop.
+    const char* music_folder = nullptr;
+    uint32_t red_controls = 0, red_control_size = 0, red_music_controls = 0, red_music_offset = 0, red_loop = 0;
+
+    // A Red game's effects. The game numbers an effect below kRedFirstSep by its block and its place in the block: the
+    // block's number times 1000 plus the place. The blocks are the first `red_blocks` SEB files in `block_folder`, each
+    // named "se" and the block's number in three digits or more. An effect from kRedFirstSep on is a SEP file in
+    // `effect_folder`, named "se" and the effect's number in six digits or more. A SEP file names its wave bank. Each
+    // effect of a block names one too. The length analysis reads Red's effect control, number `red_effect_control`.
+    // Its first word points at its `red_effect_tracks` tracks, `red_track_size` bytes each. A track's first word
+    // points at its next command. It's 0 when the track is free. The CPU reaches `red_track_loop` each time a track
+    // goes back to the start of a loop that never ends. r3 then points at the track's control and r5 at the track.
+    const char* block_folder = nullptr;
+    const char* effect_folder = nullptr;
+    uint32_t red_blocks = 0, red_effect_control = 0, red_effect_tracks = 0, red_track_size = 0, red_track_loop = 0;
 };
+
+// The first number of a Red game's effect in a SEP file (see GameProfile::effect_folder). The game's function that
+// plays an effect takes a smaller number as an effect of a block.
+inline constexpr uint32_t kRedFirstSep = 4000;
 
 const std::vector<GameProfile>& KnownProfiles();
 
 // The profile for a game's main.dol, or nullptr if it isn't supported.
 const GameProfile* FindProfile(const disc::GameFiles& game);
 
-// Whether gcsfrip takes the game's sounds from its code (ListSongs): a MusyX game's songs, or a Jac game's pieces of
-// music. Other games list theirs in a start-up archive.
+// Whether gcsfrip takes the game's sounds from its code or its files (ListSongs): a MusyX game's songs, a Jac game's
+// pieces of music, or a Red game's pieces of music. Other games list theirs in a start-up archive.
 bool ListsSongs(const GameProfile& profile);
 
 // Whether the profile's driver loads only the waves that a .minigcsf names. Four Swords Adventures' driver loads every
@@ -311,7 +340,12 @@ Sound SoundOf(const jaudio::SoundEntry& entry);
 // holds the piece's number in the index. The driver loads the wave group. A piece's part is 0. A piece plays group 0
 // of the wave system with the piece's number. A piece's label is its file's name without the extension. A piece in
 // parts is listed as its parts instead (GameProfile::parts). A part's label is the piece's label, a hyphen and the
-// part's number. Every song is music. Throws xsflib::FormatError if main.dol or a table can't be read.
+// part's number. A Red game's pieces are the BGM files in its music folder, by number. A piece's ID is its number.
+// Its label is the file's name without the extension. Its effects follow: those of its blocks, by number, then its SEP
+// files from kRedFirstSep on, by number. An effect's ID is 0x1000000 plus the game's number of the effect. A block's
+// effect is labelled with the block's file name without the extension, a hyphen and the effect's place in three
+// digits. A SEP file's effect is labelled with the file's name without the extension. The songs and the pieces are
+// music. The effects aren't. Throws xsflib::FormatError if main.dol or a table can't be read.
 std::vector<Sound> ListSongs(const disc::GameFiles& game, const GameProfile& profile);
 
 // The disc path of a MusyX game's song. Camelot's file number holds the file's index above its low bit. The low bit is

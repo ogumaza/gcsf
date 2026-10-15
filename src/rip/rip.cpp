@@ -39,6 +39,7 @@
 #include "gcsf/player.h"
 #include "rip/driver_blob.h"
 #include "rip/driver_collectors_edition_blob.h"
+#include "rip/driver_crystal_chronicles_blob.h"
 #include "rip/driver_double_dash_blob.h"
 #include "rip/driver_jungle_beat_blob.h"
 #include "rip/driver_luigis_mansion_blob.h"
@@ -115,6 +116,9 @@ std::optional<DriverImage> ImageOf(Driver driver)
     case Driver::kCollectorsEdition:
         return DriverImage{collectors_edition::kDriverBlob, collectors_edition::kDriverBase,
                            collectors_edition::kDriverEntry, collectors_edition::kDriverParams};
+    case Driver::kCrystalChronicles:
+        return DriverImage{crystal_chronicles::kDriverBlob, crystal_chronicles::kDriverBase,
+                           crystal_chronicles::kDriverEntry, crystal_chronicles::kDriverParams};
     }
 
     return std::nullopt;
@@ -1284,10 +1288,79 @@ const GameProfile kCollectorsEditionUsa = {
     .conditional_jump = 0x80021f1c, // its command 0xC8, where it takes the jump
 };
 
+// Final Fantasy Crystal Chronicles (USA). Its sound library is Square's Red driver (RedSound, built 2003-06-17) on the
+// SDK's AX, under a thin layer of the game's code, CSound. The game's system set-up (0x80021E74) sets up the memory
+// manager, the sound manager and the file manager, in that order. The game's scripts load a piece's wave bank, then
+// the piece, then play it, through CSound's LoadWave, LoadBgm and PlayBgm. The game loads its blocks of effects and
+// the wave banks 0 and 500 once, through CSound::LoadBlock (0x800C6284). Those banks take Red's first two slots for
+// banks. Any effect's track can pick a wave from them by the slot (command 0x21). The game's scripts load an area's
+// wave bank and the area's SEP files through LoadWave and LoadSe. Every effect plays through CSound::PlaySe
+// (0x800C5C1C), or through a function that places the effect in 3D. The game's calls of PlaySe pass a pan of 0x40, a
+// volume of 127 and no fade-in. The names come from the disc's map (game.MAP), a link map of another build. Each
+// address was found in main.dol and checked against its code. The parameters follow driver/crystal_chronicles.c's
+// Params from os_sleep_thread.
+//
+// The memory manager's set-up (0x8001F6E4) gives its heap the arena from 80 KiB above the arena's bottom up to
+// 0x81780000, and fills it with 0xAB. That would cover the driver. The patch moves the heap's top to 0x81700000, the
+// top of the arena.
+//
+// The length analysis reads Red's sound controls (p_SoundControlBuffer). The first three play music. A piece's loop
+// takes its tracks back to their state at its start in _MusicNoteExecute, at 0x801C5440. The fourth control plays
+// effects, on 32 tracks. A track goes back to the start of a loop that never ends in __MidiCtrl_LoopRepeat
+// (0x801C6F38).
+const GameProfile kCrystalChroniclesUsa = {
+    .name = "Final Fantasy Crystal Chronicles",
+    .game_id = "GCCE01",
+    .dol_sha1 = "ba57add3e93ea97b0a93ed77037173217bc89eaa",
+    .main = 0x80019d7c,
+    .driver = Driver::kCrystalChronicles,
+    .library = SoundLibrary::kRed,
+    .wave_folder = "dvd/sound/wave/",
+    .params =
+        {
+            0x80180840, // OSSleepThread
+            0x8001f6e4, // CMemory::Init
+            0x8023b848, // the memory manager
+            0x800c7970, // CSound::Init
+            0x802f1694, // the sound manager
+            0x80013b98, // CFile::Init
+            0x8021dd00, // the file manager
+            0x80013948, // CFile::Open
+            0x80013790, // CFile::Read
+            0x800135ec, // CFile::SyncCompleted
+            0x8001364c, // CFile::Close
+            0x801b58f0, // sprintf
+            0x801da194, // "dvd/sound/music/music%03d.bgm"
+            0x800c5f20, // CSound::LoadWave
+            0x800c66b0, // CSound::LoadBgm
+            0x800c6630, // CSound::PlayBgm
+            0x801da124, // "dvd/sound/se/sep/se%06d.sep"
+            0x800c6284, // CSound::LoadBlock
+            0x800c6108, // CSound::LoadSe
+            0x800c5c1c, // CSound::PlaySe
+        },
+    .library_name = "CrystalChronicles",
+    .patches = {{0x8001f764, 0x3c008170}}, // CMemory::Init: lis r0, 0x8170
+    .music_folder = "dvd/sound/music/",
+    .red_controls = 0x8032e3d0,
+    .red_control_size = 0x494,
+    .red_music_controls = 3,
+    .red_music_offset = 0x470,
+    .red_loop = 0x801c5440,
+    .block_folder = "dvd/sound/se/block/",
+    .effect_folder = "dvd/sound/se/sep/",
+    .red_blocks = 4,
+    .red_effect_control = 3,
+    .red_effect_tracks = 32,
+    .red_track_size = 0x154,
+    .red_track_loop = 0x801c6f38,
+};
+
 const std::vector<GameProfile> kProfiles = {
     kFourSwordsUsa,       kFourSwordsJpn, kTwilightPrincessUsa, kWindWakerUsa,          kMarioGolfUsa,
     kMarioPowerTennisUsa, kWarioWareUsa,  kLuigisMansionUsa,    kSuperMarioSunshineUsa, kPikminUsa,
-    kJungleBeatUsa,       kDoubleDashUsa, kPikmin2Usa,          kPacManVsUsa,           kCollectorsEditionUsa};
+    kJungleBeatUsa,       kDoubleDashUsa, kPikmin2Usa,          kPacManVsUsa,           kCollectorsEditionUsa,
+    kCrystalChroniclesUsa};
 
 // Pikmin 2's driver parameters: the profile's, then the number of pieces and the pieces (driver/pikmin2.c's Piece).
 std::vector<uint32_t> Pikmin2Parameters(const GameProfile& p)
@@ -1531,7 +1604,8 @@ const GameProfile* FindProfile(const disc::GameFiles& game)
 
 bool ListsSongs(const GameProfile& profile)
 {
-    return profile.library == SoundLibrary::kMusyX || profile.library == SoundLibrary::kJac;
+    return profile.library == SoundLibrary::kMusyX || profile.library == SoundLibrary::kJac ||
+           profile.library == SoundLibrary::kRed;
 }
 
 bool NamesWaves(const GameProfile& profile)
@@ -2018,10 +2092,206 @@ std::vector<Sound> JacPieces(const ntdlib::Dol& dol, const GameProfile& profile)
     return pieces;
 }
 
+// A Red game's names of its files: a prefix, the number in `digits` digits or more, and the extension. The game writes
+// them with sprintf.
+struct RedName
+{
+    std::string_view prefix;
+    std::size_t digits;
+    std::string_view extension;
+};
+
+constexpr RedName kRedPiece = {"music", 3, ".bgm"};
+constexpr RedName kRedBank = {"wave", 4, ".wd"};
+constexpr RedName kRedBlock = {"se", 3, ".seb"};
+constexpr RedName kRedEffect = {"se", 6, ".sep"};
+
+// A Red effect's sound ID is this plus the game's number of the effect (see ListSongs). A piece's is its number.
+constexpr uint32_t kRedEffectId = 0x1000000;
+
+// The game numbers a block's effect by the block's number times this, plus the effect's place in the block.
+constexpr uint32_t kRedBlockStride = 1000;
+
+// A Red game's files in `folder` that have the form of `name`, by their numbers. The game's disc library matches paths
+// in any case. The match therefore ignores case. A file whose number has other digits than the game's sprintf writes
+// is left out. A further leading zero is one example. The game never reads such a file.
+std::map<uint32_t, std::string> RedFiles(const disc::GameFiles& game, std::string_view folder, const RedName& name)
+{
+    constexpr std::size_t kMaxDigits = 8;
+    std::map<uint32_t, std::string> found;
+    for (const disc::GameFile& file : game.files)
+    {
+        const std::string path = xsflib::AsciiLower(file.path);
+        if (!path.starts_with(folder) || !path.ends_with(name.extension))
+        {
+            continue;
+        }
+
+        const std::string_view rest = std::string_view(path).substr(folder.size());
+        if (!rest.starts_with(name.prefix) || rest.size() < name.prefix.size() + name.extension.size())
+        {
+            continue;
+        }
+
+        const std::string_view digits =
+            rest.substr(name.prefix.size(), rest.size() - name.prefix.size() - name.extension.size());
+        const auto is_digit = [](char c)
+        {
+            return c >= '0' && c <= '9';
+        };
+        if (digits.empty() || digits.size() > kMaxDigits || !std::all_of(digits.begin(), digits.end(), is_digit))
+        {
+            continue;
+        }
+
+        const uint32_t number = static_cast<uint32_t>(std::stoul(std::string(digits)));
+        std::string written = std::to_string(number);
+        written.insert(0, name.digits > written.size() ? name.digits - written.size() : 0, '0');
+        if (written == digits)
+        {
+            found.emplace(number, file.path);
+        }
+    }
+
+    return found;
+}
+
+// The name of a Red game's file without its folder and extension.
+std::string RedLabel(const std::string& path, const RedName& name)
+{
+    std::string label = path.substr(path.rfind('/') + 1);
+    label.resize(label.size() - name.extension.size());
+    return label;
+}
+
+// The wave bank of a Red sound: a little-endian half at `offset` in its information.
+uint32_t RedInfoBank(std::span<const uint8_t> info, std::size_t offset)
+{
+    return info[offset] | static_cast<uint32_t>(info[offset + 1]) << 8;
+}
+
+// An effect of a Red game's block: its place in the block and its wave bank.
+struct RedBlockEffect
+{
+    uint32_t place;
+    uint32_t bank;
+};
+
+// The effects of a Red game's block, by place. A block's file starts with "SeBlock" and a zero byte. A big-endian half
+// at 10 gives the number of places. A table of big-endian words follows at 16, one for each place. A free place's word
+// is -1. Another place's word gives the offset of its effect's information from the table's end in its low 31 bits.
+// The information's second and third bytes give its wave bank's number, the low byte first. Returns nothing if the
+// file isn't a block.
+std::optional<std::vector<RedBlockEffect>> RedBlockEffects(std::span<const uint8_t> block)
+{
+    constexpr std::size_t kTable = 16;
+    constexpr std::size_t kBank = 1;
+    constexpr uint32_t kFree = 0xffffffff;
+    constexpr uint32_t kOffsetMask = 0x7fffffff;
+    if (block.size() < kTable ||
+        !std::equal(block.begin(), block.begin() + 8, std::string_view("SeBlock\0", 8).begin()))
+    {
+        return std::nullopt;
+    }
+
+    const std::size_t places = xsflib::LoadBe16(block.data() + 10);
+    const std::size_t end = kTable + 4 * places;
+    if (block.size() < end)
+    {
+        return std::nullopt;
+    }
+
+    std::vector<RedBlockEffect> effects;
+    for (std::size_t place = 0; place < places; place++)
+    {
+        const uint32_t entry = xsflib::LoadBe32(block.data() + kTable + 4 * place);
+        if (entry == kFree)
+        {
+            continue;
+        }
+
+        const std::size_t info = end + (entry & kOffsetMask);
+        if (info + kBank + 2 > block.size())
+        {
+            return std::nullopt;
+        }
+
+        effects.push_back({static_cast<uint32_t>(place), RedInfoBank(block.subspan(info), kBank)});
+    }
+
+    return effects;
+}
+
+// A Red game's blocks of effects that the game loads, by number.
+std::map<uint32_t, std::string> RedBlocks(const disc::GameFiles& game, const GameProfile& profile)
+{
+    std::map<uint32_t, std::string> blocks = RedFiles(game, profile.block_folder, kRedBlock);
+    std::erase_if(blocks, [&profile](const auto& block) { return block.first >= profile.red_blocks; });
+    return blocks;
+}
+
+// A Red game's effects in SEP files that the game can play, by number.
+std::map<uint32_t, std::string> RedSeps(const disc::GameFiles& game, const GameProfile& profile)
+{
+    std::map<uint32_t, std::string> seps = RedFiles(game, profile.effect_folder, kRedEffect);
+    std::erase_if(seps, [](const auto& sep) { return sep.first < kRedFirstSep; });
+    return seps;
+}
+
+// A Red game's pieces of music and effects (see ListSongs).
+std::vector<Sound> RedSounds(const disc::GameFiles& game, const GameProfile& profile)
+{
+    std::vector<Sound> sounds;
+    for (const auto& [number, path] : RedFiles(game, profile.music_folder, kRedPiece))
+    {
+        sounds.push_back({number, RedLabel(path, kRedPiece), true});
+    }
+
+    if (!profile.effect_folder)
+    {
+        return sounds;
+    }
+
+    for (const auto& [number, path] : RedBlocks(game, profile))
+    {
+        std::vector<uint8_t> bytes;
+        if (!game.read_file || !game.read_file(path, bytes))
+        {
+            throw xsflib::FormatError("can't read " + path);
+        }
+
+        const std::optional<std::vector<RedBlockEffect>> effects = RedBlockEffects(bytes);
+        if (!effects)
+        {
+            throw xsflib::FormatError(path + " isn't a block of effects");
+        }
+
+        for (const RedBlockEffect& effect : *effects)
+        {
+            std::string place = std::to_string(effect.place);
+            place.insert(0, place.size() < 3 ? 3 - place.size() : 0, '0');
+            sounds.push_back({kRedEffectId + number * kRedBlockStride + effect.place,
+                              RedLabel(path, kRedBlock) + "-" + place, false});
+        }
+    }
+
+    for (const auto& [number, path] : RedSeps(game, profile))
+    {
+        sounds.push_back({kRedEffectId + number, RedLabel(path, kRedEffect), false});
+    }
+
+    return sounds;
+}
+
 } // namespace
 
 std::vector<Sound> ListSongs(const disc::GameFiles& game, const GameProfile& profile)
 {
+    if (profile.library == SoundLibrary::kRed)
+    {
+        return RedSounds(game, profile);
+    }
+
     const std::optional<ntdlib::Dol> dol = ntdlib::Dol::Parse(game.dol);
     if (!dol)
     {
@@ -2231,6 +2501,119 @@ std::optional<std::vector<uint8_t>> BuildLibrary(const disc::GameFiles& game, co
             }
 
             program.AddFile(path, bytes);
+        }
+
+        return WritePsf(kPsfVersionGcsf, d.Serialize(), program.Data(), tags);
+    }
+
+    // A Red game: the disc's header, every piece of music, the blocks of effects that the game loads, the SEP files
+    // that it can play, and the wave banks that they name. A piece's file starts with "BGM ", then the piece's number
+    // and its bank's number, big-endian halves at 4 and 6. A SEP file starts with "SeSep". Its bank's number is a
+    // little-endian half at 0x11. RedBlockEffects reads a block.
+    if (profile.library == SoundLibrary::kRed)
+    {
+        constexpr std::size_t kBankOffset = 6;
+        constexpr std::size_t kSepBankOffset = 0x11;
+        const std::map<uint32_t, std::string> banks = RedFiles(game, profile.wave_folder, kRedBank);
+        std::set<uint32_t> named;
+        std::optional<std::string> error;
+        const auto add = [&](const std::string& path, std::vector<uint8_t>& bytes)
+        {
+            if (!game.read_file || !game.read_file(path, bytes))
+            {
+                error = "can't read " + path;
+                return false;
+            }
+
+            program.AddFile(path, bytes);
+            return true;
+        };
+        const auto name = [&](const std::string& path, uint32_t bank)
+        {
+            if (!banks.contains(bank))
+            {
+                error = path + " names wave bank " + std::to_string(bank) + ", which the disc lacks";
+                return false;
+            }
+
+            named.insert(bank);
+            return true;
+        };
+
+        program.AddFile("sys/boot.bin", game.boot);
+        for (const auto& [number, path] : RedFiles(game, profile.music_folder, kRedPiece))
+        {
+            std::vector<uint8_t> bytes;
+            if (!add(path, bytes))
+            {
+                return fail(*error);
+            }
+
+            if (bytes.size() < kBankOffset + 2 || !std::equal(bytes.begin(), bytes.begin() + 4, "BGM "))
+            {
+                return fail(path + " isn't a piece of music");
+            }
+
+            if (!name(path, xsflib::LoadBe16(bytes.data() + kBankOffset)))
+            {
+                return fail(*error);
+            }
+        }
+
+        if (profile.effect_folder)
+        {
+            for (const auto& [number, path] : RedBlocks(game, profile))
+            {
+                std::vector<uint8_t> bytes;
+                if (!add(path, bytes))
+                {
+                    return fail(*error);
+                }
+
+                const std::optional<std::vector<RedBlockEffect>> effects = RedBlockEffects(bytes);
+                if (!effects)
+                {
+                    return fail(path + " isn't a block of effects");
+                }
+
+                for (const RedBlockEffect& effect : *effects)
+                {
+                    if (!name(path, effect.bank))
+                    {
+                        return fail(*error);
+                    }
+                }
+            }
+
+            for (const auto& [number, path] : RedSeps(game, profile))
+            {
+                std::vector<uint8_t> bytes;
+                if (!add(path, bytes))
+                {
+                    return fail(*error);
+                }
+
+                if (bytes.size() < kSepBankOffset + 2 || !std::equal(bytes.begin(), bytes.begin() + 5, "SeSep"))
+                {
+                    return fail(path + " isn't an effect");
+                }
+
+                if (!name(path, RedInfoBank(bytes, kSepBankOffset)))
+                {
+                    return fail(*error);
+                }
+            }
+        }
+
+        for (const uint32_t bank : named)
+        {
+            std::vector<uint8_t> bytes;
+            if (!game.read_file(banks.at(bank), bytes))
+            {
+                return fail("can't read " + banks.at(bank));
+            }
+
+            program.AddFile(banks.at(bank), bytes);
         }
 
         return WritePsf(kPsfVersionGcsf, d.Serialize(), program.Data(), tags);
@@ -2481,20 +2864,22 @@ ntdlib::jaudio::GameWatch WatchOf(const GameProfile& p)
     return watch;
 }
 
-// A MusyX song in game mode, as xsflib's MeasureLength plays it (see xsflib/rip/length.h). A frame is one block of the
-// analysis's output (kLengthRules.block_frames). The song loops in a frame in which its tracks' slots fall. It plays
-// while it's in one of MusyX's lists of songs. It also counts as playing before it first gets there. A jingle's thread
-// waits half a second before it starts the jingle. The output keeps a constant level on each channel once the song has
-// stopped. Sound is therefore a sample that differs by more than xsflib's kSilenceLevel from its channel's recent
-// level. That level is a running average over about 50 ms. The song rings while it has sounded in the last 0.5 s. The
-// analysis therefore keeps the end of a release. The adapter follows no voices and finds no steady state.
-class MusyXSong
+// A song in game mode, as xsflib's MeasureLength plays it (see xsflib/rip/length.h). The adapter follows the song
+// through its sound library's state. A derived class reads that state: whether the song plays, and whether it has
+// gone back to the start of its loop. A frame is one block of the analysis's output (kLengthRules.block_frames). The
+// song also counts as playing before it first plays. Its loop has one target, 0. The output keeps a constant level on
+// each channel once the song has stopped. Sound is therefore a sample that differs by more than xsflib's
+// kSilenceLevel from its channel's recent level. That level is a running average over about 50 ms. The song rings
+// while it has sounded in the last 0.5 s. The analysis therefore keeps the end of a release. The adapter follows no
+// voices and finds no steady state.
+class LibrarySong
 {
 public:
-    MusyXSong(Player& player, const GameProfile& profile) : player_(player), profile_(profile)
+    explicit LibrarySong(Player& player) : player_(player)
     {
-        last_ticks_.assign(profile.track_slot_count, 0);
     }
+
+    virtual ~LibrarySong() = default;
 
     bool RunFrame()
     {
@@ -2517,21 +2902,9 @@ public:
             last_sound_ = frame_;
         }
 
-        const bool listed = Word(profile_.song_lists[0]) != 0 || Word(profile_.song_lists[1]) != 0;
-        started_ = started_ || listed;
-        playing_ = listed;
-
-        // A loop of the song moves its tracks back, all in one frame. A slot's new tick depends on the pass, so the
-        // song's loop has one target, 0.
-        bool looped = false;
-        for (uint32_t k = 0; k < profile_.track_slot_count; k++)
-        {
-            const uint32_t ticks = Word(profile_.track_slots + k * profile_.track_slot_size);
-            looped = looped || ticks < last_ticks_[k];
-            last_ticks_[k] = ticks;
-        }
-
-        if (looped && on_loop_)
+        playing_ = Playing();
+        started_ = started_ || playing_;
+        if (Looped() && on_loop_)
         {
             on_loop_(0, 0);
         }
@@ -2607,6 +2980,33 @@ public:
         on_loop_ = std::move(f);
     }
 
+    // Whether the song's other tracks let its fade start (see xsflib's MeasureLength). Its loops count as track 0's.
+    bool OthersLooped(int)
+    {
+        return OthersDone();
+    }
+
+protected:
+    // Whether the song plays in the sound library.
+    virtual bool Playing() = 0;
+
+    // Whether the song has gone back to the start of its loop since the last frame.
+    virtual bool Looped() = 0;
+
+    // Whether the tracks that loop apart from the song's loops have each looped twice, or have stopped. A song whose
+    // tracks all loop together has none.
+    virtual bool OthersDone()
+    {
+        return true;
+    }
+
+    // The word at `address` in the game's memory, or 0 where no memory is.
+    uint32_t Word(uint32_t address) const
+    {
+        const uint8_t* p = player_.System()->Memory().At(ToPhysical(address), 4);
+        return p != nullptr ? xsflib::LoadBe32(p) : 0;
+    }
+
 private:
     // The output's running average takes a sample with this weight's inverse: about 50 ms.
     static constexpr double kLevelSamples = 1600.0;
@@ -2616,15 +3016,7 @@ private:
         kLengthRules.tail_ms * kLengthRules.sample_rate / 1000 / kLengthRules.block_frames;
     static constexpr uint64_t kStartFrames = 5000 * kLengthRules.sample_rate / 1000 / kLengthRules.block_frames;
 
-    uint32_t Word(uint32_t address) const
-    {
-        const uint8_t* p = player_.System()->Memory().At(ToPhysical(address), 4);
-        return p != nullptr ? xsflib::LoadBe32(p) : 0;
-    }
-
     Player& player_;
-    const GameProfile& profile_;
-    std::vector<uint32_t> last_ticks_;
     double levels_[2] = {0.0, 0.0};
     std::function<void(int, uint32_t)> on_loop_;
     std::optional<uint64_t> last_sound_;
@@ -2634,10 +3026,207 @@ private:
     bool playing_ = false;
 };
 
-// The length of a MusyX song that `player` has started: two loops and a 10 s fade, or its last sound and a 0.5 s tail.
-std::optional<Timing> AnalyzeMusyX(Player& player, const GameProfile& profile)
+// A MusyX song (see LibrarySong). It plays while it's in one of MusyX's lists of songs. A jingle's thread waits half a
+// second before it starts the jingle. The song loops in a frame in which its tracks' slots fall.
+class MusyXSong : public LibrarySong
 {
-    MusyXSong song(player, profile);
+public:
+    MusyXSong(Player& player, const GameProfile& profile) : LibrarySong(player), profile_(profile)
+    {
+        last_ticks_.assign(profile.track_slot_count, 0);
+    }
+
+private:
+    bool Playing() override
+    {
+        return Word(profile_.song_lists[0]) != 0 || Word(profile_.song_lists[1]) != 0;
+    }
+
+    // A loop of the song moves its tracks back, all in one frame. A slot's new tick depends on the pass.
+    bool Looped() override
+    {
+        bool looped = false;
+        for (uint32_t k = 0; k < profile_.track_slot_count; k++)
+        {
+            const uint32_t ticks = Word(profile_.track_slots + k * profile_.track_slot_size);
+            looped = looped || ticks < last_ticks_[k];
+            last_ticks_[k] = ticks;
+        }
+
+        return looped;
+    }
+
+    const GameProfile& profile_;
+    std::vector<uint32_t> last_ticks_;
+};
+
+// A piece of a Red game (see LibrarySong). It plays while one of Red's music controls plays a piece. It loops in a
+// frame in which the CPU reaches the profile's `red_loop`. There, Red takes the piece's tracks back to their state at
+// the start of the loop.
+class RedPiece : public LibrarySong
+{
+public:
+    RedPiece(Player& player, const GameProfile& profile)
+        : LibrarySong(player), profile_(profile), cpu_(player.System()->Cpu())
+    {
+        cpu_.Watch({profile.red_loop}, [this](uint32_t) { looped_ = true; });
+    }
+
+    RedPiece(const RedPiece&) = delete;
+    RedPiece& operator=(const RedPiece&) = delete;
+
+    ~RedPiece() override
+    {
+        cpu_.Watch({}, nullptr);
+    }
+
+private:
+    bool Playing() override
+    {
+        const uint32_t controls = Word(profile_.red_controls);
+        if (controls == 0)
+        {
+            return false;
+        }
+
+        for (uint32_t i = 0; i < profile_.red_music_controls; i++)
+        {
+            const uint32_t piece = Word(controls + i * profile_.red_control_size + profile_.red_music_offset);
+            if (static_cast<int32_t>(piece) >= 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    bool Looped() override
+    {
+        return std::exchange(looped_, false);
+    }
+
+    const GameProfile& profile_;
+    ppc::Cpu& cpu_;
+    bool looped_ = false;
+};
+
+// An effect of a Red game (see LibrarySong). It plays while one of the tracks of Red's effect control is busy. Each
+// track loops on its own. The profile's `red_track_loop` takes a track back to the start of a loop that never ends.
+// The first track that loops gives the effect's loops. Another track that is still busy holds the fade back until it
+// has looped twice too. A track that has stopped holds nothing back.
+class RedEffect : public LibrarySong
+{
+public:
+    RedEffect(Player& player, const GameProfile& profile)
+        : LibrarySong(player), profile_(profile), cpu_(player.System()->Cpu()), loops_(profile.red_effect_tracks, 0)
+    {
+        cpu_.Watch({profile.red_track_loop}, [this](uint32_t) { TrackLooped(); });
+    }
+
+    RedEffect(const RedEffect&) = delete;
+    RedEffect& operator=(const RedEffect&) = delete;
+
+    ~RedEffect() override
+    {
+        cpu_.Watch({}, nullptr);
+    }
+
+private:
+    // The effect control, or 0 before Red has set up its controls.
+    uint32_t Control() const
+    {
+        const uint32_t controls = Word(profile_.red_controls);
+        return controls != 0 ? controls + profile_.red_effect_control * profile_.red_control_size : 0;
+    }
+
+    // The effect control's first track, or 0.
+    uint32_t Tracks() const
+    {
+        const uint32_t control = Control();
+        return control != 0 ? Word(control) : 0;
+    }
+
+    // Whether track `i` is busy.
+    bool Busy(uint32_t i) const
+    {
+        return Word(Tracks() + i * profile_.red_track_size) != 0;
+    }
+
+    bool Playing() override
+    {
+        if (Tracks() == 0)
+        {
+            return false;
+        }
+
+        for (uint32_t i = 0; i < profile_.red_effect_tracks; i++)
+        {
+            if (Busy(i))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // A track has gone back to the start of its loop. r3 holds its control and r5 the track.
+    void TrackLooped()
+    {
+        const uint32_t control = Control();
+        const uint32_t tracks = Tracks();
+        const uint32_t track = cpu_.state_.gpr[5];
+        if (tracks == 0 || cpu_.state_.gpr[3] != control || track < tracks)
+        {
+            return;
+        }
+
+        const uint32_t i = (track - tracks) / profile_.red_track_size;
+        if (i >= profile_.red_effect_tracks)
+        {
+            return;
+        }
+
+        ++loops_[i];
+        if (!first_)
+        {
+            first_ = i;
+        }
+        if (i == *first_)
+        {
+            looped_ = true;
+        }
+    }
+
+    bool Looped() override
+    {
+        return std::exchange(looped_, false);
+    }
+
+    bool OthersDone() override
+    {
+        for (uint32_t i = 0; i < profile_.red_effect_tracks; i++)
+        {
+            if (i != first_ && loops_[i] < xsflib::rip::kLengthLoops && Busy(i))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    const GameProfile& profile_;
+    ppc::Cpu& cpu_;
+    std::vector<int> loops_;        // each track's loops so far
+    std::optional<uint32_t> first_; // the first track that looped
+    bool looped_ = false;           // whether that track has looped since the last frame
+};
+
+// The length of a song that `song` follows: two loops and a 10 s fade, or its last sound and a 0.5 s tail.
+std::optional<Timing> MeasureSong(LibrarySong& song)
+{
     xsflib::rip::LengthRules rules;
     rules.frame_ms = 1000.0 * kLengthRules.block_frames / kLengthRules.sample_rate;
     rules.max_frames = static_cast<uint64_t>(kLengthRules.limit_ms / rules.frame_ms);
@@ -2735,7 +3324,20 @@ std::optional<Timing> LengthAnalyzer::Play(uint32_t id, const FileChunk* file, c
 
     if (profile.library == SoundLibrary::kMusyX)
     {
-        return AnalyzeMusyX(player, profile);
+        MusyXSong song(player, profile);
+        return MeasureSong(song);
+    }
+
+    if (profile.library == SoundLibrary::kRed && id >= kRedEffectId)
+    {
+        RedEffect effect(player, profile);
+        return MeasureSong(effect);
+    }
+
+    if (profile.library == SoundLibrary::kRed)
+    {
+        RedPiece piece(player, profile);
+        return MeasureSong(piece);
     }
 
     // An AutoBgm piece never repeats. Once its root track idles in its polling routine, the passes of its other tracks
