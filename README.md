@@ -10,11 +10,22 @@ library and its DSP program. The game plays the sound itself. The mixing, filter
 game. A rip requires a driver profile for the game.
 
 `docs/gcsf.md` specifies the format. Version 1 supports The Legend of Zelda: Four Swords Adventures (USA) and its
-Japanese release, The Legend of Zelda: Four Swords Plus, The Legend of Zelda: Twilight Princess (USA) and The Legend
-of Zelda: The Wind Waker (USA). It also supports the 38 songs and 9 jingles of Mario Golf: Toadstool Tour (USA). Navi
-Trackers, a mode that only Four Swords Plus has, plays its music from streams. GCSF doesn't rip streams. The Wind
-Waker names none of its sounds. A rip names an effect after its category and index, for example `se4-0123`, and a
-piece of music after its file.
+Japanese release, The Legend of Zelda: Four Swords Plus, The Legend of Zelda: Twilight Princess (USA), The Legend of
+Zelda: The Wind Waker (USA), Luigi's Mansion (USA), Super Mario Sunshine (USA), Pikmin (USA), Donkey Kong Jungle Beat
+(USA) and Mario Kart: Double Dash!! (USA). It also supports the 38 songs and 9 jingles of Mario Golf: Toadstool Tour
+(USA), the 111 songs and jingles of Mario Power Tennis (USA), the 231 pieces in the Sound Room of WarioWare, Inc.: Mega
+Party Game$! (USA) and the sequenced music and sound effects of Pikmin 2 (USA). Pac-Man Vs. (USA) and The Legend of
+Zelda: Collector's Edition (USA) stream their music. GCSF rips the sequenced sound effects of Pac-Man Vs. and of the
+menu of Collector's Edition. The menu's sound table also lists one sequenced piece of music, `JA_BGM_DUMMY`. The menu's
+code never starts it. GCSF rips it too. Navi Trackers, a mode that only Four Swords Plus has, plays its music from
+streams. So does Mario Kart: Double Dash!! on its courses. GCSF doesn't rip streams. The Wind Waker, Luigi's Mansion and
+Pac-Man Vs. name none of their sounds. A rip names an effect after its category and index, for example `se4-0123`, and a
+piece of music after its file. Super Mario Sunshine keeps a table of its sounds' names. A rip of it takes its names from
+that table, for example `MSD_BGM_DOLPIC`. Pikmin's code lists its pieces of music by their files' names. A rip of Pikmin
+names a piece after its file, for example `select`. The game plays the music of its cutscenes as parts of one piece. A
+rip names a part after the piece and the part's number, for example `demobgm-5`. The rip leaves out the game's sound
+effects and the game's streamed music. Pikmin 2's pieces of music are named after their files too. The game keeps a
+table of its effects' names. A rip of an effect takes its name from that table, for example `PSSE_SY_MENU_CURSOR`.
 
 ## Tools
 
@@ -136,8 +147,13 @@ externals/ntdlib/  ntdlib: the CPU, the DSP and the devices that the GameCube sh
 A driver runs on the emulated GameCube. `driver/build.py` builds one for PowerPC with ntdlib's
 `tools/build_ppc_driver.py`, and requires a clang with the PowerPC target. The drivers' images are committed in
 `src/rip/`: `driver_blob.h` for Four Swords Adventures, `driver_twilight_princess_blob.h` for Twilight Princess,
-`driver_zel_blob.h` for The Wind Waker and `driver_mario_golf_blob.h` for Mario Golf: Toadstool Tour. Building GCSF
-itself requires no PowerPC toolchain.
+`driver_zel_blob.h` for The Wind Waker, `driver_luigis_mansion_blob.h` for Luigi's Mansion,
+`driver_super_mario_sunshine_blob.h` for Super Mario Sunshine, `driver_pikmin_blob.h` for Pikmin,
+`driver_jungle_beat_blob.h` for Donkey Kong Jungle Beat, `driver_double_dash_blob.h` for Mario Kart: Double Dash!!,
+`driver_mario_golf_blob.h` for Mario Golf: Toadstool Tour and Mario Power Tennis, `driver_warioware_blob.h` for
+WarioWare, Inc.: Mega Party Game$!, `driver_pikmin2_blob.h` for Pikmin 2, `driver_pacman_vs_blob.h` for Pac-Man Vs. and
+`driver_collectors_edition_blob.h` for The Legend of Zelda: Collector's Edition. Building GCSF itself requires no
+PowerPC toolchain.
 
 ## Licence
 

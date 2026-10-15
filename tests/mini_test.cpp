@@ -112,12 +112,15 @@ void TestFile()
 
 void TestNamesWaves()
 {
-    // Four Swords Adventures' driver loads every wave bank, and Mario Golf's loads whole MusyX groups. The Wind Waker's
-    // and Twilight Princess's drivers load the waves that a mini names.
+    // Four Swords Adventures' driver loads every wave bank, and Mario Golf's loads whole MusyX groups. The drivers of
+    // The Wind Waker, Twilight Princess, Super Mario Sunshine, Donkey Kong Jungle Beat and Pikmin 2 load the waves
+    // that a mini names.
     for (const rip::GameProfile& profile : rip::KnownProfiles())
     {
-        const bool lists =
-            profile.driver == rip::Driver::kWindWaker || profile.driver == rip::Driver::kTwilightPrincess;
+        const bool lists = profile.driver == rip::Driver::kWindWaker ||
+                           profile.driver == rip::Driver::kTwilightPrincess ||
+                           profile.driver == rip::Driver::kSuperMarioSunshine ||
+                           profile.driver == rip::Driver::kJungleBeat || profile.driver == rip::Driver::kPikmin2;
         Check(rip::NamesWaves(profile) == lists, std::string(profile.name) + ": whether its driver names waves");
     }
 

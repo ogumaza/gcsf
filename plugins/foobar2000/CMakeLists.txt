@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 
-# foo_input_gcsf: the foobar2000 component. It's a DLL built with clang-cl or MSVC on Windows. On macOS it's a .component
+# foo_input_gcsf: the foobar2000 component. It's a DLL built with clang-cl on Windows. On macOS it's a .component
 # bundle. The top-level CMakeLists.txt adds it when FOOBAR2000_SDK_DIR is set (see README.md). xsflib's
 # xsflib_add_foobar2000_component compiles the parts of the SDK that a component requires.
 

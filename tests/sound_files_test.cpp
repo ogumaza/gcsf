@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 
 // Unit tests for rip::UseSoundFiles: where it finds another release's sound files, and which of the game's files it
-// then reads from them, The Wind Waker HD's sequence table among them. The folders are made up in a temporary folder.
+// then reads from them, The Wind Waker HD's sequence table among them. A profile may have no sequence archive. The
+// folders are made up in a temporary folder.
 
 #include <cstddef>
 #include <cstdint>
@@ -119,6 +120,29 @@ void TestExtractedDisc(const fs::path& dir)
 
     Check(found && fs::equivalent(*found, disc / "DATA" / "files" / "Audiores"), "the disc's sound folder: " + error);
     XSFLIB_CHECK(Read(game, "Audiores/Z2Sound.baa") == "wii baa");
+}
+
+// A profile without a sequence archive (Mario Kart: Double Dash!!). The folder's start-up archive and wave archives
+// replace the game's. The game's other files, those of the sequence archive's usual place among them, stay the game's.
+void TestNoSequenceArchive(const fs::path& dir)
+{
+    const fs::path sounds = dir / "blocks" / "AudioRes";
+    WriteText(sounds / "GCKart.baa", "baa");
+    WriteText(sounds / "Waves" / "A.aw", "a");
+    WriteText(sounds / "Seqs" / "JaiSeqs.arc", "folder's arc");
+
+    rip::GameProfile profile{};
+    profile.sound_archive = "AudioRes/GCKart.baa";
+    profile.wave_folder = "AudioRes/Waves/";
+
+    disc::GameFiles game = DiscGame();
+    std::string error;
+    const std::optional<fs::path> found = rip::UseSoundFiles(game, profile, dir / "blocks", &error);
+
+    Check(found && fs::equivalent(*found, sounds), "the sound folder without a sequence archive: " + error);
+    XSFLIB_CHECK(Read(game, "AudioRes/GCKart.baa") == "baa");
+    XSFLIB_CHECK(Read(game, "AudioRes/Waves/A.aw") == "a");
+    XSFLIB_CHECK(Read(game, "AudioRes/Seqs/JaiSeqs.arc") == "disc:AudioRes/Seqs/JaiSeqs.arc");
 }
 
 void TestErrors(const fs::path& dir)
@@ -261,6 +285,7 @@ int main()
         fs::temp_directory_path() / ("gcsf_sound_files_test_" + std::to_string(std::random_device{}()));
     TestTitle(dir);
     TestExtractedDisc(dir);
+    TestNoSequenceArchive(dir);
     TestErrors(dir);
     TestSequenceTable(dir);
 

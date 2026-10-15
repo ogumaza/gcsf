@@ -121,7 +121,8 @@ void ListSounds(const disc::GameFiles& game, const std::vector<rip::Sound>& soun
 }
 
 // For a game that loads its wave groups as its scenes require them: the groups that hold each sound's waves. The sounds
-// play with no group loaded, on a library that holds no wave archive (see LengthAnalyzer::FindWaves).
+// play with no group loaded, on a library that holds no wave archive (see LengthAnalyzer::FindWaves). A sound whose
+// groups the profile gives takes those (see rip::GameWaveGroups).
 template <typename Job>
 void FindWaveGroups(std::vector<Job>& jobs, const std::vector<uint8_t>& library, const rip::GameProfile& profile,
                     const std::vector<jaudio::WaveSystem>& systems, unsigned threads)
@@ -129,6 +130,12 @@ void FindWaveGroups(std::vector<Job>& jobs, const std::vector<uint8_t>& library,
     const rip::LengthAnalyzer analyzer(library, profile);
     const auto find = [&](Job& job)
     {
+        if (std::optional<std::vector<uint32_t>> groups = rip::GameWaveGroups(profile, job.sound.id))
+        {
+            job.waves = std::move(*groups);
+            return false;
+        }
+
         const auto waves = analyzer.FindWaves(job.sound.id, job.archive ? &*job.archive : nullptr);
         if (!waves)
         {
@@ -201,19 +208,27 @@ int ListJAudio(const disc::GameFiles& game, const rip::GameProfile& profile, std
     }
 
     // A JAudio1 game's sound list requires its sequence archive. Otherwise a sequence archive that can't be read loses
-    // only the sequences that no sound plays.
+    // only the sequences that no sound plays. A game without a sequence archive has no such sequences.
     std::vector<uint8_t> sequence_archive;
-    const bool has_sequences = game.read_file(profile.sequence_archive, sequence_archive);
+    const bool has_sequences = profile.sequence_archive && game.read_file(profile.sequence_archive, sequence_archive);
     if (!has_sequences && profile.library == rip::SoundLibrary::kJAudio1)
     {
         std::fprintf(stderr, "error: can't read %s\n", profile.sequence_archive);
         return 1;
     }
 
+    // The sound name table, for a game that has one.
+    std::vector<uint8_t> names;
+    if (profile.sound_names && !game.read_file(profile.sound_names, names))
+    {
+        std::fprintf(stderr, "error: can't read %s\n", profile.sound_names);
+        return 1;
+    }
+
     std::vector<jaudio::SoundEntry> entries;
     try
     {
-        entries = rip::ListSounds(profile, sound_archive, sequence_archive);
+        entries = rip::ListSounds(profile, sound_archive, sequence_archive, profile.sound_names ? &names : nullptr);
     }
     catch (const xsflib::FormatError& e)
     {
@@ -222,11 +237,7 @@ int ListJAudio(const disc::GameFiles& game, const rip::GameProfile& profile, std
     }
 
     // The sequences that no sound plays.
-    if (!has_sequences)
-    {
-        std::fprintf(stderr, "warning: can't read %s\n", profile.sequence_archive);
-    }
-    else
+    if (has_sequences)
     {
         try
         {
@@ -237,6 +248,10 @@ int ListJAudio(const disc::GameFiles& game, const rip::GameProfile& profile, std
             std::fprintf(stderr, "warning: %s: %s; the sequences that no sound plays are left out\n",
                          profile.sequence_archive, e.what());
         }
+    }
+    else if (profile.sequence_archive)
+    {
+        std::fprintf(stderr, "warning: can't read %s\n", profile.sequence_archive);
     }
 
     for (const jaudio::SoundEntry& entry : entries)
@@ -276,11 +291,12 @@ int RipInput(const std::string& input, const Options& o, xsflib::cli::FileNameRe
         return 1;
     }
 
-    // Another release's sound files, played with this release's code.
+    // A start-up archive inside another archive, then another release's sound files, played with this release's code.
+    rip::UnpackSoundArchive(game, *profile);
     if (!o.sound_files.empty())
     {
-        // The sound files are found by the start-up archive's name. A MusyX game has no start-up archive.
-        if (profile->library == rip::SoundLibrary::kMusyX)
+        // The sound files are found by the start-up archive's name. A MusyX game or a Jac game has no start-up archive.
+        if (rip::ListsSongs(*profile))
         {
             std::fprintf(stderr, "error: --sound-files doesn't work with %s\n", profile->name);
             return 1;
@@ -301,7 +317,7 @@ int RipInput(const std::string& input, const Options& o, xsflib::cli::FileNameRe
     std::vector<uint8_t> sound_archive;
     std::vector<rip::Sound> sounds;
     std::vector<rip::UnplayedSequence> unplayed;
-    if (profile->library == rip::SoundLibrary::kMusyX)
+    if (rip::ListsSongs(*profile))
     {
         try
         {

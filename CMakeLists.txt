@@ -3,7 +3,7 @@
 cmake_minimum_required(VERSION 3.20)
 # Shared version for gcsfrip, gcsfplay, the foobar2000 component, the XMPlay plugin, Windows file properties and macOS
 # bundles (xsflib_add_version below). For a release, update it here and add notes in docs/release-notes/.
-project(gcsf VERSION 1.2.0 LANGUAGES C CXX)
+project(gcsf VERSION 1.3.0 LANGUAGES C CXX)
 
 # xsflib, a library for players and rippers of the PSF family, is the submodule externals/xsflib. Its
 # XsflibProject.cmake sets what a project built on it starts with: C++20, a release build by default, the static C
@@ -63,8 +63,17 @@ target_compile_options(gcsf_player PRIVATE ${GCSF_WARNINGS})
 # The ripper: the game profiles, the sets and the length analysis.
 add_library(gcsf_rip STATIC
     src/rip/driver_blob.h
+    src/rip/driver_collectors_edition_blob.h
+    src/rip/driver_double_dash_blob.h
+    src/rip/driver_jungle_beat_blob.h
+    src/rip/driver_luigis_mansion_blob.h
     src/rip/driver_mario_golf_blob.h
+    src/rip/driver_pacman_vs_blob.h
+    src/rip/driver_pikmin2_blob.h
+    src/rip/driver_pikmin_blob.h
+    src/rip/driver_super_mario_sunshine_blob.h
     src/rip/driver_twilight_princess_blob.h
+    src/rip/driver_warioware_blob.h
     src/rip/driver_zel_blob.h
     src/rip/rip.cpp
     src/rip/rip.h
@@ -92,11 +101,11 @@ foreach (tool gcsfrip gcsfplay)
     xsflib_add_droplet(${tool} VERSION ${gcsf_VERSION})
 endforeach()
 
-# foobar2000 component (Windows with clang-cl or MSVC, or macOS): cmake -DFOOBAR2000_SDK_DIR=<unpacked SDK> ...
+# foobar2000 component (Windows with clang-cl, or macOS): cmake -DFOOBAR2000_SDK_DIR=<unpacked SDK> ...
 set(FOOBAR2000_SDK_DIR "" CACHE PATH "foobar2000 SDK (builds the foo_input_gcsf component when set)")
 if (FOOBAR2000_SDK_DIR)
     if (NOT MSVC AND NOT APPLE)
-        message(FATAL_ERROR "the foobar2000 component requires clang-cl or MSVC on Windows, or macOS")
+        message(FATAL_ERROR "the foobar2000 component requires clang-cl on Windows, or macOS")
     endif()
     add_subdirectory(plugins/foobar2000)
 endif()

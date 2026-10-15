@@ -156,11 +156,98 @@ game gives the sound library 0xA00000 bytes of ARAM and graphics 0x5CE000. The d
 64 KiB of both, 0xFBE000 bytes. A rip draws nothing. The Wind Waker HD's waves that stay loaded take more than the
 game's share for sound.
 
+Luigi's Mansion's driver is `driver/luigis_mansion.c`. It sets up the video interface, the disc with long file names,
+JSystem's heaps and ARAM manager, and the game's sound set-up. It loads the wave systems that the game loads before its
+first frame. Then it calls the game's sound frame until the sound library is up and every wave system that stays loaded
+is in ARAM. Then it starts the sound by its JAudio sound ID. From then on it calls the sound frame once a frame. A frame
+is two video retraces, as in the game.
+
+Super Mario Sunshine's driver is `driver/super_mario_sunshine.c`. It sets up the video interface, the disc with long
+file names, JSystem's heaps and ARAM manager, and the game's sound object. The sound object sets up the sound library.
+The game hands its sound object the start-up archive. The driver hands it none. The sound library then reads the archive
+from a file of the rip (see "Ripping"). Next come the three wave groups that the game loads at start-up and before its
+title. The driver calls the game's sound frame until the sound library is up and those groups are in ARAM. Then it loads
+the scene's group that the `.minigcsf` names. That group goes at the top of ARAM. The game's scene loader puts it there
+too. The sound then starts by its JAudio sound ID. A piece of music gets the volume that the game gives its music, 0.75.
+From then on the driver calls the sound frame once a frame. As in the game, a frame is two video retraces.
+
+Pikmin's driver is `driver/pikmin.c`. The game's sound library is an early JAudio1. The game calls it through C
+functions, without a sound table. The driver sets up the OS, the disc with long file names, the video interface and
+ARAM. Then the driver starts the sound library with a block of the arena and of ARAM. The sound library loads its bank
+file and starts two threads. Those threads play the music. The game then gives the sound library a buffer for the disc,
+from two words of its system object. Only the game's set-up of that object fills them in. The driver doesn't run that
+set-up. It passes the two words as they are, 0 and 0. The sound library's disc thread keeps its two 32 KB buffers. Then
+the driver reads the piece's sequence and loads the wave group that the sound ID gives (see "Ripping"). The piece plays
+in the slot that the game plays its music in. The piece gets the music's volume from the game's options. Without a save,
+that volume is full. The driver leaves it there. The driver writes the sound's handle itself: the address of a word that
+holds the piece's root track. The driver checks for the sound's end once a video retrace. At the end, the driver sets
+the handle to 0.
+
+The music of Pikmin's cutscenes is one piece in parts. The sound library plays that piece from its start-up. The piece's
+root track polls a port. A cutscene writes the number of a part to that port. The root track then opens a track that
+plays the part. For a part, the driver loads the part's wave group and writes the part's number to the port. The sound
+starts at that write. The handle then points at a word that holds the track that plays the part.
+
+Donkey Kong Jungle Beat's driver is `driver/jungle_beat.c`. It sets up the video interface, JSystem's heaps and ARAM
+manager, and the game's heaps. It loads the game's sound files as the game does: the start-up archive, the sequence
+archive, the chord archive and the chord database. The game decodes the start-up archive from Yaz0 as it loads it. The
+driver then creates the game's audio manager, loads the wave groups of the wave list and starts the sound. Music starts
+in the game's BGM player. The player sets each of a piece's tracks to a state that tables in the game's code give. Some
+tracks start silent. The game turns them on later, or never. A piece whose first state silences every track gets its
+next state at once. The game turns that piece's tracks on later. From then on the driver calls the audio manager's frame
+process once per video retrace. An entry of its wave list holds a wave bank in its high 16 bits and a group of that
+bank's wave system in its low 16 bits.
+
+Mario Kart: Double Dash!!'s driver is `driver/double_dash.c`. It sets up the video interface, JSystem's heaps and ARAM
+manager, and the game's audio heap. It loads the start-up archive as the game does and passes it to the game's audio
+set-up. Then it loads every wave bank that the archive names and starts the sound. From then on it calls the audio frame
+process once per video retrace. Some effects are level sounds, such as the engines. The game's start function gives a
+level sound a lifetime of one frame. The game starts the sound again each frame for as long as it should play. The
+driver starts it again before each frame until the sound ends.
+
 Mario Golf: Toadstool Tour's driver sets up the video interface, the OS's arena and heap, the ARAM and the game's heaps.
 The game's sound set-up then starts MusyX, and the driver loads the game's two MusyX sound groups. The driver starts the
 song by its number in the game's song table, or the jingle by its number in the jingle table. The game starts a jingle
 from another thread. The jingle sounds half a second later. The driver's thread then sleeps. The song plays from the
-audio and DSP interrupts.
+audio and DSP interrupts. Mario Power Tennis plays through the same driver.
+
+WarioWare, Inc.: Mega Party Game$!'s driver is `driver/warioware.c`. It sets up the game's heaps. The game's file loader
+then reads the game's five sound files from the disc. The driver puts each one where the game's sound set-up looks for
+it. The sound set-up initialises the ARAM, the audio interface and MusyX. It loads every MusyX sound group into ARAM and
+sets up the reverb. The driver then plays the song through the game's play function. It passes the mode in which the
+game plays music. The driver's thread then sleeps.
+
+Pikmin 2's driver is `driver/pikmin2.c`. It sets up the video interface, JSystem's heaps and ARAM manager, and the
+game's sound system: the start-up archive, the game's sound layer, and the global scene with the effects sequence. The
+game plays each piece of music through an object of its sound layer, in a sound scene. The driver makes a scene and the
+piece's object in the way the game makes them. It loads the scene's resources: the piece's sequence, the conductor of a
+cave's music and the wave groups of the wave list. Then the scene starts the piece. The game starts a boss's music when
+the boss appears, at a part of the music that the boss picks. The driver starts the bosses' music at those parts. From
+then on it calls the sound layer's frame work once a frame. A frame is two video retraces. The driver's scene has no
+game objects. The music therefore plays as it does when nothing happens in the game.
+
+The global scene's effects sequence plays the effects. The global scene also loads wave group 0. That group holds the
+waves of every effect. The driver starts an effect as the game starts the effects of its menus: through the sound
+system, with no position in the game's world. Some effects ask the game about its state. The effects of the ship and the
+pod ask whether the debt is paid. The driver gives them the game's play data with every flag clear. That is the state at
+the start of the story. The effects of the captains' marching horns ask for the horn's place in its tune and for the
+wait between its notes. The driver's horns start at the tune's beginning, with the shortest wait that the game sets: the
+wait for a stick tilted all the way.
+
+Pac-Man Vs.'s driver is `driver/pacman_vs.c`. The game plays its sound through a thin layer in its code over JAudio1's
+`JAIBasic`. The driver sets up the game's heaps and the video interface. The game runs its other steps on its task
+thread. The driver does the same. The game's reader of disc files stops on a thread whose priority number is below 17.
+The steps set up the disc, the ARAM manager, the start-up archive, the sequence archive and the sound library. The sound
+library loads both of the game's wave systems and starts the effects sequence. The driver then starts the effect through
+the game's layer without a position. From then on the driver calls the layer's frame work once a frame.
+
+The Legend of Zelda: Collector's Edition's driver is `driver/collectors_edition.c`. It covers the disc's menu. The
+driver sets up the video interface, JSystem's heaps and ARAM manager, and the menu's audio heap. The driver mounts the
+sequence archive and reads the start-up archive. The menu's loader thread does the same. The menu's audio set-up then
+reads the start-up archive into the sound library and loads the wave archive that the start-up archive marks. The set-up
+returns the sound manager. The driver waits until the wave archive is in ARAM. Then the driver starts the sound through
+the sound manager without a position. The menu starts its effects that way. From then on the driver calls the sound
+manager's frame work once a frame.
 
 Its parameter block is at **0x81700010**. The block's words are big-endian:
 
@@ -187,8 +274,21 @@ The Wind Waker's driver has a wave list. An entry gives a wave system's number i
 system in its low 16 bits. The driver skips a wave system that the sound library has loaded already. Each of the
 game's wave systems has one group.
 
+Pikmin 2's driver has a wave list too. Its entries have the same layout. The game has one wave system, with 49 groups.
+Group 0 holds the effects. The sound system loads it at start-up, and the driver skips it. A scene loads at most two
+other groups.
+
 Mario Golf's driver doesn't use the handle. The top byte of a Mario Golf sound ID gives the table, and its low 16 bits
-give the song's number in that table. Table 0 holds the songs, and table 1 the jingles.
+give the song's number in that table. Table 0 holds the songs, and table 1 the jingles. Mario Power Tennis has only
+table 0. It holds the jingles too. The driver plays them as songs.
+
+WarioWare's driver doesn't use the handle either. A WarioWare sound ID is MusyX's song ID: the song's MusyX song
+group in the top byte and its number in the low 16 bits.
+
+The game starts its music by the sequence's file name. A Pikmin 2 sound ID is 0x80000000 plus the piece's number in the
+driver's table of pieces. The table gives each piece's file, how the game makes the piece's object, the conductor of a
+cave's music, the object's sound information, and the part at which a boss's music starts. An effect's sound ID is its
+ID in the sound table (see "Ripping").
 
 A `.minigcsf` patches the sound ID: a 4-byte `MEM` chunk at 0x8170001C. For a driver with a wave list, it also patches
 the list: a `MEM` chunk at 0x81700024 with the number of waves and the waves. A sequence that no sound plays also
@@ -220,37 +320,54 @@ before the fade.
 
 `gcsfrip` builds sets from a GameCube disc image or an extracted disc. A game requires a driver profile. Profiles
 (function addresses) are specific to each game and version. They're matched by game ID and the SHA-1 of `main.dol`.
-Version 1 supports The Legend of Zelda: Four Swords Adventures (USA) and its Japanese release, The Legend of Zelda:
-Four Swords Plus, The Legend of Zelda: Twilight Princess (USA) and The Legend of Zelda: The Wind Waker (USA). It also
-supports Mario Golf: Toadstool Tour (USA).
+Version 1 supports The Legend of Zelda: Four Swords Adventures (USA) and its Japanese release, The Legend of Zelda: Four
+Swords Plus, The Legend of Zelda: Twilight Princess (USA), The Legend of Zelda: The Wind Waker (USA), Luigi's Mansion
+(USA), Super Mario Sunshine (USA), Pikmin (USA), Donkey Kong Jungle Beat (USA) and Mario Kart: Double Dash!! (USA). It
+also supports Mario Golf: Toadstool Tour (USA), Mario Power Tennis (USA), WarioWare, Inc.: Mega Party Game$! (USA),
+Pikmin 2 (USA), Pac-Man Vs. (USA) and the menu of The Legend of Zelda: Collector's Edition (USA).
 
 The `.gcsflib` contains:
 
 - the sections of the game's `main.dol`, with `main` patched to branch to the driver, and the profile's other patches
-  (Mario Golf's `ClearArena` returns at once);
+  (they skip the clear of the OS's arena: Mario Golf's `ClearArena` and the same code inside Mario Power Tennis's
+  `OSInit`);
 - the driver and its parameter block with the game profile;
 - for a JAudio game, the disc's header (`sys/boot.bin`), the sound library's start-up archive (a BAA, or an AAF in The
-  Wind Waker), the sequence archive, and wave archives (`.aw`), as `FILE` chunks. For Mario Golf, the disc's header, the
-  files of its two MusyX sound groups and every song's file (an SNG), as `FILE` chunks;
+  Wind Waker, Luigi's Mansion, Super Mario Sunshine, Pikmin 2 and Pac-Man Vs.), the sequence archive if the game has
+  one, the game's other sound files (Donkey Kong Jungle Beat's chord archive and chord database), and wave archives
+  (`.aw`), as `FILE` chunks. Super Mario Sunshine keeps its start-up archive, `msound.aaf`, in `data/nintendo.szs`, an
+  archive compressed with Yaz0. The library holds it unpacked, as `AudioRes/mSound.aaf`. The sound library reads that
+  file when the game hands it no archive. Pikmin has no start-up archive. Its library holds the disc's header, the bank
+  file (`pikibank.bx`), the sequence archive (`pikiseq.arc`) and every wave archive that the bank file's wave systems
+  name. Pikmin 2's library also holds the other files that the game's sound layer reads: the conductors
+  (`Conductor.arc`), `Key.arc`, the lists of music and streams, and the track maps. For Mario Golf and Mario Power
+  Tennis, the disc's header, the files of the game's two MusyX sound groups and every song's file (an SNG), as `FILE`
+  chunks;
 - a process descriptor.
 
 The wave archives are every one that the start-up archive's wave systems name, unless the game loads its wave groups as
-its scenes require them. Twilight Princess and The Wind Waker do. The Wind Waker's library also holds the archives that
-the sound library loads at start-up. A wave system lists a wave bank's waves in groups, and each group is one wave
-archive. A wave can be in several groups. For such a game, the library holds the archives of the groups that the
-rip's sounds use, and each `.minigcsf` lists its sound's groups (see "Wave groups").
+its scenes require them. Twilight Princess, The Wind Waker, Super Mario Sunshine, Donkey Kong Jungle Beat and Pikmin 2
+do. The Wind Waker's and Super Mario Sunshine's libraries also hold the archives that the sound library loads at
+start-up, and Pikmin 2's holds group 0's. A wave system lists a wave bank's waves in groups, and each group is one wave
+archive. A wave can be in several groups. For such a game, the library holds the archives of the groups that the rip's
+sounds use, and each `.minigcsf` lists its sound's groups (see "Wave groups").
 
 Each `.minigcsf` selects one sound by its JAudio sound ID. The sound table in the start-up archive lists the sounds and
-names them. In a BAA's table, a sound's ID gives its section in the top byte, its group in the next byte and its
-index in the low 16 bits. `--bgm` selects the sounds of the section named BGM. `--only` selects the sounds whose names
-match a regular expression.
+names them. In a BAA's table, a sound's ID gives its section in the top byte, its group in the next byte and its index
+in the low 16 bits. `--bgm` selects the sounds of the section named BGM. Mario Kart: Double Dash!! names it TYPE_BGM.
+`--only` selects the sounds whose names match a regular expression.
 
 The Wind Waker's start-up archive is JAudio1's AAF. Its sound table lists the effects in categories, then the music. It
 names no sound. An effect is named after its category and index, for example `se4-0123`. A piece of music is named after
 its file in the sequence archive. An effect's ID gives its category in bits 12 to 19 and its index in the low 10 bits.
 Its bit 11 is set. The game sets that bit for most effects. With it, the sound library plays the effect to its end. A
 piece of music's ID is 0x80000000 plus its index. The table's first piece is the effects sequence. The sound library
-plays it all along. The ripper leaves it out.
+plays it all along. The ripper leaves it out. Luigi's Mansion's start-up archive is an AAF too, and its sounds follow
+the same rules. So do Super Mario Sunshine's, but that game names its sounds in `AudioRes/mSound.asn`: a 16-byte header,
+then 32 bytes for each name, with the name in up to 28 bytes and then a word. The first 18 name the sound table's
+categories. Each one after them names a sound, and its word is the sound's ID. A rip takes those names, for example
+`MSD_BGM_DOLPIC`. The table gives a piece of music the ID 0x80010000 plus its index, and the driver starts it by that
+ID.
 
 Some of The Wind Waker's effects make no sound in a rip, and the ripper skips them. Most are empty: their code
 returns at once, and the game plays nothing for them either. 34 others read a port that the game sets when it starts
@@ -263,22 +380,88 @@ the effect, and they play nothing while the port holds 0:
 - **Port 9** holds a value that the game gives the effect. These effects read it: se3-0049 to 0050, se4-0254 to 0255
   and se4-0327.
 
+Donkey Kong Jungle Beat has effects like these too. 133 are empty. 68 read port 0xb, and some of them also ports 0xc to
+0xf. Most take the key of a note from those ports. They play nothing while port 0xb holds 0, and the driver leaves it
+0. Two more make no sound in a rip. `gcsfrip` names each effect that it skips.
+
+Mario Kart: Double Dash!! keeps its music's sequences in the start-up archive. It has no sequence archive. The ripper
+skips 882 of its effects. 872 are voices. Their waves are in three more start-up archives inside the first one. The game
+loads one of those at a time. A rip loads none of them. 8 more effects have a volume of 0 in the sound table. 2 are
+empty.
+
 The sequence archive can hold sequences that no sound of the table plays. The game never plays them. The ripper rips
 each one after the table's sounds, as music, named after its file without the extension. Its `.minigcsf` selects the
 table's first sound that plays a file of the sequence archive. It also holds a `FILE` chunk with a copy of the start-up
 archive. The copy replaces the library's. In the copy, that sound plays the sequence instead, at the volume that most of
 the table's music has.
 
-The sound table lays out a sound's data in one of two ways. A type with bit 0x40 set has the later layout (Twilight
-Princess). The data's second byte is the sound's volume, and its 16 bits at +2 give a resource. A sound of type 0x60
-to 0x6f plays the sequence archive's file with that id. In the earlier layout (Four Swords Adventures), the data's
-third byte is the volume. A sound of type 0x11 plays a file of the sequence archive, and the low 16 bits of its data's
-word at +8 give the file's id. An AAF's entry gives the file's id at +6 and the volume at +0xc. The Wind Waker's table
-plays every file of its sequence archive. A sequence archive can be compressed with Yaz0. Twilight Princess's is.
+The sound table lays out a sound's data in one of three ways. A type with bit 0x40 set has the later layout (Twilight
+Princess). The data's second byte is the sound's volume, and its 16 bits at +2 give a resource. A sound of type 0x60 to
+0x6f plays the sequence archive's file with that id. In the earlier layout (Four Swords Adventures), the data's third
+byte is the volume. A sound of type 0x11 plays a file of the sequence archive, and the low 16 bits of its data's word at
++8 give the file's id. An AAF's entry gives the file's id at +6 and the volume at +0xc. That holds when bit 0 of the
+table's second byte, the music's format, is set. The Wind Waker's table sets it. Without the bit, a piece of music plays
+the file whose id is its index, as in Luigi's Mansion. The Wind Waker's table plays every file of its sequence archive.
+A sequence archive can be compressed with Yaz0. Twilight Princess's is. So can a start-up archive. Donkey Kong Jungle
+Beat's is (`Donkey.szs`). Luigi's Mansion and Super Mario Sunshine keep their sequences in one file without an archive's
+directory. A block of the AAF (chunk type 4, `BARC`) lists each sequence's name, offset and size in that file. The first
+layout (Mario Kart: Double Dash!!) came before the other two. Mario Kart: Double Dash!!'s profile selects it. A sound of
+type 0x10 plays a sequence of the start-up archive's sequence collection. Type 0x20 plays the start-up archive's
+sequence block with the sound's ID. Type 0x30 plays a stream. The data's ninth byte is the volume.
 
-Mario Golf's code lists its songs in two tables: 38 songs and 9 jingles. Each entry names the song's file. A `.minigcsf`
-selects a song by its table and number (see "Driver"). `--bgm` takes every song and jingle. A song's name is its file's
-name without the extension.
+Mario Golf's code lists its songs in two tables: 38 songs and 9 jingles. Mario Power Tennis's code lists 111 songs and
+jingles in one table. Each entry names the song's file. A `.minigcsf` selects a song by its table and number (see
+"Driver"). `--bgm` takes every song and jingle. A song's name is its file's name without the extension.
+
+Pikmin's code holds the index of its sequences: a BARC of 22 entries that gives each sequence's name and its offset and
+size in `pikiseq.arc`. The first entry is the effects sequence, and the second plays the system's events. Five entries
+are empty. The other 15 are pieces of music. A `.minigcsf` selects a sound by its ID: 0x80000000 | group << 24 | wave
+system << 16 | part << 8 | piece. The piece is the sequence's number in the index. The driver loads the group of the
+wave system that the ID gives. A piece's ID gives part 0 and group 0 of the wave system with the piece's number. The
+piece's name is its file's name without the extension, for example `select`. `--bgm` takes every piece. One piece plays
+an empty bank. That piece makes no sound, and the ripper skips it. The music of the game's cutscenes is one piece in
+parts, `demobgm`. The ripper lists the parts that the game plays in place of that piece. A part's ID gives the part and
+the wave group that the game loads for it. A part's name is the piece's name, a hyphen and the part's number, for
+example `demobgm-5`. The game plays 13 more pieces, most of them in cutscenes, from streams (`.stx` files). The game's
+sound effects aren't ripped.
+
+WarioWare, Inc.: Mega Party Game$!'s code names its music in the table of its Sound Room: 231 pieces. A `.minigcsf`
+selects a piece by its MusyX song ID (see "Driver"). Each piece keeps the name that the Sound Room gives it. `--bgm`
+takes every piece. Two of the pieces only count beats for the game. They have no notes, and the ripper skips them. The
+game plays its sound effects as MusyX songs too. They aren't ripped. For WarioWare, the `.gcsflib` holds the disc's
+header and the game's five sound files as `FILE` chunks: MusyX's project, pool, sample directory and samples, and one
+file with every song.
+
+Pikmin 2's start-up archive is an AAF too. Its sound table lists the effects sequence and 24 other sequences. The game's
+sound layer starts each piece of music by its file. The ripper leaves out the table's sequences. It takes every file of
+the sequence archive but the effects sequence, `se.bms`: 48 pieces. A piece is named after its file without the
+extension. The game never plays 14 of them. One of those, `result`, makes no sound, and the ripper skips it. `--bgm`
+takes every piece. The game picks a conductor for each floor of a cave. The conductor picks the phrases that the tracks
+of the cave's music play, at random. A rip plays a cave's piece with the first conductor of its family, such as
+`caveconc_00_0.cnd` for `caveconc`. The game's code names that conductor itself, for a boss's floor. A cave's piece
+never repeats. It plays to the ripper's limit of 600 seconds, then fades (see "Lengths").
+
+Pikmin 2's sound table lists 1,038 effects in categories 0 to 5. Their IDs follow The Wind Waker's rules. The game names
+its sounds in `AudioRes/PSound.asn`: a 16-byte header, then 32 bytes for each name, with the name in up to 28 bytes and
+then a word. The first 18 name the sound table's categories. Each one after them names a sound, and its word is the
+sound's ID. A rip of an effect takes that name, for example `PSSE_SY_MENU_CURSOR`. The ripper lists the pieces first,
+then the effects. Four effects make no sound, and the ripper skips them. The code of `PSSE_PL_DEMOE00_POD02` returns at
+once. The other three play only some of the times that the game starts them: `PSSE_EN_FROG_VOICE`,
+`PSSE_EN_OOPAN_BOUND2` and `PSSE_EN_OOPAN_VOICE_DOWN`. Each one draws a random number and ends at once on some draws.
+The sound library's random numbers start from a fixed seed. In a rip, each of the three draws a number that ends it.
+
+Pac-Man Vs.'s start-up archive is an AAF too. Its sound table lists the effects sequence and 76 effects in categories 0
+to 2. The effects' IDs follow The Wind Waker's rules. The game names none of its sounds. A rip of an effect is named
+after its category and index. 17 effects make no sound. The ripper skips them. The code of 5 returns at once: se0-0000,
+se1-0007, se1-0008, se1-0012 and se1-0013. 11 narration effects play a note that has no sample in the instrument:
+se2-0000, se2-0009, se2-0015, se2-0017, se2-0028 to 0030 and se2-0035 to 0038. The sound table gives se2-0020 a volume
+of 0.
+
+Collector's Edition's menu has a BAA with the later layout. Its sound table lists 23 effects, one piece of music and
+one stream. A rip keeps the table's names, such as `JA_SE_TR_OC_CURSOR_L`. The start-up archive's sequence collection
+(`bsc`) holds the effects' sequences. The sequence archive is compressed with Yaz0. It holds one file, `zeldamain.bms`.
+The piece, `JA_BGM_DUMMY`, plays it. The menu's code never starts the piece. The disc's other programs are out of
+scope: the four games that the disc emulates, and a demo of The Wind Waker.
 
 ### Wave groups
 
@@ -288,7 +471,13 @@ lookups: the bank and the wave's id. It plays the sound as far as the length ana
 lookup counting as a sound. Then it picks groups from the bank's wave system. The group that holds the most of the
 sound's waves comes first, then the group that holds the most of the rest, and so on. Of two groups that hold as many,
 the lower group goes first. The `.minigcsf` lists the groups. The driver loads them before it starts the sound. The
-length analysis then plays the sound with them loaded. The ripper finds the groups with `--no-length` too.
+length analysis then plays the sound with them loaded. The ripper finds the groups with `--no-length` too. Super Mario
+Sunshine's scene groups share some waves, with the same samples, and the game holds one of them in ARAM at a time. Its
+driver loads the first group of the list that the start-up doesn't load.
+
+For a piece of Pikmin 2 that the game plays, the ripper lists the groups that the game's scene loads for the piece
+instead. A note whose wave lies in another group is silent in the game, and in the rip too. Every effect of Pikmin 2
+finds its waves in group 0.
 
 ### Another release's sound files
 
@@ -315,9 +504,9 @@ Each file's data starts on a 32-byte boundary.
 
 The ripper plays each sound in game mode to work out its length. Sound means a sample louder than 8 of 32,767 (-72 dB).
 The ripper watches the sound library's sequence parser. It sees each command that each of the sound's tracks runs. In
-The Wind Waker, the effects sequence plays all along. Each effect plays in one of its tracks. There the ripper
-takes only the sound's root track and the tracks below it: a piece of music's tracks, or the effect's track and the
-tracks that the effect opens.
+The Wind Waker, Luigi's Mansion, Super Mario Sunshine, Pikmin 2 and Pac-Man Vs., the effects sequence plays all along.
+Each effect plays in one of its tracks. There the ripper takes only the sound's root track and the tracks below it: a
+piece of music's tracks, or the effect's track and the tracks that the effect opens.
 
 - A sound ends when the game releases it. Its notes can sound on after that: the output runs behind the game, and a
   release fades on. A sound that ends plays until half a second after its last sound.
@@ -329,12 +518,27 @@ tracks that the effect opens.
   closes no track. Such a pass only waits, or polls the game with conditional commands. The track idles in that loop.
   A pass that also plays notes counts, whatever it polls. Loops before the first sound don't count either. A loop that
   completes without a sound ends the sound at its last sound instead.
+- A track can run an interrupt. Pikmin 2's root tracks run one every tick. The interrupt's commands count as a
+  subroutine's.
+- In Pikmin 2 and Pac-Man Vs., a track can also idle in a loop inside a subroutine. That holds only when the loop's
+  passes change nothing. Many of Pikmin 2's root tracks call a routine that polls the game once a beat and never
+  returns. The caves' music is the exception. Its conductors pick the phrases at random. A cave's piece never repeats.
+  The analysis counts its root track's polls as moves, and the piece plays to the limit. In one of Pac-Man Vs.'s effects
+  (se1-0006), the effect's track polls in such a routine while a child track loops.
 - The tracks are taken in the order in which they start. A track's loop counts only while each track before it idles,
   has ended, or has run no command for 10 seconds with no ticks left to wait. Many sound effects work this way: the
-  first track polls until the game stops the sound, and another track loops.
+  first track polls until the game stops the sound, and another track loops. In Donkey Kong Jungle Beat, the first track
+  polls in a subroutine. That loop doesn't count. The game's effects that loop therefore play until the 600-second
+  limit. In two of Mario Kart: Double Dash!!'s pieces, a note holds a looping wave while the first tracks wait 133
+  seconds between their jumps back. Those pieces play for 266.665 seconds, two of the first track's loops. 32 of the
+  game's level sounds play until the 600-second limit.
 - A sound holds when one of its tracks idles, every track has settled as above, and for 10 seconds no track has run a
-  command outside the loop it idles in. A note on a looping wave that nothing releases holds like this. A sound that
-  has sounded in the last second loops where it holds, with the fade. Any other sound ended at its last sound.
+  command outside the loop it idles in. A note on a looping wave that nothing releases holds like this. In Luigi's
+  Mansion, a track with at least 0x2000 ticks left to wait has settled too. Some of its effects hold a note with a wait
+  of 16,000 or 32,000 ticks until the game stops them. In Super Mario Sunshine the threshold is 0x7000 ticks. Some of
+  its effects hold a note of 32,767 ticks. In that game, the commands of a track's interrupt routine aren't the
+  track's moves. Some of its effects hold a note while a timer routine polls the game every 5 ticks. A sound that has
+  sounded in the last second loops where it holds, with the fade. Any other sound ended at its last sound.
 - A sound that stays busy without a sound for 180 seconds ended at its last sound.
 - A sound still playing at 600 seconds gets a length of 600 seconds and the fade.
 

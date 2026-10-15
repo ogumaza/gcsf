@@ -1,0 +1,188 @@
+// SPDX-License-Identifier: MIT
+
+/*
+ * GCSF guest driver for Luigi's Mansion. The game's sound library is an early JAudio1, with a sound layer above it
+ * (JAIBasic) and the game's wrapper above that. It's compiled for Gekko and stored in the game's .gcsflib. The player
+ * boots the game's startup code: the OS initialisation and the static constructors. The rip patches the game's main
+ * to branch here.
+ *
+ * The driver calls the game's functions to do what the game's start-up does for sound, without its graphics. The
+ * profile in `driver_params` gives their addresses. The ripper fills in the profile. The steps:
+ *   1. the video interface: its retraces pace the driver as they pace the game's frames;
+ *   2. the disc, with long file names as the disc's bi2.bin allows them, the root heap and the game's heap, and the
+ *      ARAM manager, as the game's main makes them;
+ *   3. the game's sound set-up, with a block of the game's heap for the sound library;
+ *   4. the wave systems of load type 0: the game's start-up loads them before its first frame;
+ *   5. the game's sound frame, once a frame, until the sound library is up and every wave system that stays loaded is
+ *      in ARAM. The sound library loads those of load type 1 by itself once it's up;
+ *   6. the sound: the sound library starts it by its JAudio sound ID, as the game starts its music;
+ *   7. the game's sound frame, once a frame, forever.
+ * `driver_params.status` reports the driver's progress to the player (see docs/gcsf.md).
+ *
+ * Build with `driver/build.py luigis_mansion` (clang). The result is committed as
+ * src/rip/driver_luigis_mansion_blob.h. Building GCSF itself requires no PowerPC toolchain.
+ */
+
+typedef unsigned int u32;
+typedef int s32;
+
+#define PARAMS_MAGIC 0x47435344u /* 'GCSD' */
+#define PARAMS_VERSION 1u
+
+/* Values of Params.status. They're macros because an enumerator can't hold 0x80000000 before C23. */
+#define STATUS_BOOTING 0u
+#define STATUS_PLAYING 1u
+#define STATUS_FINISHED 2u
+#define STATUS_ERROR 0x80000000u /* | step number */
+
+/* The frames that the driver waits for the sound library and its waves before it gives up. */
+#define SETUP_FRAMES 600u
+
+/* The sound library's state once it's up and its effects sequence plays. */
+#define STATE_RUNNING 4u
+
+/* The load type of a wave system that a scene loads. The others stay loaded. */
+#define WAVES_FOR_SCENE 2u
+
+struct Params {
+    u32 magic;
+    u32 version;
+    u32 status;   /* written by the driver */
+    u32 sound_id; /* the JAudio sound ID to play; patched by each .minigcsf */
+    u32 sound;    /* the sound's JAISound handle (written by the game): its JAISound while it plays, and 0 after */
+    /* the game profile: the sizes that the game's main gives */
+    u32 frame_retraces;  /* video retraces between the game's frames */
+    u32 max_heaps;       /* the root heap's maximum of standard heaps */
+    u32 game_heap_size;  /* the game's heap, from the root heap */
+    u32 aram_audio_size; /* ARAM for the sound library */
+    u32 aram_graph_size; /* ARAM for graphics */
+    u32 aram_priorities; /* the ARAM manager's three thread priorities, a byte each, from bit 16 down */
+    u32 audio_heap_size; /* the block of the game's heap for the sound library */
+    u32 audio_heap_alignment;
+    /* the game profile: the addresses of the game's functions and variables */
+    u32 vi_init;             /* void VIInit(void) */
+    u32 vi_wait_for_retrace; /* void VIWaitForRetrace(void) */
+    u32 dvd_init;            /* void DVDInit(void) */
+    u32 long_file_names;     /* the OS's flag that allows file names longer than 8.3 */
+    u32 create_root_heap;    /* JKRExpHeap* JKRExpHeap::createRoot(int max_heaps, bool) */
+    u32 create_exp_heap;     /* JKRExpHeap* JKRExpHeap::create(u32 size, JKRHeap* parent, bool) */
+    u32 become_system_heap;  /* JKRHeap* JKRHeap::becomeSystemHeap() */
+    u32 become_current_heap; /* JKRHeap* JKRHeap::becomeCurrentHeap() */
+    u32 heap_alloc;          /* void* JKRHeap::alloc(u32 size, int alignment, JKRHeap*) */
+    u32 create_aram;         /* JKRAram* JKRAram::create(u32 audio, u32 graph, s32, s32, s32) */
+    u32 audio_setup;         /* the game's sound set-up: (heap block, its size, ARAM for the sound library) */
+    u32 load_staying_waves;  /* the game's call that loads the wave systems of load type 0 */
+    u32 audio_frame;         /* the game's sound frame */
+    u32 sound_library;       /* the variable that holds the sound library (a JAIBasic) */
+    u32 state_offset;        /* the sound library's state block, whose byte +1 is the state */
+    u32 wave_systems_offset; /* the sound library's list of wave systems: pointer, size, load type */
+    u32 last_load_offset;    /* the sound library's word that the last finished wave load sets */
+    u32 start_sound;         /* void JAIBasic::startSoundVec(u32 id, JAISound**, Vec*, u32, u8) */
+};
+
+__attribute__((section(".params"), used)) volatile struct Params driver_params = {
+    .magic = PARAMS_MAGIC,
+    .version = PARAMS_VERSION,
+};
+
+typedef u32 (*fn0)(void);
+typedef u32 (*fn1)(u32);
+typedef u32 (*fn2)(u32, u32);
+typedef u32 (*fn3)(u32, u32, u32);
+typedef u32 (*fn5)(u32, u32, u32, u32, u32);
+typedef u32 (*fn6)(u32, u32, u32, u32, u32, u32);
+
+static u32 word(u32 address) {
+    return *(volatile u32*)address;
+}
+
+static unsigned char byte(u32 address) {
+    return *(volatile unsigned char*)address;
+}
+
+static void wait_frame(void) {
+    for (u32 i = 0; i < driver_params.frame_retraces; i++)
+        ((fn0)driver_params.vi_wait_for_retrace)();
+}
+
+__attribute__((noreturn)) static void fail(u32 step) {
+    driver_params.status = STATUS_ERROR | step;
+    for (;;)
+        wait_frame();
+}
+
+/* Whether the sound library is up, and every wave system that stays loaded is in ARAM. The library loads them in the
+   order of its list, one at a time, and each load that finishes sets the library's last load to the system's number
+   in its high 16 bits. */
+static int sound_library_ready(void) {
+    volatile struct Params* p = &driver_params;
+    const u32 library = word(p->sound_library);
+    const u32 state = library ? word(library + p->state_offset) : 0;
+    if (!state || byte(state + 1) < STATE_RUNNING)
+        return 0;
+    const u32 systems = word(library + p->wave_systems_offset);
+    u32 last = 0xffffffffu;
+    for (u32 i = 0; systems && word(systems + i * 12); i++) {
+        if (word(systems + i * 12 + 8) != WAVES_FOR_SCENE)
+            last = i;
+    }
+    return last == 0xffffffffu || word(library + p->last_load_offset) == last << 16;
+}
+
+__attribute__((noreturn)) void driver_main(void) {
+    volatile struct Params* p = &driver_params;
+    if (p->magic != PARAMS_MAGIC || p->version != PARAMS_VERSION)
+        fail(1);
+
+    /* The video interface, for the retraces, and the disc. The game's OS reads the flag for long file names from the
+       disc's bi2.bin, which the apploader leaves in memory. GCSF's machine leaves none. The game's disc sets the flag,
+       and its sound files have long names. */
+    ((fn0)p->vi_init)();
+    *(volatile u32*)p->long_file_names = 1;
+    ((fn0)p->dvd_init)();
+
+    /* The game's main: the root heap, the game's heap as the system heap and the current heap, and the ARAM
+       manager. */
+    const u32 root = ((fn2)p->create_root_heap)(p->max_heaps, 0);
+    if (!root)
+        fail(2);
+    const u32 game = ((fn3)p->create_exp_heap)(p->game_heap_size, root, 0);
+    if (!game)
+        fail(2);
+    ((fn1)p->become_system_heap)(game);
+    ((fn1)p->become_current_heap)(game);
+    ((fn5)p->create_aram)(p->aram_audio_size, p->aram_graph_size, (p->aram_priorities >> 16) & 0xff,
+                          (p->aram_priorities >> 8) & 0xff, p->aram_priorities & 0xff);
+
+    /* The game's sound set-up, with its block of the game's heap, and the wave systems of load type 0. */
+    const u32 block = ((fn3)p->heap_alloc)(p->audio_heap_size, p->audio_heap_alignment, game);
+    if (!block)
+        fail(3);
+    ((fn3)p->audio_setup)(block, p->audio_heap_size, p->aram_audio_size);
+    ((fn0)p->load_staying_waves)();
+
+    /* The game's sound frame until the sound library is up and its waves are in ARAM. */
+    for (u32 frames = 0; !sound_library_ready(); frames++) {
+        if (frames > SETUP_FRAMES)
+            fail(4);
+        ((fn0)p->audio_frame)();
+        wait_frame();
+    }
+
+    /* The sound, from no position, as the game starts its music. */
+    ((fn6)p->start_sound)(word(p->sound_library), p->sound_id, (u32)&p->sound, 0, 0, 4);
+    if (!p->sound)
+        fail(5);
+    p->status = STATUS_PLAYING;
+
+    for (;;) {
+        ((fn0)p->audio_frame)();
+        if (p->status == STATUS_PLAYING && p->sound == 0)
+            p->status = STATUS_FINISHED;
+        wait_frame();
+    }
+}
+
+__attribute__((naked, section(".text.entry"))) void driver_entry(void) {
+    __asm__ volatile("b driver_main");
+}

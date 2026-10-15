@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 
 // Tests of the sequences that no sound plays (rip::UnplayedSequences), with made-up start-up archives of both kinds
-// (BAA and AAF) and a made-up sequence archive.
+// (BAA and AAF) and a made-up sequence archive. Also the sounds of a start-up archive whose sound table has the first
+// layouts (Mario Kart: Double Dash!!).
 
 #include <algorithm>
 #include <cstddef>
@@ -149,6 +150,23 @@ void TestUnplayed(uint8_t type)
               compressed[1].sound_archive == unplayed[1].sound_archive,
           "a sequence archive compressed with Yaz0");
 
+    // A start-up archive compressed with Yaz0 lists the same sounds, and the copies of it are decoded. Donkey Kong
+    // Jungle Beat compresses its start-up archive.
+    const std::vector<uint8_t> compressed_baa = Yaz0Bytes(baa);
+    const std::vector<jaudio::SoundEntry> same = rip::ListSounds(Baa(), compressed_baa, arc);
+    const std::vector<rip::UnplayedSequence> decoded = rip::UnplayedSequences(Baa(), compressed_baa, same, arc);
+
+    Check(same.size() == 3 && same[2].resource == 3 && same[2].offset == sounds[2].offset,
+          "a start-up archive compressed with Yaz0 lists the same sounds");
+    Check(decoded.size() == 2 && decoded[0].sound_archive == unplayed[0].sound_archive &&
+              decoded[1].sound_archive == unplayed[1].sound_archive,
+          "the copies of a compressed start-up archive are decoded");
+
+    const std::vector<uint8_t> cut_baa(compressed_baa.begin(), compressed_baa.end() - 16);
+
+    Check(!ErrorOf([&] { rip::UnplayedSequences(Baa(), cut_baa, sounds, arc); }).empty(),
+          "a damaged compressed start-up archive is refused");
+
     // A table whose sounds play no file of the archive offers nothing.
     Check(rip::UnplayedSequences(Baa(), baa, {}, arc).empty(), "no sound plays a file of the archive");
 
@@ -197,6 +215,42 @@ void TestUnplayedAaf()
           "the start-up archive plays the file at the volume that most music has");
 }
 
+// A sound table with the first layouts: an effect, a piece of music in a section named TYPE_BGM, and a stream.
+void TestFirstLayouts()
+{
+    const std::vector<uint8_t> baa =
+        files::StartUpArchive(files::BankV0File(0, 100), {},
+                              files::SoundTable({{"TYPE_SE", {{"SE_SYSTEM", {{0x10, 90, 0, "SE_CURSOR"}}}}},
+                                                 {"TYPE_BGM", {{"MAIN_BGM", {{0x20, 80, 0, "BGM_TITLE"}}}}},
+                                                 {"TYPE_STREAM", {{"MAIN_BGM", {{0x30, 70, 0, "STRM_GOAL"}}}}}},
+                                                true));
+    rip::GameProfile profile = Baa();
+    profile.sequence_archive = nullptr;
+    profile.first_layouts = true;
+
+    const std::vector<jaudio::SoundEntry> sounds = rip::ListSounds(profile, baa, {});
+    Check(sounds.size() == 3, "three sounds with the first layouts");
+    if (sounds.size() != 3)
+    {
+        return;
+    }
+
+    const rip::Sound effect = rip::SoundOf(sounds[0]);
+    const rip::Sound music = rip::SoundOf(sounds[1]);
+    const rip::Sound stream = rip::SoundOf(sounds[2]);
+    Check(!effect.music && !effect.stream && sounds[0].volume == 90, "an effect");
+    Check(music.music && !music.stream && sounds[1].volume == 80 &&
+              sounds[1].source == jaudio::SoundEntry::Source::kBlock && sounds[1].resource == 0x01000000,
+          "music in the section TYPE_BGM plays its sequence block");
+    Check(stream.stream && !stream.music && sounds[2].volume == 70, "a stream");
+
+    // A profile without the first layouts reads the volume where the earlier layout keeps it.
+    profile.first_layouts = false;
+    const std::vector<jaudio::SoundEntry> earlier = rip::ListSounds(profile, baa, {});
+    Check(earlier.size() == 3 && earlier[0].volume == 0 && !rip::SoundOf(earlier[2]).stream,
+          "the first layouts belong to the profile");
+}
+
 } // namespace
 
 int main()
@@ -204,6 +258,7 @@ int main()
     TestUnplayed(0x11);
     TestUnplayed(0x60);
     TestUnplayedAaf();
+    TestFirstLayouts();
 
     return xsflib::testing::Summary("unplayed");
 }
