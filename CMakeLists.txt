@@ -3,7 +3,7 @@
 cmake_minimum_required(VERSION 3.20)
 # Shared version for gcsfrip, gcsfplay, the foobar2000 component, the XMPlay plugin, Windows file properties and macOS
 # bundles (xsflib_add_version below). For a release, update it here and add notes in docs/release-notes/.
-project(gcsf VERSION 1.4.0 LANGUAGES C CXX)
+project(gcsf VERSION 1.5.0 LANGUAGES C CXX)
 
 # xsflib, a library for players and rippers of the PSF family, is the submodule externals/xsflib. Its
 # XsflibProject.cmake sets what a project built on it starts with: C++20, a release build by default, the static C
@@ -68,6 +68,7 @@ add_library(gcsf_rip STATIC
     src/rip/driver_jungle_beat_blob.h
     src/rip/driver_luigis_mansion_blob.h
     src/rip/driver_mario_golf_blob.h
+    src/rip/driver_musyx_blob.h
     src/rip/driver_pacman_vs_blob.h
     src/rip/driver_pikmin2_blob.h
     src/rip/driver_pikmin_blob.h
@@ -75,6 +76,10 @@ add_library(gcsf_rip STATIC
     src/rip/driver_twilight_princess_blob.h
     src/rip/driver_warioware_blob.h
     src/rip/driver_zel_blob.h
+    src/rip/fsys.cpp
+    src/rip/fsys.h
+    src/rip/musyx.cpp
+    src/rip/musyx.h
     src/rip/rip.cpp
     src/rip/rip.h
 )
@@ -116,18 +121,25 @@ if (XMPLAY_SDK_DIR)
     add_subdirectory(plugins/xmplay)
 endif()
 
-enable_testing()
+# The tests. -DGCSF_TESTS=OFF leaves them out of a build that only makes the programs and plugins, such as CI's
+# macOS job.
+option(GCSF_TESTS "Build GCSF's tests and register them with CTest." ON)
+if (GCSF_TESTS)
+    enable_testing()
 
-# The unit tests: gcsf_<name>_test from tests/<name>_test.cpp, registered as gcsf_<name>.
-xsflib_add_project_test(gcsf format gcsf_format)
-xsflib_add_project_test(gcsf mini gcsf_rip)
-xsflib_add_project_test(gcsf sound_files gcsf_rip ntdlib::testing)
-xsflib_add_project_test(gcsf unplayed gcsf_rip ntdlib::testing)
+    # The unit tests: gcsf_<name>_test from tests/<name>_test.cpp, registered as gcsf_<name>.
+    xsflib_add_project_test(gcsf format gcsf_format)
+    xsflib_add_project_test(gcsf fsys gcsf_rip)
+    xsflib_add_project_test(gcsf mini gcsf_rip)
+    xsflib_add_project_test(gcsf musyx gcsf_rip)
+    xsflib_add_project_test(gcsf sound_files gcsf_rip ntdlib::testing)
+    xsflib_add_project_test(gcsf unplayed gcsf_rip ntdlib::testing)
 
-# The tools report the version they were built as.
-string(REPLACE "." "\\." version_pattern ${gcsf_VERSION})
-add_test(NAME version_gcsfrip COMMAND gcsfrip --version)
-set_tests_properties(version_gcsfrip PROPERTIES PASS_REGULAR_EXPRESSION "^gcsfrip ${version_pattern}[\r\n]*$")
+    # The tools report the version they were built as.
+    string(REPLACE "." "\\." version_pattern ${gcsf_VERSION})
+    add_test(NAME version_gcsfrip COMMAND gcsfrip --version)
+    set_tests_properties(version_gcsfrip PROPERTIES PASS_REGULAR_EXPRESSION "^gcsfrip ${version_pattern}[\r\n]*$")
 
-# Load local_tests.cmake from each immediate subdirectory to register tests that use locally supplied files.
-xsflib_include_local_tests()
+    # Load local_tests.cmake from each immediate subdirectory to register tests that use locally supplied files.
+    xsflib_include_local_tests()
+endif()

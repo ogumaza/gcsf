@@ -273,6 +273,13 @@ int RipInput(const std::string& input, const Options& o, xsflib::cli::FileNameRe
         return 1;
     }
 
+    // A profile can rip a program from a TGC on the disc. The program then takes the disc's place.
+    if (auto err = rip::OpenProgram(game))
+    {
+        std::fprintf(stderr, "error: %s: %s\n", input.c_str(), err->c_str());
+        return 1;
+    }
+
     const rip::GameProfile* profile = rip::FindProfile(game);
     if (!profile)
     {
@@ -500,8 +507,15 @@ int RipInput(const std::string& input, const Options& o, xsflib::cli::FileNameRe
     std::error_code ec;
     fs::create_directories(out_dir, ec);
     xsflib::rip::FileNames& names = xsflib::cli::NamesIn(registries, out_dir, ".gcsflib", ".minigcsf");
-    const std::string lib_name =
-        names.Library(profile->library_name ? profile->library_name : fs::path(profile->sound_archive).stem().string());
+    std::string library_base =
+        profile->library_name ? profile->library_name : fs::path(profile->sound_archive).stem().string();
+    if (profile->library_per_disc && game.boot.size() > 6)
+    {
+        // The disc's number is byte 6 of its header, from 0.
+        library_base += "Disc" + std::to_string(game.boot[6] + 1);
+    }
+
+    const std::string lib_name = names.Library(library_base);
     if (!xsflib::rip::WriteFile(out_dir / xsflib::PathFromUtf8(lib_name), *library))
     {
         std::fprintf(stderr, "error: can't write %s\n", xsflib::Utf8(out_dir / xsflib::PathFromUtf8(lib_name)).c_str());

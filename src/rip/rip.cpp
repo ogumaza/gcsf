@@ -11,6 +11,7 @@
 #include <functional>
 #include <iterator>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <span>
@@ -21,6 +22,8 @@
 #include <utility>
 #include <vector>
 
+#include "ntdlib/disc/compression.h"
+#include "ntdlib/disc/header.h"
 #include "ntdlib/dol.h"
 #include "ntdlib/flipper/z2_params.h"
 #include "ntdlib/jaudio/aaf.h"
@@ -37,13 +40,16 @@
 #include "gc/system.h"
 #include "gcsf/format.h"
 #include "gcsf/player.h"
+#include "rip/driver_animal_crossing_blob.h"
 #include "rip/driver_blob.h"
 #include "rip/driver_collectors_edition_blob.h"
+#include "rip/driver_colosseum_bonus_blob.h"
 #include "rip/driver_crystal_chronicles_blob.h"
 #include "rip/driver_double_dash_blob.h"
 #include "rip/driver_jungle_beat_blob.h"
 #include "rip/driver_luigis_mansion_blob.h"
 #include "rip/driver_mario_golf_blob.h"
+#include "rip/driver_musyx_blob.h"
 #include "rip/driver_pacman_vs_blob.h"
 #include "rip/driver_pikmin2_blob.h"
 #include "rip/driver_pikmin_blob.h"
@@ -51,6 +57,7 @@
 #include "rip/driver_twilight_princess_blob.h"
 #include "rip/driver_warioware_blob.h"
 #include "rip/driver_zel_blob.h"
+#include "rip/musyx.h"
 
 namespace gcsf::rip
 {
@@ -119,6 +126,14 @@ std::optional<DriverImage> ImageOf(Driver driver)
     case Driver::kCrystalChronicles:
         return DriverImage{crystal_chronicles::kDriverBlob, crystal_chronicles::kDriverBase,
                            crystal_chronicles::kDriverEntry, crystal_chronicles::kDriverParams};
+    case Driver::kAnimalCrossing:
+        return DriverImage{animal_crossing::kDriverBlob, animal_crossing::kDriverBase, animal_crossing::kDriverEntry,
+                           animal_crossing::kDriverParams};
+    case Driver::kColosseumBonus:
+        return DriverImage{colosseum_bonus::kDriverBlob, colosseum_bonus::kDriverBase, colosseum_bonus::kDriverEntry,
+                           colosseum_bonus::kDriverParams};
+    case Driver::kMusyX:
+        return DriverImage{musyx::kDriverBlob, musyx::kDriverBase, musyx::kDriverEntry, musyx::kDriverParams};
     }
 
     return std::nullopt;
@@ -1356,11 +1371,943 @@ const GameProfile kCrystalChroniclesUsa = {
     .red_track_loop = 0x801c6f38,
 };
 
+// Animal Crossing (USA). Its sound library is Nintendo's sound library for the Nintendo 64, ported to the GameCube. The
+// port runs the Nintendo 64's sequence player and synthesis on the CPU, inside an early JAudio1 that mixes their output
+// with the DSP's. The game calls it through C functions (Na_*). The sequences, the banks and the samples are in one
+// file, `audiorom.img`. The sound library reads all of it into ARAM as it starts. The game's main (0x800060F8) sets up
+// the OS, the disc, JSystem and the sound library, and waits until the sound library is up. Then it links the game's
+// module. The module calls Na_GameFrame once a frame, and starts its music with Na_BgmStart. The names and addresses
+// come from the disc's link map of main.dol (static.map). Each address was checked against main.dol's code. The
+// parameters follow driver/animal_crossing.c's Params from frame_retraces.
+//
+// The sound library plays the music in sequence player 1 or 3 and the effects in player 0. A piece of music that plays
+// the hour holds the arrangements for three kinds of weather. The game mutes the channels of the others with masks
+// from the tables BGM_MUTE_TABLE_FINE, _SNOW and _SAKURA. When it rains, the game plays another piece in place of the
+// hour's (see ListSongs).
+const GameProfile kAnimalCrossingUsa = {
+    .name = "Animal Crossing",
+    .game_id = "GAFE01",
+    .dol_sha1 = "2ae8f56e7791d37e165bd5900921f2269f9515bf",
+    .main = 0x800060f8,
+    .driver = Driver::kAnimalCrossing,
+    .library = SoundLibrary::kNintendo64,
+    .sound_archive = "audiorom.img",
+    .params =
+        {
+            2,          // a frame is two retraces
+            3,          // JKRAram's ARInit takes a list of 3 blocks
+            0x800c3140, // nintendo_hi_0, the sound of the start-up screen
+            0x66a0,     // its size, as the game's sound_initial gives it
+            0x80211f90, // AG + 0x3788: the sequence players
+            0x160,      // the size of a player
+            0x80217bc0, // sou_now_bgm_handle: the player that plays the music
+            0x80218361, // sou_bgm_call_buffer: the request to the sound frame
+            0x800788a4, // OSInit
+            0x80079074, // OSInitAlarm
+            0x800850f4, // DVDInit
+            0x800882c8, // VIInit
+            0x80088740, // VIWaitForRetrace
+            0x8008c3cc, // ARInit
+            0x8008cff4, // ARQInit
+            0x80010c8c, // Na_InitAudio
+            0x80010d1c, // Na_GameFrame
+            0x80015548, // Na_CheckNeosBoot
+            0x80011158, // Na_Tenki
+            0x80011170, // Na_BgmStart
+            128,        // the first music disc's piece (Sou_Na_BgmStart)
+            182,        // the last
+            9,          // a hi-fi stereo
+            0x8001405c, // Na_MDPlayerPos
+            0x80015578, // Na_Museum
+            0,          // the sequence player of the effects (the game's SE_GROUP)
+            0x38,       // a player's channels
+            0x800eb670, // sou_trg_se: the slots of the effects that play
+            6,          // the slots
+            0x20,       // a slot's size
+            0x8000c784, // Sou_TrgStart
+            0x800a9838, // SEQ_TABLE
+            92,         // the first parts of Kapp'n's songs (sing_1st_part_bgm_no, in the boat's code)
+            111,        // the last
+            112,        // their second parts (sing_2nd_part_bgm_no)
+            121,        // the last
+            126,        // a piece whose sequence (247) ends at once
+            0x158,      // a sequence player's ports (Nas_GroupSeq)
+        },
+    .library_name = "AnimalCrossing",
+    // __OK: blr. The sound library calls it once the game's sound data is in ARAM. It plays the start-up screen's sound
+    // on the early JAudio1's sequence player: about 7 s of a voice and a chime. The game plays no music over that
+    // sound.
+    .patches = {{0x8000bb84, 0x4e800020}},
+    .music_table = 0x800a9838,    // SEQ_TABLE
+    .sequence_table = 0x800cca40, // AudioseqHeaderStart
+    .n64_effects = 242,           // the sequence that the game's Sou_InitAudio starts in SE_GROUP
+    .n64_effect_banks = 0x188,    // read by the effects channels' scripts
+    .n64_players = 0x80211f90,
+    .n64_player_count = 5,
+    .n64_player_size = 0x160,
+    .n64_read_byte = 0x80029a60,                               // Nas_ReadByteData
+    .n64_command_reads = {0x8002bbfc, 0x8002ad2c, 0x80029dd0}, // in Nas_GroupSeq, Nas_SubSeq and __Command_Seq
+    .n64_flow = 0x80028ec0,                                    // Common_Com
+    .n64_flow_returns = {0x8002bc30, 0x8002adc0, 0x80029e14},
+};
+
+// The Pokémon Colosseum Bonus Disc's download program (USA). The Bonus Disc's menu runs it from a TGC,
+// tgc/pokedownload.tgc. The program sends Jirachi to a Game Boy Advance. Its sound library is HAL Laboratory's: a
+// synthesizer on the SDK's AX, and a driver above it that runs a script for each effect. The program streams its
+// music. It plays five effects from pm6fgm.sem, with their samples in pm6fgm.ssm, and pm6fgm.h names them. The TGC
+// also holds sfxsem.sem and sfxmain.ssm. No code of the program names them. The SDK's functions were found by their
+// version and assertion strings, and the sound library's by the program's calls. Each address was checked against
+// the program's code. The parameters follow driver/colosseum_bonus.c's Params from vi_init.
+const GameProfile kColosseumBonusUsa = {
+    .name = "Pokémon Colosseum Bonus Disc",
+    .game_id = "PC6E01",
+    .dol_sha1 = "d9da26b12dfc3b6518c50f79988c41a864b227b7",
+    .main = 0x8001115c,
+    .driver = Driver::kColosseumBonus,
+    .library = SoundLibrary::kHal,
+    .sound_archive = "pm6fgm.sem",
+    .sound_names = "pm6fgm.h",
+    .other_sound_files = {"pm6fgm.ssm"},
+    .params =
+        {
+            0x80041244, // VIInit
+            0x800416f4, // VIWaitForRetrace
+            0x80042fbc, // AIInit
+            0x800436d8, // ARInit
+            0x80045208, // ARQInit
+            0x80038314, // OSGetArenaLo
+            0x8003830c, // OSGetArenaHi
+            0x8002b718, // DVDOpen
+            0x8002bb18, // DVDReadPrio
+            0x8009a24c, // the sound library's allocator
+            0x800976d4, // the sound library's set-up, with the program's values:
+            0x800000,   // 8 MiB of ARAM,
+            0x40,       // 64 entries for the effects that play,
+            0x20,       // and 32 tracks
+            0x80096f6c, // the scripts' file, once in memory
+            0x800ac804, // "pm6fgm.sem"
+            0x8009aa6c, // a bank in ARAM
+            0x513100,   // its size, as the program gives it
+            0x8009a8ec, // the bank's samples, from the disc
+            0x800ac810, // "pm6fgm.ssm"
+            0x80096f28, // the function through which the program plays an effect
+            0x800976fc, // the count of the effects that play
+            0x800f4fc8, // the head of their list
+        },
+    .library_name = "ColosseumBonus",
+    .tgc = "tgc/pokedownload.tgc",
+    .program_id = "POKE01",
+};
+
+// Metroid Prime (USA, disc version 2). Its sound library is MusyX 2.0, under Retro Studios' audio system. Its music
+// streams from the disc, apart from the four songs in MidiData.pak. The parameters follow driver/musyx.c's Params from
+// os_sleep_thread.
+//
+// The game's start-up of the OS (0x802D6D70) also initialises the disc and a timer. The game initialises the ARAM with
+// the stack at 0x805A9CFC and keeps its first 0x5FC000 bytes for MusyX. Its audio system starts the audio interface,
+// sets MusyX's memory hooks and calls sndInit. sndInit takes 48 voices of each kind, one studio, and the flag that
+// encodes the default studio for Dolby Pro Logic II. The output is in surround unless the console is set to mono. A rip
+// plays it as on a console set to stereo. The game's start-up then calls sndVolume(127, 0, 0xFF) at 0x800072D4. That
+// gives the volume groups of the songs and the effects their full volume.
+//
+// The length analysis reads the first of MusyX's song instances, at 0x80544A50. Its 16 sections start 0x14E8 bytes into
+// it, 0x38 bytes apart, and each holds its count of loops at +0x34.
+const GameProfile kMetroidPrimeUsa = {
+    .name = "Metroid Prime",
+    .game_id = "GM8E01",
+    .dol_sha1 = "39a2f928159ad46491e9b1ef0a72613d91e0cc40",
+    .main = 0x800085c4,
+    .driver = Driver::kMusyX,
+    .library = SoundLibrary::kMusyX,
+    .params =
+        {
+            0x80386124, // OSSleepThread
+            0x8037f594, // OSGetArenaLo
+            0x8037f58c, // OSGetArenaHi
+            0x802d6d70, // the start-up of the OS and the disc
+            0,
+            0,
+            0,
+            0x803722b4, // DVDOpen
+            0x803725c4, // DVDReadAsyncPrio
+            0x80374b04, // DVDGetCommandBlockStatus
+            0x8037237c, // DVDClose
+            0x8036e720, // ARInit
+            0x805a9cfc, // the ARAM allocation stack
+            2,          // its entries
+            0x80370230, // ARQInit
+            0x8036e004, // AIInit
+            0x803b4f20, // sndSetHooks
+            0x803b1bd8, // sndInit
+            1,          // sndInit takes the number of studios
+            48,         // voices
+            48,         // music
+            48,         // sfx
+            1,          // studios
+            1,          // SND_FLAGS_DEFAULT_STUDIO_DPL2
+            0x5fc000,   // the ARAM's size for MusyX
+            // nothing after sndInit
+            0,
+            0,
+            0x8039d460, // sndOutputMode
+            2,          // SND_OUTPUTMODE_SURROUND
+            0x803ab444, // sndPushGroup
+            0x803abbf8, // sndSeqPlayEx
+            1,          // sndSeqPlayEx takes a studio
+            0x8039d124, // sndSeqVolume
+            0x8039d2a8, // sndFXStartEx
+            // no aux effects
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0x8039d36c, // sndVolume
+        },
+    .library_name = "MetroidPrime",
+    .musyx_files = MusyXFiles::kRetro,
+    .song_lists = {0x805aaab4, 0x805aaab0},
+    .section_loops = 0x80545f6c,
+    .section_loop_size = 0x38,
+    .musyx_voices = {.count = 48,
+                     .synth = 0x805aaae8,
+                     .synth_size = 0x404,
+                     .dsp = 0x805aabc4,
+                     .dsp_size = 0xf4,
+                     .state_offset = 0xec,
+                     .loop_handler = 0x803a3d9c},
+};
+
+// Tales of Symphonia (USA). Both discs hold the same code and the same music. Its sound library is MusyX 2.0, under
+// Namco's sound layer. The parameters follow driver/musyx.c's Params from os_sleep_thread.
+//
+// OSInit initialises the disc. The game then initialises the ARAM with a stack of 64 entries at 0x802CADD8. Its sound
+// set-up (0x800A2100) starts the audio interface, sets MusyX's memory hooks and calls sndInit: 64 voices, 42 for
+// music, 22 for effects, one studio, and the ARAM up to 0x783000. The output is in surround unless the console is set
+// to mono. A rip plays it as on a console set to stereo. The set-up then gives studio 0 two standard reverbs. Aux A's
+// lasts 3.6 s, and aux B's 1 s. The game's play function (0x800A0E24) sets aux A's reverb for each song. A byte for
+// each song ID at 0x802108B0 picks the reverb of 3.6 s (1) or one of 2.5 s (2). With 0, aux A keeps its reverb. A rip
+// then takes the one of 3.6 s, as at start-up.
+//
+// The length analysis reads the first of MusyX's song instances, at 0x802FB7E8. Its 16 sections start 0x1508 bytes into
+// it, 0x38 bytes apart, and each holds its count of loops at +0x34.
+const GameProfile kTalesOfSymphoniaUsa = {
+    .name = "Tales of Symphonia",
+    .game_id = "GQSEAF",
+    .dol_sha1 = "01a4ad21219e5635cbca144ea5de0c3dd284dc39",
+    .main = 0x80028254,
+    .driver = Driver::kMusyX,
+    .library = SoundLibrary::kMusyX,
+    .params =
+        {
+            0x800fce04, // OSSleepThread
+            0x800f6164, // OSGetArenaLo
+            0x800f615c, // OSGetArenaHi
+            0x80100314, // DVDInit
+            0,
+            0,
+            0,
+            0x800ffd68, // DVDOpen
+            0x80100078, // DVDReadAsyncPrio
+            0x8010245c, // DVDGetCommandBlockStatus
+            0x800ffe30, // DVDClose
+            0x801078b4, // ARInit
+            0x802cadd8, // the ARAM allocation stack
+            0x40,       // its entries
+            0x801093c4, // ARQInit
+            0x801072b0, // AIInit
+            0x8014fb94, // sndSetHooks
+            0x8014c2e4, // sndInit
+            1,          // sndInit takes the number of studios
+            64,         // voices
+            42,         // music
+            22,         // sfx
+            1,          // studios
+            0,          // SND_FLAGS_DEFAULT
+            0x77f000,   // the ARAM's size for MusyX: up to 0x783000
+            // nothing after sndInit
+            0,
+            0,
+            0x80139000, // sndOutputMode
+            2,          // SND_OUTPUTMODE_SURROUND
+            0x8014649c, // sndPushGroup
+            0x80146c8c, // sndSeqPlayEx
+            1,          // sndSeqPlayEx takes a studio
+            0x80138d24, // sndSeqVolume
+            0x80138e48, // sndFXStartEx
+            0x801390ec, // sndSetAuxProcessingCallbacks
+            0x80150e34, // sndAuxCallbackReverbSTD, for aux A
+            0x80150e34, // and for aux B
+            0x802cc464, // aux A's reverb
+            0x802cc310, // aux B's reverb
+            0x80150ee4, // sndAuxCallbackPrepareReverbSTD, for aux A
+            0x80150ee4, // and for aux B
+            0xff,       // no MIDI channel controls aux A
+            0xff,       // or aux B
+        },
+    .bank_files = {"S/inst.snd"},
+    .library_name = "TalesOfSymphonia",
+    .musyx_files = MusyXFiles::kTales,
+    .musyx_songs = 0x801f9830,
+    .reverbs =
+        {{{.block = 0x802cc464, .coloration = 0.8f, .mix = 0.7f, .time = 3.6f, .damping = 0.6f, .pre_delay = 0.08f},
+          {.block = 0x802cc310, .coloration = 1.0f, .mix = 0.5f, .time = 1.0f, .damping = 0.8f, .pre_delay = 0.01f}}},
+    .song_reverbs = 0x802108b0,
+    .other_reverb =
+        {.block = 0x802cc464, .coloration = 0.7f, .mix = 0.7f, .time = 2.5f, .damping = 0.6f, .pre_delay = 0.05f},
+    .song_lists = {0x8035ac2c, 0x8035ac28},
+    .section_loops = 0x802fcd24,
+    .section_loop_size = 0x38,
+};
+
+// Star Fox Adventures (USA, disc version 1). Its sound library is MusyX, under Rare's sound layer. The parameters
+// follow driver/musyx.c's Params from os_sleep_thread.
+//
+// The game's start-up initialises the disc. Its sound set-up (0x80009BF8) initialises the ARAM with a stack of 10
+// entries at 0x803369F4. It then starts the audio interface, sets MusyX's memory hooks and calls sndInit: 48 voices, 48
+// for music, 24 for effects, one studio, the flag that encodes the default studio for Dolby Pro Logic II, and 16 MiB of
+// ARAM. It then sets the same numbers of voices again. The output is in stereo unless the console is set to mono. The
+// set-up then gives studio 0's aux A a standard reverb of 3 s and sets MusyX's volumes to their defaults.
+//
+// The length analysis reads the first of MusyX's song instances, at 0x803B15B0. Its 16 sections start 0x14E8 bytes into
+// it, 0x38 bytes apart, and each holds its count of loops at +0x34.
+const GameProfile kStarFoxAdventuresUsa = {
+    .name = "Star Fox Adventures",
+    .game_id = "GSAE01",
+    .dol_sha1 = "8bde4669c75260cc058b8b44ef36bacff3a67d20",
+    .main = 0x80021400,
+    .driver = Driver::kMusyX,
+    .library = SoundLibrary::kMusyX,
+    .params =
+        {
+            0x802471c4, // OSSleepThread
+            0x80241df0, // OSGetArenaLo
+            0x80241de8, // OSGetArenaHi
+            0x80249958, // DVDInit
+            0,
+            0,
+            0,
+            0x80249300, // DVDOpen
+            0x80249610, // DVDReadAsyncPrio
+            0x8024ba84, // DVDGetCommandBlockStatus
+            0x802493c8, // DVDClose
+            0x80250838, // ARInit
+            0x803369f4, // the ARAM allocation stack
+            10,         // its entries
+            0x80251460, // ARQInit
+            0x8025024c, // AIInit
+            0x8028469c, // sndSetHooks
+            0x802817a8, // sndInit
+            1,          // sndInit takes the number of studios
+            48,         // voices
+            48,         // music
+            24,         // sfx
+            1,          // studios
+            1,          // SND_FLAGS_DEFAULT_STUDIO_DPL2
+            0x1000000,  // the ARAM's size for MusyX
+            // nothing after sndInit
+            0,
+            0,
+            0x802731c8, // sndOutputMode
+            1,          // SND_OUTPUTMODE_STEREO
+            0x8027be90, // sndPushGroup
+            0x8027c140, // sndSeqPlayEx
+            1,          // sndSeqPlayEx takes a studio
+            0x80272e84, // sndSeqVolume
+            0,          // sndFXStartEx: no effects yet
+            0x802732c0, // sndSetAuxProcessingCallbacks
+            0x80285324, // sndAuxCallbackReverbSTD, for aux A
+            0,          // nothing for aux B
+            0x803368a0, // aux A's reverb
+            0,
+            0x80285380, // sndAuxCallbackPrepareReverbSTD, for aux A
+            0,
+            0xff, // no MIDI channel controls aux A
+            0xff, // or aux B
+        },
+    .library_name = "StarFoxAdventures",
+    .musyx_files = MusyXFiles::kStarFox,
+    .musyx_songs = 0x802c5e80,
+    .musyx_song_count = 99,
+    .reverbs =
+        {{{.block = 0x803368a0, .coloration = 0.5f, .mix = 0.9f, .time = 3.0f, .damping = 0.5f, .pre_delay = 0.033f}}},
+    .song_lists = {0x803deeb4, 0x803deeb0},
+    .section_loops = 0x803b2acc,
+    .section_loop_size = 0x38,
+};
+
+// Star Wars Rogue Squadron II: Rogue Leader (USA). Its sound library is MusyX. The parameters follow driver/musyx.c's
+// Params from os_sleep_thread.
+//
+// main.dol is a loader. It holds the OS, MusyX and a second DOL at 0x80100000: the game. The loader maps the game in at
+// 0x7FC00000. The driver uses only the loader. Its start-up of the user's code (0x80006B18) initialises the disc, sets
+// up the game's heaps over the whole arena and runs the static constructors, most of them the game's. The rip skips
+// the heaps and the constructors. OSInit starts the arena at 0x800AE1E0, or at 0x800AC1E0 with no debugger. The rip
+// moves both starts to 0x800AE3E0. The game's high-quality reverb takes the room below. The disc's library takes only
+// paths in the 8.3 form unless bi2.bin allows long names. The game's bi2.bin does. The rip lets the library take the
+// driver's long names without bi2.bin.
+//
+// The game's sound set-up (0x7FD49254 in the game) sets MusyX's memory hooks and calls sndInit: 56 voices, 40 for
+// music, 32 for effects, one studio, the flags for Dolby Pro Logic II, and the ARAM up to 0xA00000. The game starts its
+// output in surround. Its options offer only mono besides. The set-up then gives studio 0's aux A MusyX's high-quality
+// reverb of 2 s, and turns on the delay between the ears (sndSetITDDefault) for studio 0's music and effects. A rip
+// writes that setting into MusyX's table of them at 0x80096474.
+//
+// Sixty of the game's 124 songs play only a stream: a note whose sample is a buffer of one second that loops. The game
+// probably fills the buffers from the disc as the song plays. GCSF doesn't rip streams. Those songs make no sound in a
+// rip, and the ripper skips them. Eight more songs play a stream along with their notes. A rip leaves them out.
+//
+// The length analysis reads the first of MusyX's song instances, at 0x800694F0. Its 16 sections start 0x14E8 bytes into
+// it, 0x38 bytes apart, and each holds its count of loops at +0x34.
+const GameProfile kRogueLeaderUsa = {
+    .name = "Star Wars Rogue Squadron II: Rogue Leader",
+    .game_id = "GSWE64",
+    .dol_sha1 = "bc595e8b8c89ec8307ef61658b6cd5c854670d60",
+    .main = 0x80006a40,
+    .driver = Driver::kMusyX,
+    .library = SoundLibrary::kMusyX,
+    .params =
+        {
+            0x8002f010, // OSSleepThread
+            0x8002908c, // OSGetArenaLo
+            0x80029084, // OSGetArenaHi
+            0,          // the start-up of the user's code initialises the disc
+            0,
+            0,
+            0,
+            0x80038e10, // DVDOpen
+            0x80039120, // DVDReadAsyncPrio
+            0x8003af74, // DVDGetCommandBlockStatus
+            0x80038ed8, // DVDClose
+            0x8004014c, // ARInit
+            0x80095ca0, // the ARAM allocation stack
+            2,          // its entries
+            0x80041364, // ARQInit
+            0x8004193c, // AIInit
+            0x80026174, // sndSetHooks
+            0x8002300c, // sndInit
+            1,          // sndInit takes the number of studios
+            56,         // voices
+            40,         // music
+            32,         // sfx
+            1,          // studios
+            3,          // SND_FLAGS_DEFAULT_STUDIO_DPL2 and SND_FLAGS_EMITTERGROUPSUSEMAXVOICES
+            0x9fc000,   // the ARAM's size for MusyX
+            // nothing after sndInit
+            0,
+            0,
+            0x80011ff0, // sndOutputMode
+            2,          // SND_OUTPUTMODE_SURROUND
+            0x8001cc50, // sndPushGroup
+            0x8001d040, // sndSeqPlayEx
+            1,          // sndSeqPlayEx takes a studio
+            0x80011b10, // sndSeqVolume
+            0,          // sndFXStartEx: no effects yet
+            0x80012070, // sndSetAuxProcessingCallbacks
+            0x80026ea4, // sndAuxCallbackReverbHI, for aux A
+            0,          // nothing for aux B
+            0x800ae1e0, // aux A's reverb
+            0,
+            0x80026f00, // sndAuxCallbackPrepareReverbHI, for aux A
+            0,
+            0xff, // no MIDI channel controls aux A
+            0xff, // or aux B
+        },
+    .library_name = "RogueLeader",
+    .patches = {{0x80006b2c, 0x4800003c},  // the start-up of the user's code: on from DVDInit to its end
+                {0x80027cb8, 0x3863e3e0},  // OSInit: the arena from 0x800AE3E0
+                {0x80027cf0, 0x3863e3e0},  // and without a debugger too
+                {0x80038bf8, 0x480000a4}}, // the disc's paths: long names (bi2.bin allows them)
+    .musyx_files = MusyXFiles::kRogue,
+    .musyx_songs = 0x80060c38,
+    .musyx_song_count = 114,
+    .embedded_dol = 0x80100000,
+    .musyx_writes = {{0x80096474, 0x01010000}},
+    .musyx_streamed_songs =
+        {
+            0x0046000b, // The Battle Of Yavin I
+            0x0072006d, // The Battle Of Yavin III
+            0x005a0030, // Hyperspace
+            0x005d0039, // Imperial Attack
+            0x0047000c, // The Asteroid Field
+            0x004d001b, // Celebration & End Titles
+            0x004d001a, // a song that the hall doesn't list
+            0x0061003d, // and another
+        },
+    // The menus play this song at 0x67 in two of their three calls (0x7FCD9A28 and 0x7FD719A8 in the game).
+    .musyx_song_volumes = {{0x006e0065, 0x67}},
+    .reverbs = {{{.block = 0x800ae1e0,
+                  .coloration = 0.67f,
+                  .mix = 1.0f,
+                  .time = 2.0f,
+                  .damping = 0.2f,
+                  .pre_delay = 0.04f,
+                  .high = true,
+                  .crosstalk = 1.0f}}},
+    .song_lists = {0x8009646c, 0x80096468},
+    .section_loops = 0x8006aa0c,
+    .section_loop_size = 0x38,
+};
+
+// Pokémon Colosseum (USA). Its sound library is MusyX, under the game's sound layer. The parameters follow
+// driver/musyx.c's Params from os_sleep_thread.
+//
+// OSInit initialises the disc. The game's main initialises the ARAM with a stack of 2 entries at 0x80478DC0 and starts
+// the audio interface. Its sound set-up (0x80166E88) sets MusyX's memory hooks and calls sndInit: 64 voices, 48 for
+// music, 16 for effects, one studio, and 0x9FC000 bytes of ARAM. It then writes the settings of reverb preset 0 into
+// aux A's high-quality reverb, prepares the reverb and gives it to studio 0's aux A. The output is in stereo unless the
+// console is set to mono. The game's module common_rel holds its table of sounds (see MusyXFiles::kColosseum). The
+// game's play function (0x80166AB8) sets a song's reverb preset, then plays the song at volume 0x7F. No call in the
+// game's code gives a song another volume.
+//
+// The length analysis reads the first of MusyX's song instances, at 0x804285D0. Its 16 sections start 0x14E8 bytes into
+// it, 0x38 bytes apart, and each holds its count of loops at +0x34.
+const GameProfile kColosseumUsa = {
+    .name = "Pokémon Colosseum",
+    .game_id = "GC6E01",
+    .dol_sha1 = "870e8b9693ca780782d80f22a6a4572d8ba9458f",
+    .main = 0x800055e0,
+    .driver = Driver::kMusyX,
+    .library = SoundLibrary::kMusyX,
+    .params =
+        {
+            0x800a238c, // OSSleepThread
+            0x8009afb8, // OSGetArenaLo
+            0x8009afb0, // OSGetArenaHi
+            0,          // OSInit initialises the disc
+            0,
+            0,
+            0,
+            0x800a501c, // DVDOpen
+            0x800a532c, // DVDReadAsyncPrio
+            0x800a7728, // DVDGetCommandBlockStatus
+            0x800a50e4, // DVDClose
+            0x800aca80, // ARInit
+            0x80478dc0, // the ARAM allocation stack
+            2,          // its entries
+            0x800ae5c0, // ARQInit
+            0x800ac440, // AIInit
+            0x801631ac, // sndSetHooks
+            0x8015fe88, // sndInit
+            1,          // sndInit takes the number of studios
+            64,         // voices
+            48,         // music
+            16,         // sfx
+            1,          // studios
+            0,          // SND_FLAGS_DEFAULT
+            0x9fc000,   // the ARAM's size for MusyX
+            // nothing after sndInit
+            0,
+            0,
+            0x8014d9bc, // sndOutputMode
+            1,          // SND_OUTPUTMODE_STEREO
+            0x80159ef0, // sndPushGroup
+            0x8015a368, // sndSeqPlayEx
+            1,          // sndSeqPlayEx takes a studio
+            0x8014d6d8, // sndSeqVolume
+            0,          // sndFXStartEx: no effects yet
+            0x8014daa8, // sndSetAuxProcessingCallbacks
+            0x8016442c, // sndAuxCallbackReverbHI, for aux A
+            0,          // nothing for aux B
+            0x80452500, // aux A's reverb
+            0,
+            0x801644e0, // sndAuxCallbackPrepareReverbHI, for aux A
+            0,
+            0xff, // no MIDI channel controls aux A
+            0xff, // or aux B
+        },
+    .library_name = "PokémonColosseum",
+    .musyx_files = MusyXFiles::kColosseum,
+    .musyx_songs = 0x141654,
+    .musyx_song_count = 1236,
+    .musyx_file_table = 0x1133d8,
+    .musyx_file_count = 79,
+    .musyx_reverb_presets = 0x145044,
+    // The settings come from each song's preset.
+    .reverbs = {{{.block = 0x80452500, .high = true}}},
+    .song_lists = {0x8047af14, 0x8047af10},
+    .section_loops = 0x80429aec,
+    .section_loop_size = 0x38,
+};
+
+// Resident Evil Zero (USA). Both discs hold the same code. Each disc holds the songs of its part of the game, and the
+// songs that both parts play. A rip's library therefore takes the disc's number. The game's sound library is MusyX,
+// under Capcom's sound layer. The parameters follow driver/musyx.c's Params from os_sleep_thread.
+//
+// OSInit initialises the disc and lets the disc's library take long names. The game's sound set-up (0x80148DCC)
+// initialises the ARAM with a stack of 24 entries at 0x8031B140. It then starts the audio interface, sets MusyX's
+// memory hooks and calls sndInit: 64 voices, 32 for music, 32 for effects, one studio, and 10 MiB of ARAM. The output
+// is in stereo unless the console is set to mono. The game's options offer only those two. The set-up then gives
+// studio 0's aux A and aux B MusyX's high-quality reverb. Aux A's lasts 1.5 s, and aux B's 1 s.
+//
+// The length analysis reads the first of MusyX's song instances, at 0x8033AA90. Its 16 sections start 0x14E8 bytes into
+// it, 0x38 bytes apart, and each holds its count of loops at +0x34.
+const GameProfile kResidentEvilZeroUsa = {
+    .name = "Resident Evil Zero",
+    .game_id = "GBZE08",
+    .dol_sha1 = "5c10973f82a1946ebad3dcfe1ec56e8623d50404",
+    .main = 0x80005600,
+    .driver = Driver::kMusyX,
+    .library = SoundLibrary::kMusyX,
+    .params =
+        {
+            0x8019f9d4, // OSSleepThread
+            0x80198dcc, // OSGetArenaLo
+            0x80198dc4, // OSGetArenaHi
+            0x801a5ae0, // DVDInit
+            0,
+            0,
+            0,
+            0x801a5540, // DVDOpen
+            0x801a58b0, // DVDReadAsyncPrio
+            0x801a7dfc, // DVDGetCommandBlockStatus
+            0x801a5608, // DVDClose
+            0x801ad1cc, // ARInit
+            0x8031b140, // the ARAM allocation stack
+            0x18,       // its entries
+            0x801aecdc, // ARQInit
+            0x801acaec, // AIInit
+            0x801e6598, // sndSetHooks
+            0x801e32d8, // sndInit
+            1,          // sndInit takes the number of studios
+            64,         // voices
+            32,         // music
+            32,         // sfx
+            1,          // studios
+            0,          // SND_FLAGS_DEFAULT
+            0xa00000,   // the ARAM's size for MusyX
+            // nothing after sndInit
+            0,
+            0,
+            0x801cf3ec, // sndOutputMode
+            1,          // SND_OUTPUTMODE_STEREO
+            0x801dcc8c, // sndPushGroup
+            0x801dd440, // sndSeqPlayEx
+            1,          // sndSeqPlayEx takes a studio
+            0x801cf0dc, // sndSeqVolume
+            0x801cf200, // sndFXStartEx
+            0x801cf4d8, // sndSetAuxProcessingCallbacks
+            0x801e8040, // sndAuxCallbackReverbHI, for aux A
+            0x801e8040, // and for aux B
+            0x8031b1a0, // aux A's reverb
+            0x8031b380, // aux B's reverb
+            0x801e809c, // sndAuxCallbackPrepareReverbHI, for aux A
+            0x801e809c, // and for aux B
+            0xff,       // no MIDI channel controls aux A
+            0xff,       // or aux B
+        },
+    .library_name = "ResidentEvilZero",
+    .library_per_disc = true,
+    .musyx_files = MusyXFiles::kResidentEvil,
+    .musyx_songs = 0x80243bcc,
+    .reverbs = {{{.block = 0x8031b1a0,
+                  .coloration = 0.5f,
+                  .mix = 0.8f,
+                  .time = 1.5f,
+                  .damping = 0.5f,
+                  .pre_delay = 0.0f,
+                  .high = true,
+                  .crosstalk = 0.0f},
+                 {.block = 0x8031b380,
+                  .coloration = 0.5f,
+                  .mix = 0.8f,
+                  .time = 1.0f,
+                  .damping = 1.0f,
+                  .pre_delay = 0.0f,
+                  .high = true,
+                  .crosstalk = 0.0f}}},
+    .song_lists = {0x8037a2cc, 0x8037a2c8},
+    .section_loops = 0x8033bfac,
+    .section_loop_size = 0x38,
+};
+
+// Metroid Prime 2: Echoes (USA). Its sound library is a later build of MusyX 2.0, under Retro Studios' audio system.
+// It streams its music. Its MusyX groups are all effects groups. The parameters follow driver/musyx.c's Params from
+// os_sleep_thread.
+//
+// The game's start-up of the OS (0x8028BF68) also initialises the disc and a timer. The game initialises the ARAM with
+// a stack of 3 entries at 0x803C5AB8. Its audio system starts the audio interface, sets MusyX's memory hooks and calls
+// sndInit: 48 voices of each kind, three studios, the flag that encodes the default studio for Dolby Pro Logic II, and
+// 0x7D200 bytes of ARAM. A static constructor (0x80009864) sets that size. The audio system then activates studios 1
+// and 2 and feeds both into aux A of studio 0, for the acoustics of the game's rooms. A rip plays each effect on studio
+// 0, without a room's acoustics. The output is in surround unless the console is set to mono. A rip plays it as on a
+// console set to stereo. The game's start-up then calls sndVolume(127, 0, 0xFF) at 0x80007F90. That gives the volume
+// groups of the effects their full volume.
+//
+// Before the game pushes a group, it adds a pool of ARAM for the samples of the group's audio group set (sndPoolAdd,
+// 0x80397B80) and selects the pool (0x80397C4C). MusyX then uploads the samples into the pool through the game's
+// callback (0x803077C0). The samples of the title music don't fit in MusyX's 0x7D200 bytes. A rip gives MusyX 0x400000
+// bytes of ARAM instead. MusyX uploads each set's samples there. Where the samples lie in ARAM changes nothing that a
+// listener hears.
+const GameProfile kMetroidPrime2Usa = {
+    .name = "Metroid Prime 2: Echoes",
+    .game_id = "G2ME01",
+    .dol_sha1 = "6ef9b491d0cc08bc81a124fdedb8bfaec34d0010",
+    .main = 0x801efb00,
+    .driver = Driver::kMusyX,
+    .library = SoundLibrary::kMusyX,
+    .params =
+        {
+            0x80375eac, // OSSleepThread
+            0x8036ebc4, // OSGetArenaLo
+            0x8036ebbc, // OSGetArenaHi
+            0x8028bf68, // the start-up of the OS and the disc
+            0,
+            0,
+            0,
+            0x8036017c, // DVDOpen
+            0x8036048c, // DVDReadAsyncPrio
+            0x80362a20, // DVDGetCommandBlockStatus
+            0x80360244, // DVDClose
+            0x8035533c, // ARInit
+            0x803c5ab8, // the ARAM allocation stack
+            3,          // its entries
+            0x80356e4c, // ARQInit
+            0x80381b4c, // AIInit
+            0x803a1d30, // sndSetHooks
+            0x8039e168, // sndInit
+            1,          // sndInit takes the number of studios
+            48,         // voices
+            48,         // music
+            48,         // sfx
+            3,          // studios
+            1,          // SND_FLAGS_DEFAULT_STUDIO_DPL2
+            0x400000,   // the ARAM's size for MusyX in a rip (see above)
+            // nothing after sndInit
+            0,
+            0,
+            0x80389a58, // sndOutputMode
+            2,          // SND_OUTPUTMODE_SURROUND
+            0x803974dc, // sndPushGroup
+            0x80397dd4, // sndSeqPlayEx
+            1,          // sndSeqPlayEx takes a studio
+            0x803895a4, // sndSeqVolume
+            0x803897cc, // sndFXStartEx
+            // no aux effects
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0x80389964, // sndVolume
+        },
+    .library_name = "MetroidPrime2",
+    .musyx_files = MusyXFiles::kRetro,
+    .musyx_voices = {.count = 48,
+                     .synth = 0x8041a228,
+                     .synth_size = 0x458,
+                     .dsp = 0x8041a320,
+                     .dsp_size = 0xf8,
+                     .state_offset = 0xf0,
+                     .loop_handler = 0x8038f660},
+};
+
+// Paper Mario: The Thousand-Year Door (USA). Its sound library is MusyX 2.0, the build of Metroid Prime 2's. It
+// streams its music. The parameters follow driver/musyx.c's Params from os_sleep_thread.
+//
+// The game has no DVDReadAsyncPrio. The driver reads through DVDReadPrio (0x802A03C0) instead. That one waits for the
+// read and takes the priority where DVDReadAsyncPrio takes the callback. The driver passes 0 there.
+//
+// The game's sound set-up (0x800E239C) initialises the ARAM with a stack of 8 entries, its queue and the audio
+// interface. It sets MusyX's memory hooks and calls sndInit: 64 voices, 12 for music, 44 for effects, one studio, the
+// flag that encodes the default studio for Dolby Pro Logic II, and 0xBFC000 bytes of ARAM. It gives studio 0's aux A
+// MusyX's high-quality reverb of 3 s and aux B MusyX's chorus. It calls sndVolume(127, 0, 0xFF) and sets the output
+// to stereo. A rip writes the chorus's settings: a delay of 10 ms, no variation and a period of 500 ms.
+const GameProfile kPaperMarioUsa = {
+    .name = "Paper Mario: The Thousand-Year Door",
+    .game_id = "G8ME01",
+    .dol_sha1 = "bc62d5e4674d139fd50d6c05694b34f955e37039",
+    .main = 0x800055e0,
+    .driver = Driver::kMusyX,
+    .library = SoundLibrary::kMusyX,
+    .params =
+        {
+            0x8029d5b0, // OSSleepThread
+            0x8029673c, // OSGetArenaLo
+            0x80296734, // OSGetArenaHi
+            0x802a0500, // DVDInit
+            0,
+            0,
+            0,
+            0x802a00b0, // DVDOpen
+            0x802a03c0, // DVDReadPrio, in place of DVDReadAsyncPrio (see above)
+            0x802a2710, // DVDGetCommandBlockStatus
+            0x802a0178, // DVDClose
+            0x802a8d3c, // ARInit
+            0x8041eb24, // the ARAM allocation stack
+            8,          // its entries
+            0x802aa87c, // ARQInit
+            0x802a868c, // AIInit
+            0x802915c0, // sndSetHooks
+            0x8028dacc, // sndInit
+            1,          // sndInit takes the number of studios
+            64,         // voices
+            12,         // music
+            44,         // sfx
+            1,          // studios
+            1,          // SND_FLAGS_DEFAULT_STUDIO_DPL2
+            0xbfc000,   // the ARAM's size for MusyX
+            // nothing after sndInit
+            0,
+            0,
+            0x8027a300, // sndOutputMode
+            1,          // SND_OUTPUTMODE_STEREO
+            0x802877f0, // sndPushGroup
+            0x80287fe0, // sndSeqPlayEx
+            1,          // sndSeqPlayEx takes a studio
+            0x80279eac, // sndSeqVolume
+            0x8027a0d4, // sndFXStartEx
+            0x8027a3ec, // sndSetAuxProcessingCallbacks
+            0x80292d78, // sndAuxCallbackReverbHI, for aux A
+            0x80294058, // sndAuxCallbackChorus, for aux B
+            0x803e194c, // aux A's reverb
+            0x803e175c, // aux B's chorus
+            0x80292dd4, // sndAuxCallbackPrepareReverbHI, for aux A
+            0x80294314, // sndAuxCallbackPrepareChorus, for aux B
+            0xff,       // no MIDI channel controls aux A
+            0xff,       // or aux B
+            0x8027a2a0, // sndVolume
+            0x80279fd4, // sndFXCtrl
+            0x8027a034, // sndFXCtrl14
+        },
+    .library_name = "PaperMario",
+    .musyx_files = MusyXFiles::kPaperMario,
+    .musyx_writes = {{0x803e17ec, 10}, {0x803e17f0, 0}, {0x803e17f4, 500}},
+    .reverbs = {{{.block = 0x803e194c,
+                  .coloration = 0.0f,
+                  .mix = 0.8f,
+                  .time = 3.0f,
+                  .damping = 0.3f,
+                  .pre_delay = 0.1f,
+                  .high = true,
+                  .crosstalk = 0.0f}}},
+    .musyx_voices = {.count = 64,
+                     .synth = 0x8041ee90,
+                     .synth_size = 0x458,
+                     .dsp = 0x8041ef88,
+                     .dsp_size = 0xf8,
+                     .state_offset = 0xf0,
+                     .loop_handler = 0x8027f8cc},
+    .musyx_effects = 0x80316b28,
+    .musyx_effect_count = 4242,
+};
+
+// Star Wars Rogue Squadron III: Rebel Strike (USA). Its sound library is MusyX. The parameters follow driver/musyx.c's
+// Params from os_sleep_thread.
+//
+// main.dol is a loader. It holds the OS and the disc's library. The game's code and data, MusyX among them, are a
+// second DOL that main.dol holds packed at 0x80200000. The loader's start-up (0x800040BC, before main) unpacks that DOL
+// into ARAM and runs it from 0x7F200000 through the CPU's page table, a page at a time. The rip places the game's DOL
+// 16 MB above its addresses, from 0x80200000 to 0x8086EAA0. It replaces that start-up with code that maps 0x7F000000 to
+// 0x7FFFFFFF there with IBAT3 and DBAT3. MusyX's state lies in the loader's memory. The rip leaves it at the game's
+// addresses. The arena starts at 0x81000000. The disc's library takes only paths in the 8.3 form unless bi2.bin allows
+// long names. The rip lets it take the driver's long names.
+//
+// The game's sound set-up (0x7F5C1140 in the game) sets MusyX's memory hooks and calls sndInit: 56 voices, 20 for
+// music, 50 for effects, one studio, the flags for Dolby Pro Logic II, and the ARAM up to 0x500000. The game's hooks
+// are two mallocs and a free. The rip patches sndSetHooks to take the driver's malloc for both mallocs. The set-up
+// starts the output in surround and turns on the delay between the ears (sndSetITDDefault) for studio 0's music and
+// effects. A rip writes that setting into MusyX's table of them at 0x80097C54. The set-up then calls sndVolume(127, 0,
+// 0xFF). Each level sets a reverb on studio 0's aux A, or none. The rip sets none.
+const GameProfile kRebelStrikeUsa = {
+    .name = "Star Wars Rogue Squadron III: Rebel Strike",
+    .game_id = "GLRE64",
+    .dol_sha1 = "dd1797f6dcdc88abeaecc153b1e76c21e7733cae",
+    .main = 0x80004000,
+    .driver = Driver::kMusyX,
+    .library = SoundLibrary::kMusyX,
+    .params =
+        {
+            0x80026a88, // OSSleepThread
+            0x800216a4, // OSGetArenaLo
+            0x8002169c, // OSGetArenaHi
+            0x80027dd4, // DVDInit
+            0,
+            0,
+            0,
+            0x80027650, // DVDOpen
+            0x80027ab4, // DVDReadAsyncPrio
+            0x80029ed8, // DVDGetCommandBlockStatus
+            0x80027718, // DVDClose
+            0x80030180, // ARInit
+            0,          // no ARAM allocation stack: the loader's start-up calls ARInit
+            0,
+            0x80031c90, // ARQInit
+            0x80032270, // AIInit
+            0x7f65a060, // sndSetHooks
+            0x7f65655c, // sndInit
+            1,          // sndInit takes the number of studios
+            56,         // voices
+            20,         // music
+            50,         // sfx
+            1,          // studios
+            3,          // SND_FLAGS_DEFAULT_STUDIO_DPL2 and SND_FLAGS_EMITTERGROUPSUSEMAXVOICES
+            0x4fc000,   // the ARAM's size for MusyX: 0x500000 less ARAM's base
+            // nothing after sndInit
+            0,
+            0,
+            0x7f644b28, // sndOutputMode
+            2,          // SND_OUTPUTMODE_SURROUND
+            0x7f653608, // sndPushGroup
+            0x7f653df8, // sndSeqPlayEx
+            1,          // sndSeqPlayEx takes a studio
+            0x7f6444b0, // sndSeqVolume
+            0x7f6446d8, // sndFXStartEx
+            0,          // no aux effects
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0xff,
+            0xff,
+            0x7f644ac8, // sndVolume
+        },
+    .library_name = "RebelStrike",
+    // The loader's start-up maps the game's DOL with IBAT3 and DBAT3 instead of its page table: the 16 MB from
+    // 0x7F000000 to 0, cached, read and write.
+    .patches = {{0x800040bc, 0x3c607f00},  // lis r3, 0x7f00
+                {0x800040c0, 0x606301ff},  // ori r3, r3, 0x1ff
+                {0x800040c4, 0x38800002},  // li r4, 2
+                {0x800040c8, 0x4c00012c},  // isync
+                {0x800040cc, 0x7c9783a6},  // mtspr IBAT3L, r4
+                {0x800040d0, 0x7c7683a6},  // mtspr IBAT3U, r3
+                {0x800040d4, 0x7c9f83a6},  // mtspr DBAT3L, r4
+                {0x800040d8, 0x7c7e83a6},  // mtspr DBAT3U, r3
+                {0x800040dc, 0x4c00012c},  // isync
+                {0x800040e0, 0x4e800020},  // blr
+                {0x8002742c, 0x480000ac},  // the disc's paths: long names
+                {0x8065a06c, 0x80030000},  // sndSetHooks: the driver's malloc for both of the game's mallocs
+                {0x8065a074, 0x80030004}}, // and its free for the game's free
+    .musyx_files = MusyXFiles::kRebelStrike,
+    .musyx_writes = {{0x80097c54, 0x01010000}},
+    .musyx_voices = {.count = 56,
+                     .synth = 0x800a2848,
+                     .synth_size = 0x458,
+                     .dsp = 0x800a2898,
+                     .dsp_size = 0xf8,
+                     .state_offset = 0xf0,
+                     .loop_handler = 0x7f64b608},
+    .packed_module = 0x80200000,
+    .module_offset = 0x01000000,
+};
+
 const std::vector<GameProfile> kProfiles = {
-    kFourSwordsUsa,       kFourSwordsJpn, kTwilightPrincessUsa, kWindWakerUsa,          kMarioGolfUsa,
-    kMarioPowerTennisUsa, kWarioWareUsa,  kLuigisMansionUsa,    kSuperMarioSunshineUsa, kPikminUsa,
-    kJungleBeatUsa,       kDoubleDashUsa, kPikmin2Usa,          kPacManVsUsa,           kCollectorsEditionUsa,
-    kCrystalChroniclesUsa};
+    kFourSwordsUsa,        kFourSwordsJpn,     kTwilightPrincessUsa, kWindWakerUsa,          kMarioGolfUsa,
+    kMarioPowerTennisUsa,  kWarioWareUsa,      kLuigisMansionUsa,    kSuperMarioSunshineUsa, kPikminUsa,
+    kJungleBeatUsa,        kDoubleDashUsa,     kPikmin2Usa,          kPacManVsUsa,           kCollectorsEditionUsa,
+    kCrystalChroniclesUsa, kAnimalCrossingUsa, kColosseumBonusUsa,   kMetroidPrimeUsa,       kTalesOfSymphoniaUsa,
+    kStarFoxAdventuresUsa, kRogueLeaderUsa,    kColosseumUsa,        kResidentEvilZeroUsa,   kMetroidPrime2Usa,
+    kPaperMarioUsa,        kRebelStrikeUsa};
 
 // Pikmin 2's driver parameters: the profile's, then the number of pieces and the pieces (driver/pikmin2.c's Piece).
 std::vector<uint32_t> Pikmin2Parameters(const GameProfile& p)
@@ -1581,6 +2528,107 @@ std::span<const uint8_t> StartUpArchive(const std::vector<uint8_t>& sound_archiv
     return decoded;
 }
 
+// A TGC's header: its magic, and where its parts lie in it. The program's disc header comes first, then bi2.bin and
+// the apploader. The file system table gives each file's offset as if the files began at kTgcTableFiles. They begin at
+// kTgcFiles in the TGC. The values were read from the Pokémon Colosseum Bonus Disc's TGC. Its file system table then
+// finds each file's data.
+constexpr uint32_t kTgcMagic = 0xae0f38a2;
+constexpr uint32_t kTgcHeader = 0x08;     // the program's disc header
+constexpr uint32_t kTgcFst = 0x10;        // the file system table's offset, then its size
+constexpr uint32_t kTgcDol = 0x1c;        // main.dol's offset, then its size
+constexpr uint32_t kTgcFiles = 0x24;      // the files' offset in the TGC
+constexpr uint32_t kTgcTableFiles = 0x34; // and in the file system table
+
+// bi2.bin and the apploader follow the disc header. The apploader's header gives its code's size at 0x14 and its
+// trailer's at 0x18.
+constexpr uint32_t kBi2Size = 0x2000;
+constexpr uint32_t kApploaderHeaderSize = 0x20;
+
+// The program in a TGC, as LoadGame would give it from the program's disc (see OpenProgram). `source` names the
+// image that holds the TGC. A file system table entry is 12 bytes: a word with a folder's flag in the top byte and the
+// name's offset below, then a file's offset and size, or a folder's parent and the entry after its last. The first
+// entry is the root folder. The names follow the entries. Throws xsflib::FormatError for a damaged TGC.
+disc::GameFiles ReadTgc(std::shared_ptr<const std::vector<uint8_t>> tgc, const std::string& source)
+{
+    const xsflib::Reader r(*tgc, true);
+    if (r.U32(0) != kTgcMagic)
+    {
+        throw xsflib::FormatError("it isn't a TGC");
+    }
+
+    const auto part = [&r](uint32_t offset, uint32_t size)
+    {
+        const std::span<const uint8_t> bytes = r.Sub(offset, size);
+        return std::vector<uint8_t>(bytes.begin(), bytes.end());
+    };
+
+    disc::GameFiles game;
+    game.source = "TGC in " + source;
+    const uint32_t header = r.U32(kTgcHeader);
+    game.boot = part(header, disc::kHeaderSize);
+    game.bi2 = part(header + disc::kHeaderSize, kBi2Size);
+    const uint32_t apploader = header + disc::kHeaderSize + kBi2Size;
+    game.apploader = part(apploader, kApploaderHeaderSize + r.U32(apploader + 0x14) + r.U32(apploader + 0x18));
+    game.dol = part(r.U32(kTgcDol), r.U32(kTgcDol + 4));
+    game.fst = part(r.U32(kTgcFst), r.U32(kTgcFst + 4));
+    game.region = xsflib::LoadBe32(game.bi2.data() + 0x18);
+
+    // The files, by their paths. A folder's entries run up to its last entry.
+    const xsflib::Reader fst(game.fst, true);
+    const uint32_t entries = fst.U32(8);
+    if (entries == 0 || uint64_t{entries} * 12 > game.fst.size())
+    {
+        throw xsflib::FormatError("its file system table is damaged");
+    }
+
+    const uint32_t files = r.U32(kTgcFiles);
+    const uint32_t table_files = r.U32(kTgcTableFiles);
+    std::map<std::string, std::pair<uint32_t, uint32_t>> places;
+    std::vector<std::pair<uint32_t, std::string>> folders = {{entries, ""}};
+    for (uint32_t i = 1; i < entries; i++)
+    {
+        while (i >= folders.back().first && folders.size() > 1)
+        {
+            folders.pop_back();
+        }
+
+        const uint32_t word = fst.U32(i * 12);
+        const std::string name = fst.CString(entries * 12 + (word & 0xffffff), 255);
+        const std::string path = folders.back().second + name;
+        if (word >> 24)
+        {
+            folders.emplace_back(fst.U32(i * 12 + 8), path + "/");
+            continue;
+        }
+
+        const uint32_t offset = fst.U32(i * 12 + 4);
+        const uint32_t size = fst.U32(i * 12 + 8);
+        if (offset < table_files || uint64_t{offset} - table_files + files + size > tgc->size())
+        {
+            throw xsflib::FormatError(path + " lies outside the TGC");
+        }
+
+        places[path] = {offset - table_files + files, size};
+        game.files.push_back({path, size, i});
+    }
+
+    std::sort(game.files.begin(), game.files.end(),
+              [](const disc::GameFile& a, const disc::GameFile& b) { return a.path < b.path; });
+    game.read_file = [tgc, places](const std::string& path, std::vector<uint8_t>& data)
+    {
+        const auto place = places.find(path);
+        if (place == places.end())
+        {
+            return false;
+        }
+
+        data.assign(tgc->begin() + place->second.first, tgc->begin() + place->second.first + place->second.second);
+        return true;
+    };
+
+    return game;
+}
+
 } // namespace
 
 const std::vector<GameProfile>& KnownProfiles()
@@ -1591,9 +2639,11 @@ const std::vector<GameProfile>& KnownProfiles()
 const GameProfile* FindProfile(const disc::GameFiles& game)
 {
     const std::string sha1 = xsflib::Sha1::Hex(xsflib::Sha1::Of(game.dol));
+    const std::string id = game.GameId();
     for (const GameProfile& profile : kProfiles)
     {
-        if (game.GameId() == profile.game_id && sha1 == profile.dol_sha1)
+        const bool named = id == profile.game_id || (profile.program_id && id == profile.program_id);
+        if (named && sha1 == profile.dol_sha1)
         {
             return &profile;
         }
@@ -1602,10 +2652,43 @@ const GameProfile* FindProfile(const disc::GameFiles& game)
     return nullptr;
 }
 
+std::optional<std::string> OpenProgram(disc::GameFiles& game)
+{
+    for (const GameProfile& profile : kProfiles)
+    {
+        if (!profile.tgc || game.GameId() != profile.game_id ||
+            std::none_of(game.files.begin(), game.files.end(),
+                         [&profile](const disc::GameFile& file) { return file.path == profile.tgc; }))
+        {
+            continue;
+        }
+
+        auto tgc = std::make_shared<std::vector<uint8_t>>();
+        if (!game.read_file || !game.read_file(profile.tgc, *tgc))
+        {
+            return std::string("can't read ") + profile.tgc;
+        }
+
+        try
+        {
+            game = ReadTgc(tgc, game.source);
+        }
+        catch (const xsflib::FormatError& e)
+        {
+            return std::string(profile.tgc) + ": " + e.what();
+        }
+
+        return std::nullopt;
+    }
+
+    return std::nullopt;
+}
+
 bool ListsSongs(const GameProfile& profile)
 {
     return profile.library == SoundLibrary::kMusyX || profile.library == SoundLibrary::kJac ||
-           profile.library == SoundLibrary::kRed;
+           profile.library == SoundLibrary::kRed || profile.library == SoundLibrary::kNintendo64 ||
+           profile.library == SoundLibrary::kHal;
 }
 
 bool NamesWaves(const GameProfile& profile)
@@ -1982,11 +3065,6 @@ std::vector<SongEntry> SongEntries(const ntdlib::Dol& dol, const GameProfile& pr
 
 } // namespace
 
-namespace
-{
-
-// The bytes of the game's code and data from `address` to the end of its section. Throws xsflib::FormatError if no
-// section holds the address.
 std::span<const uint8_t> DolBytes(const ntdlib::Dol& dol, uint32_t address)
 {
     for (const ntdlib::Dol::Section& section : dol.Sections())
@@ -1999,6 +3077,9 @@ std::span<const uint8_t> DolBytes(const ntdlib::Dol& dol, uint32_t address)
 
     throw xsflib::FormatError("main.dol has nothing at " + xsflib::Hex(address, 8));
 }
+
+namespace
+{
 
 // The songs that a MusyX game's code names (GameProfile::named_songs), in the order of its table. Throws
 // xsflib::FormatError if the table or a name lies outside the game's code.
@@ -2283,7 +3364,279 @@ std::vector<Sound> RedSounds(const disc::GameFiles& game, const GameProfile& pro
     return sounds;
 }
 
+// The weathers for which the game arranges a piece of music that plays the hour: its numbers for them, and the names
+// that its tables of masks give them (BGM_MUTE_TABLE_FINE, _SNOW and _SAKURA). The game plays another piece in the
+// rain, its weather 1. The game's falling leaves count as its weather 3.
+struct N64Weather
+{
+    uint8_t number;
+    const char* name;
+};
+
+constexpr N64Weather kN64Weathers[] = {{0, "fine"}, {2, "snow"}, {3, "sakura"}};
+
+// The game's numbers of its pieces of music that play the hour.
+constexpr uint32_t kN64FirstHour = 1;
+constexpr uint32_t kN64LastHour = 24;
+
+// The top byte of an effect's sound ID with the Nintendo 64's sound library. The driver takes the low 16 bits as the
+// game's number of the effect.
+constexpr uint32_t kN64EffectKind = 1;
+
+// The most effects in a bank of the Nintendo 64's sound library. The game's table of the effects' priorities has an
+// entry for each place in a bank (TRGPRIO, 128 bytes).
+constexpr uint32_t kN64BankEffects = 128;
+
+// The museum's piece of music, and its rooms by the game's numbers for them. Each room mutes some of the piece's
+// channels (BGM_MUTE_TABLE_MUSEUM). The game plays the piece only in the museum.
+constexpr uint32_t kN64Museum = 88;
+constexpr const char* kN64MuseumRooms[] = {"lobby", "paintings", "fish", "insects", "fossils"};
+
+// The game's numbers that its start of a piece of music (Sou_BgmStart) doesn't play as a piece: 0 stops the music, and
+// 83 to 87 play the effects of the start-up screen. Numbers 112 to 121 are the second parts of Kapp'n's songs. The
+// first part's script starts its second part. The game's driver plays a second part as a piece.
+bool N64PlaysPiece(uint32_t number)
+{
+    return number != 0 && !(number >= 83 && number <= 87);
+}
+
+// A sequence's number in the game's table of sequences (GameProfile::sequence_table), following a sequence of size 0 to
+// the sequence that it plays. Throws xsflib::FormatError for a number outside the table, or for a chain that doesn't
+// end.
+uint32_t N64Sequence(const ntdlib::Dol& dol, const GameProfile& profile, uint32_t number)
+{
+    constexpr uint32_t kEntries = 0x10;
+    constexpr uint32_t kEntrySize = 0x10;
+    constexpr int kMaxChain = 8;
+    const std::span<const uint8_t> table = DolBytes(dol, profile.sequence_table);
+    const uint32_t count = table.size() >= 2 ? xsflib::LoadBe16(table.data()) : 0;
+    for (int chain = 0; chain < kMaxChain; chain++)
+    {
+        const uint32_t entry = kEntries + number * kEntrySize;
+        if (number >= count || entry + kEntrySize > table.size())
+        {
+            break;
+        }
+
+        if (xsflib::LoadBe32(table.data() + entry + 4) != 0)
+        {
+            return number;
+        }
+
+        number = xsflib::LoadBe32(table.data() + entry);
+    }
+
+    throw xsflib::FormatError("main.dol's table of sequences lacks sequence " + std::to_string(number));
+}
+
+// A game's pieces of music with the Nintendo 64's sound library (see ListSongs). Throws xsflib::FormatError if a table
+// lies outside the game's code.
+std::vector<Sound> N64Pieces(const ntdlib::Dol& dol, const GameProfile& profile)
+{
+    constexpr uint32_t kPieces = 256;
+    const std::span<const uint8_t> table = DolBytes(dol, profile.music_table);
+    if (table.size() < kPieces)
+    {
+        throw xsflib::FormatError("main.dol's table of music ends early");
+    }
+
+    std::vector<Sound> sounds;
+    std::set<uint32_t> sequences;
+    for (uint32_t number = 0; number < kPieces; number++)
+    {
+        const uint32_t sequence = N64Sequence(dol, profile, table[number]);
+        std::string label = std::to_string(number);
+        label.insert(0, label.size() < 3 ? 3 - label.size() : 0, '0');
+        label.insert(0, "bgm");
+        if (number >= kN64FirstHour && number <= kN64LastHour)
+        {
+            for (const N64Weather& weather : kN64Weathers)
+            {
+                sounds.push_back({uint32_t{weather.number} << 8 | number, label + "-" + weather.name, true});
+            }
+        }
+        else if (number == kN64Museum)
+        {
+            for (uint32_t room = 1; room <= std::size(kN64MuseumRooms); room++)
+            {
+                sounds.push_back({room << 16 | number, label + "-" + kN64MuseumRooms[room - 1], true});
+            }
+        }
+        else if (N64PlaysPiece(number) && sequences.insert(sequence).second)
+        {
+            sounds.push_back({number, std::move(label), true});
+        }
+    }
+
+    return sounds;
+}
+
+// A game's effects with the Nintendo 64's sound library (see GameProfile::n64_effects). A bank's table ends where
+// another bank's table or an effect's script starts, or after 128 effects. An effect is named after its bank and its
+// place, for example `se2-017`. The game's effect 0 is none: the game's slot of an effect holds 0 when it's free.
+// Throws xsflib::FormatError if the tables lie outside the sound data.
+std::vector<Sound> N64Effects(const disc::GameFiles& game, const ntdlib::Dol& dol, const GameProfile& profile)
+{
+    std::vector<uint8_t> rom;
+    if (!game.read_file || !game.read_file(profile.sound_archive, rom))
+    {
+        throw xsflib::FormatError(std::string("can't read ") + profile.sound_archive);
+    }
+
+    const std::span<const uint8_t> table = DolBytes(dol, profile.sequence_table);
+    const uint32_t entry = 0x10 + N64Sequence(dol, profile, profile.n64_effects) * 0x10;
+    const uint64_t offset = xsflib::LoadBe32(table.data() + entry);
+    const uint64_t size = xsflib::LoadBe32(table.data() + entry + 4);
+    if (offset + size > rom.size() || profile.n64_effect_banks + 2 > size)
+    {
+        throw xsflib::FormatError("the effects sequence lies outside the sound data");
+    }
+
+    const std::span<const uint8_t> sequence(rom.data() + offset, size);
+    const auto half = [&sequence](uint32_t at)
+    {
+        return uint32_t{xsflib::LoadBe16(sequence.data() + at)};
+    };
+
+    // The table of banks ends where the first bank's table starts.
+    std::vector<uint32_t> banks;
+    uint32_t end = static_cast<uint32_t>(size);
+    for (uint32_t at = profile.n64_effect_banks; at + 2 <= end && banks.size() < 16; at += 2)
+    {
+        const uint32_t bank = half(at);
+        if (bank <= profile.n64_effect_banks || bank >= size)
+        {
+            throw xsflib::FormatError("the effects sequence's table of banks is damaged");
+        }
+
+        banks.push_back(bank);
+        end = std::min(end, bank);
+    }
+
+    std::vector<Sound> sounds;
+    for (uint32_t number = 0; number < banks.size(); number++)
+    {
+        const uint32_t start = banks[number];
+        uint32_t stop = static_cast<uint32_t>(size);
+        for (const uint32_t other : banks)
+        {
+            if (other > start)
+            {
+                stop = std::min(stop, other);
+            }
+        }
+
+        for (uint32_t place = 0; place < kN64BankEffects && start + 2 * place + 2 <= stop; place++)
+        {
+            const uint32_t script = half(start + 2 * place);
+            if (script > start)
+            {
+                stop = std::min(stop, script);
+            }
+
+            if (start + 2 * place + 2 > stop)
+            {
+                break;
+            }
+
+            if (number == 0 && place == 0)
+            {
+                continue;
+            }
+
+            std::string label = std::to_string(place);
+            label.insert(0, label.size() < 3 ? 3 - label.size() : 0, '0');
+            sounds.push_back(
+                {kN64EffectKind << 24 | number << 8 | place, "se" + std::to_string(number) + "-" + label, false});
+        }
+    }
+
+    return sounds;
+}
+
 } // namespace
+
+// The names that a HAL game's C header defines for its effects' IDs (see GameProfile::sound_names), by ID. A line
+// "#define NAME ((GROUP<<16) + NUMBER)" names an effect. The header's comments are Shift-JIS. Its names are ASCII.
+std::map<uint32_t, std::string> HalNames(const disc::GameFiles& game, const GameProfile& profile)
+{
+    std::map<uint32_t, std::string> names;
+    std::vector<uint8_t> header;
+    if (!profile.sound_names || !game.read_file || !game.read_file(profile.sound_names, header))
+    {
+        return names;
+    }
+
+    const std::string text(header.begin(), header.end());
+    std::size_t line = 0;
+    while (line < text.size())
+    {
+        const std::size_t end = std::min(text.find('\n', line), text.size());
+        unsigned group = 0;
+        unsigned number = 0;
+        char name[64] = {};
+        const std::string row = text.substr(line, end - line);
+        if (std::sscanf(row.c_str(), "#define %63s ((%u<<16) + %u)", name, &group, &number) == 3 && group <= 0xffff &&
+            number <= 0xffff)
+        {
+            names.emplace(group << 16 | number, name);
+        }
+
+        line = end + 1;
+    }
+
+    return names;
+}
+
+// A HAL game's effects (see GameProfile::sound_archive): every effect of the file of scripts, group by group. An
+// effect's label is its name in the game's header, or else "se", its group, a hyphen and its place in the group in
+// three digits.
+std::vector<Sound> HalEffects(const disc::GameFiles& game, const GameProfile& profile)
+{
+    std::vector<uint8_t> scripts;
+    if (!game.read_file || !game.read_file(profile.sound_archive, scripts))
+    {
+        throw xsflib::FormatError(std::string("can't read ") + profile.sound_archive);
+    }
+
+    const xsflib::Reader r(scripts, true);
+    uint32_t at = 0;
+    for (int table = 0; table < 2; table++)
+    {
+        at += 4 + 4 * r.U32(at);
+    }
+
+    const uint32_t groups = r.U32(at);
+    std::vector<uint32_t> firsts;
+    for (uint32_t group = 0; group < groups; group++)
+    {
+        firsts.push_back(r.U32(at + 4 + 4 * group));
+    }
+
+    const uint32_t effects = r.U32(at + 4 + 4 * groups);
+    const std::map<uint32_t, std::string> names = HalNames(game, profile);
+    std::vector<Sound> sounds;
+    for (uint32_t group = 0; group < groups; group++)
+    {
+        const uint32_t end = group + 1 < groups ? firsts[group + 1] : effects;
+        if (end < firsts[group] || end > effects || end - firsts[group] > 0x10000)
+        {
+            throw xsflib::FormatError(std::string(profile.sound_archive) + "'s table of groups is damaged");
+        }
+
+        for (uint32_t place = 0; place < end - firsts[group]; place++)
+        {
+            const uint32_t id = group << 16 | place;
+            const auto name = names.find(id);
+            std::string label = std::to_string(place);
+            label.insert(0, label.size() < 3 ? 3 - label.size() : 0, '0');
+            sounds.push_back(
+                {id, name != names.end() ? name->second : "se" + std::to_string(group) + "-" + label, false});
+        }
+    }
+
+    return sounds;
+}
 
 std::vector<Sound> ListSongs(const disc::GameFiles& game, const GameProfile& profile)
 {
@@ -2292,10 +3645,45 @@ std::vector<Sound> ListSongs(const disc::GameFiles& game, const GameProfile& pro
         return RedSounds(game, profile);
     }
 
+    if (profile.library == SoundLibrary::kHal)
+    {
+        return HalEffects(game, profile);
+    }
+
+    if (profile.driver == Driver::kMusyX)
+    {
+        const MusyXCatalogue catalogue = GatherMusyX(game, profile);
+        std::vector<Sound> sounds;
+        for (std::size_t i = 0; i < catalogue.entries.size(); i++)
+        {
+            const MusyXCatalogue::Entry& entry = catalogue.entries[i];
+            const bool song = entry.kind == MusyXCatalogue::Kind::kSong;
+            const uint32_t key = uint32_t{entry.song_group} << 16 | entry.id;
+            const std::vector<uint32_t>& streamed = profile.musyx_streamed_songs;
+            const bool stream = song && std::find(streamed.begin(), streamed.end(), key) != streamed.end();
+            sounds.push_back({static_cast<uint32_t>(i), entry.label, song, stream});
+        }
+
+        return sounds;
+    }
+
     const std::optional<ntdlib::Dol> dol = ntdlib::Dol::Parse(game.dol);
     if (!dol)
     {
         throw xsflib::FormatError("main.dol isn't a DOL");
+    }
+
+    if (profile.library == SoundLibrary::kNintendo64)
+    {
+        std::vector<Sound> sounds = N64Pieces(*dol, profile);
+        if (profile.n64_effects)
+        {
+            std::vector<Sound> effects = N64Effects(game, *dol, profile);
+            sounds.insert(sounds.end(), std::make_move_iterator(effects.begin()),
+                          std::make_move_iterator(effects.end()));
+        }
+
+        return sounds;
     }
 
     if (profile.library == SoundLibrary::kJac)
@@ -2409,6 +3797,31 @@ std::vector<UnplayedSequence> UnplayedSequences(const GameProfile& profile, cons
     return unplayed;
 }
 
+// The part of a game's code and data that main.dol holds packed at `address` (see GameProfile::packed_module),
+// unpacked. Throws xsflib::FormatError if it's damaged.
+std::vector<uint8_t> UnpackModule(const ntdlib::Dol& dol, uint32_t address)
+{
+    const std::span<const uint8_t> packed = DolBytes(dol, address);
+    if (packed.size() < 8 || xsflib::LoadBe32(packed.data()) > packed.size() - 8)
+    {
+        throw xsflib::FormatError("main.dol's packed code runs past its section");
+    }
+
+    std::vector<uint8_t> module(xsflib::LoadBe32(packed.data() + 4));
+    try
+    {
+        if (ntdlib::disc::Inflate(packed.subspan(8, xsflib::LoadBe32(packed.data())), module) == module.size())
+        {
+            return module;
+        }
+    }
+    catch (const std::exception&)
+    {
+    }
+
+    throw xsflib::FormatError("main.dol's packed code is damaged");
+}
+
 std::optional<std::vector<uint8_t>> BuildLibrary(const disc::GameFiles& game, const GameProfile& profile,
                                                  const Tags& tags, std::string* error,
                                                  const std::vector<std::string>* wave_archives)
@@ -2429,11 +3842,64 @@ std::optional<std::vector<uint8_t>> BuildLibrary(const disc::GameFiles& game, co
         return fail("main.dol isn't a DOL");
     }
 
-    // The game's code and data, section by section.
+    // The game's code and data, section by section. A game that maps part of them through the page table keeps that
+    // part packed (GameProfile::packed_module). Its sections go where the profile's patches map them with a BAT. They
+    // replace main.dol's sections that they overlap.
+    std::vector<uint8_t> module_bytes;
+    std::optional<ntdlib::Dol> module;
+    if (profile.packed_module)
+    {
+        try
+        {
+            module_bytes = UnpackModule(*dol, profile.packed_module);
+        }
+        catch (const xsflib::FormatError& e)
+        {
+            return fail(e.what());
+        }
+
+        module = ntdlib::Dol::Parse(module_bytes);
+        if (!module)
+        {
+            return fail("main.dol's packed code isn't a DOL");
+        }
+    }
+
+    const auto overlaps_module = [&](const ntdlib::Dol::Section& section)
+    {
+        if (!module)
+        {
+            return false;
+        }
+
+        const uint64_t start = section.address, end = start + section.data.size();
+        for (const ntdlib::Dol::Section& part : module->Sections())
+        {
+            const uint64_t part_start = uint64_t{part.address} + profile.module_offset;
+            if (start < part_start + part.data.size() && part_start < end)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    };
+
     ProgramBuilder program;
     for (const ntdlib::Dol::Section& section : dol->Sections())
     {
-        program.AddMemory(section.address, section.data.data(), section.data.size());
+        if (!overlaps_module(section))
+        {
+            program.AddMemory(section.address, section.data.data(), section.data.size());
+        }
+    }
+
+    if (module)
+    {
+        for (const ntdlib::Dol::Section& section : module->Sections())
+        {
+            program.AddMemory(section.address + profile.module_offset, section.data.data(), section.data.size());
+        }
     }
 
     // The driver, with the game's profile in its parameters. A .minigcsf fills in the sound. For a driver that
@@ -2474,6 +3940,37 @@ std::optional<std::vector<uint8_t>> BuildLibrary(const disc::GameFiles& game, co
     ProcessDescriptor d;
     d.entry = dol->Entry();
     d.status_address = DriverBlock::kAddress + DriverBlock::kStatusOffset;
+
+    // A game for driver/musyx.c: the disc's header, the catalogue, and the files of its groups and songs.
+    if (profile.driver == Driver::kMusyX)
+    {
+        try
+        {
+            const MusyXCatalogue catalogue = GatherMusyX(game, profile);
+            program.AddFile("sys/boot.bin", game.boot);
+            program.AddFile(kMusyXCatalogue, CatalogueFile(catalogue));
+            for (std::size_t i = 0; i < catalogue.sets.size(); i++)
+            {
+                const MusyXCatalogue::FileSet& set = catalogue.sets[i];
+                const uint32_t number = static_cast<uint32_t>(i);
+                program.AddFile(MusyXPath(number, ".proj"), set.project);
+                program.AddFile(MusyXPath(number, ".pool"), set.pool);
+                program.AddFile(MusyXPath(number, ".sdir"), set.sdir);
+                program.AddFile(MusyXPath(number, ".samp"), set.samples);
+            }
+
+            for (std::size_t i = 0; i < catalogue.songs.size(); i++)
+            {
+                program.AddFile(MusyXPath(static_cast<uint32_t>(i), ".sng"), catalogue.songs[i]);
+            }
+        }
+        catch (const xsflib::FormatError& e)
+        {
+            return fail(e.what());
+        }
+
+        return WritePsf(kPsfVersionGcsf, d.Serialize(), program.Data(), tags);
+    }
 
     // A MusyX game: the disc's header, the sound banks and every song's file.
     if (profile.library == SoundLibrary::kMusyX)
@@ -2532,7 +4029,7 @@ std::optional<std::vector<uint8_t>> BuildLibrary(const disc::GameFiles& game, co
         {
             if (!banks.contains(bank))
             {
-                error = path + " names wave bank " + std::to_string(bank) + ", which the disc lacks";
+                error = path + " names wave bank " + std::to_string(bank) + ". The disc doesn't have that bank";
                 return false;
             }
 
@@ -2615,6 +4112,41 @@ std::optional<std::vector<uint8_t>> BuildLibrary(const disc::GameFiles& game, co
 
             program.AddFile(banks.at(bank), bytes);
         }
+
+        return WritePsf(kPsfVersionGcsf, d.Serialize(), program.Data(), tags);
+    }
+
+    // A game with HAL Laboratory's sound library: the disc's header, the effects' scripts and their samples.
+    if (profile.library == SoundLibrary::kHal)
+    {
+        program.AddFile("sys/boot.bin", game.boot);
+        std::vector<std::string> paths = {profile.sound_archive};
+        paths.insert(paths.end(), profile.other_sound_files.begin(), profile.other_sound_files.end());
+        for (const std::string& path : paths)
+        {
+            std::vector<uint8_t> bytes;
+            if (!game.read_file || !game.read_file(path, bytes))
+            {
+                return fail("can't read " + path);
+            }
+
+            program.AddFile(path, bytes);
+        }
+
+        return WritePsf(kPsfVersionGcsf, d.Serialize(), program.Data(), tags);
+    }
+
+    // A game with the Nintendo 64's sound library: the disc's header and the file of sound data.
+    if (profile.library == SoundLibrary::kNintendo64)
+    {
+        std::vector<uint8_t> data;
+        if (!game.read_file || !game.read_file(profile.sound_archive, data))
+        {
+            return fail(std::string("can't read ") + profile.sound_archive);
+        }
+
+        program.AddFile("sys/boot.bin", game.boot);
+        program.AddFile(profile.sound_archive, data);
 
         return WritePsf(kPsfVersionGcsf, d.Serialize(), program.Data(), tags);
     }
@@ -2867,15 +4399,16 @@ ntdlib::jaudio::GameWatch WatchOf(const GameProfile& p)
 // A song in game mode, as xsflib's MeasureLength plays it (see xsflib/rip/length.h). The adapter follows the song
 // through its sound library's state. A derived class reads that state: whether the song plays, and whether it has
 // gone back to the start of its loop. A frame is one block of the analysis's output (kLengthRules.block_frames). The
-// song also counts as playing before it first plays. Its loop has one target, 0. The output keeps a constant level on
-// each channel once the song has stopped. Sound is therefore a sample that differs by more than xsflib's
-// kSilenceLevel from its channel's recent level. That level is a running average over about 50 ms. The song rings
-// while it has sounded in the last 0.5 s. The analysis therefore keeps the end of a release. The adapter follows no
-// voices and finds no steady state.
+// song also counts as playing before it first plays. Its loop has one target, 0. MusyX's and Red's output keeps a
+// constant level on each channel once the song has stopped. Sound is therefore a sample that differs by more than
+// xsflib's kSilenceLevel from its channel's recent level. That level is a running average over about 50 ms. An output
+// that rests at 0 (`rests_at_zero`) counts a sample louder than kSilenceLevel as sound, as the other analyses do. The
+// song rings while it has sounded in the last 0.5 s. The analysis therefore keeps the end of a release. The adapter
+// follows no voices and finds no steady state.
 class LibrarySong
 {
 public:
-    explicit LibrarySong(Player& player) : player_(player)
+    explicit LibrarySong(Player& player, bool rests_at_zero = false) : player_(player), rests_at_zero_(rests_at_zero)
     {
     }
 
@@ -2893,7 +4426,7 @@ public:
         for (std::size_t i = 0; i < 2 * kLengthRules.block_frames; i++)
         {
             double& level = levels_[i % 2];
-            sounded_ = sounded_ || std::abs(block[i] - level) > xsflib::rip::kSilenceLevel;
+            sounded_ = sounded_ || std::abs(block[i] - (rests_at_zero_ ? 0.0 : level)) > xsflib::rip::kSilenceLevel;
             level += (block[i] - level) / kLevelSamples;
         }
 
@@ -3017,6 +4550,7 @@ private:
     static constexpr uint64_t kStartFrames = 5000 * kLengthRules.sample_rate / 1000 / kLengthRules.block_frames;
 
     Player& player_;
+    bool rests_at_zero_;
     double levels_[2] = {0.0, 0.0};
     std::function<void(int, uint32_t)> on_loop_;
     std::optional<uint64_t> last_sound_;
@@ -3027,11 +4561,13 @@ private:
 };
 
 // A MusyX song (see LibrarySong). It plays while it's in one of MusyX's lists of songs. A jingle's thread waits half a
-// second before it starts the jingle. The song loops in a frame in which its tracks' slots fall.
+// second before it starts the jingle. Each section of the song counts its loops (see MusyXSections). The song has
+// looped once more when each section that loops has.
 class MusyXSong : public LibrarySong
 {
 public:
-    MusyXSong(Player& player, const GameProfile& profile) : LibrarySong(player), profile_(profile)
+    MusyXSong(Player& player, const GameProfile& profile, const MusyXSections& sections)
+        : LibrarySong(player), profile_(profile), sections_(sections)
     {
         last_ticks_.assign(profile.track_slot_count, 0);
     }
@@ -3042,22 +4578,322 @@ private:
         return Word(profile_.song_lists[0]) != 0 || Word(profile_.song_lists[1]) != 0;
     }
 
-    // A loop of the song moves its tracks back, all in one frame. A slot's new tick depends on the pass.
     bool Looped() override
     {
-        bool looped = false;
-        for (uint32_t k = 0; k < profile_.track_slot_count; k++)
+        CountSectionLoops();
+
+        // The song's count is the least of the counts of its sections that loop.
+        uint32_t least = UINT32_MAX;
+        for (std::size_t s = 0; s < MusyXSections::kSections; s++)
+        {
+            if (sections_.looping >> s & 1)
+            {
+                least = std::min(least, section_loops_[s]);
+            }
+        }
+
+        if (sections_.looping == 0 || least <= song_loops_)
+        {
+            return false;
+        }
+
+        song_loops_ = least;
+
+        return true;
+    }
+
+    // Brings each section's count of its loops up to date. MusyX keeps the counts where the profile gives them.
+    // Otherwise a section loops in a frame in which the slots of its tracks fall. A loop moves the section's tracks
+    // back, all in one frame. A slot's new tick depends on the pass. A section whose tracks reach their loop entries in
+    // the frame of the loop shows no fall.
+    void CountSectionLoops()
+    {
+        if (profile_.section_loops != 0)
+        {
+            for (uint32_t s = 0; s < MusyXSections::kSections; s++)
+            {
+                section_loops_[s] = Word(profile_.section_loops + s * profile_.section_loop_size) >> 16;
+            }
+
+            return;
+        }
+
+        uint32_t fell = 0;
+        for (uint32_t k = 0; k < profile_.track_slot_count && k < MusyXSections::kTracks; k++)
         {
             const uint32_t ticks = Word(profile_.track_slots + k * profile_.track_slot_size);
-            looped = looped || ticks < last_ticks_[k];
+            if (ticks < last_ticks_[k] && sections_.of_track[k] < MusyXSections::kSections)
+            {
+                fell |= 1u << sections_.of_track[k];
+            }
             last_ticks_[k] = ticks;
         }
 
-        return looped;
+        for (std::size_t s = 0; s < MusyXSections::kSections; s++)
+        {
+            section_loops_[s] += fell >> s & 1;
+        }
     }
 
     const GameProfile& profile_;
+    const MusyXSections sections_;
     std::vector<uint32_t> last_ticks_;
+    std::array<uint32_t, MusyXSections::kSections> section_loops_ = {};
+    uint32_t song_loops_ = 0;
+};
+
+// The entry of sound `id` in the catalogue in `library`, or null if the library has no catalogue or the catalogue no
+// such sound.
+const uint8_t* CatalogueEntry(const LoadedSet& library, uint32_t id)
+{
+    constexpr uint32_t kSounds = 8, kSoundsAt = 12, kSound = 20;
+    const std::vector<uint8_t>* catalogue = library.File(kMusyXCatalogue);
+    if (catalogue == nullptr || catalogue->size() < kSoundsAt + 4 ||
+        id >= xsflib::LoadBe32(catalogue->data() + kSounds))
+    {
+        return nullptr;
+    }
+
+    const uint64_t entry = uint64_t{xsflib::LoadBe32(catalogue->data() + kSoundsAt)} + uint64_t{id} * kSound;
+
+    return entry + kSound <= catalogue->size() ? catalogue->data() + entry : nullptr;
+}
+
+// The sections of the song that sound `id` plays, from the catalogue in `library` (see MusyXSections). A sound without
+// a song, or a library without a catalogue, gets the defaults.
+MusyXSections SoundSections(const LoadedSet& library, uint32_t id)
+{
+    constexpr uint32_t kSong = 8;
+    const uint8_t* entry = CatalogueEntry(library, id);
+    if (entry == nullptr)
+    {
+        return {};
+    }
+
+    const std::vector<uint8_t>* file = library.File(MusyXPath(xsflib::LoadBe16(entry + kSong), ".sng"));
+
+    return file != nullptr ? SectionsOf(*file) : MusyXSections{};
+}
+
+// Whether sound `id` of the catalogue in `library` is an effect.
+bool IsMusyXEffect(const LoadedSet& library, uint32_t id)
+{
+    const uint8_t* entry = CatalogueEntry(library, id);
+
+    return entry != nullptr && entry[0] == static_cast<uint8_t>(MusyXCatalogue::Kind::kEffect);
+}
+
+// A MusyX effect (see LibrarySong and MusyXVoices). The effect plays while one of MusyX's voices is busy: while its
+// synthesizer voice is in use, or while its DSP voice plays. A rip sends an effect no events, such as a key-off. A
+// voice whose macro has ended, or waits for an event, therefore changes no more. The voice has settled. The sound
+// changes when a voice starts or stops, moves to another step of its macro, or starts to wait. A voice's macro loops
+// when a LOOP step without a count (a count of 0xFFFF) jumps back. The first voice that loops gives the effect's loops.
+// Another voice that is still busy holds the fade back until it has looped twice too, or has settled.
+//
+// An effect whose voices have all settled holds. xsflib's MeasureLength loops it at the later of two points: 10 s after
+// its sound last changed, and the second time since then that each playing DSP voice has passed the start of its
+// sample's loop. An effect whose voices have all settled while no DSP voice plays has ended.
+class MusyXEffect : public LibrarySong
+{
+public:
+    MusyXEffect(Player& player, const GameProfile& profile)
+        : LibrarySong(player),
+          voices_(profile.musyx_voices),
+          cpu_(player.System()->Cpu()),
+          now_(voices_.count),
+          loops_(voices_.count, 0)
+    {
+        cpu_.Watch({voices_.loop_handler}, [this](uint32_t) { StepLoops(); });
+    }
+
+    MusyXEffect(const MusyXEffect&) = delete;
+    MusyXEffect& operator=(const MusyXEffect&) = delete;
+
+    ~MusyXEffect() override
+    {
+        cpu_.Watch({}, nullptr);
+    }
+
+    // MeasureLength reads these in place of LibrarySong's.
+    std::size_t VoiceCount() const
+    {
+        return voices_.count;
+    }
+
+    xsflib::rip::VoicePlace Voice(std::size_t i) const
+    {
+        const VoiceState& v = now_[i];
+
+        return {.playing = v.state != 0, .loops = v.loop != 0, .position = v.position};
+    }
+
+    bool Settled() const
+    {
+        return settled_ && frame_ - changed_frame_ >= kHoldFrames;
+    }
+
+    bool Stuck() const
+    {
+        return settled_;
+    }
+
+    uint64_t ChangedAt() const
+    {
+        return changes_;
+    }
+
+    int ActiveChannels() const
+    {
+        return sampling_;
+    }
+
+private:
+    // A voice's state in a frame.
+    struct VoiceState
+    {
+        uint32_t id = kFree;
+        uint32_t macro = 0;
+        uint32_t step = 0;
+        uint64_t wait = 0;
+        uint8_t state = 0;
+        int64_t position = 0;
+        uint32_t loop = 0;
+
+        bool Busy() const
+        {
+            return id != kFree || state != 0;
+        }
+
+        // Whether the voice's macro has ended or waits for an event.
+        bool Settled() const
+        {
+            return id == kFree || macro == 0 || wait == kForever;
+        }
+
+        // Whether the voice's sound has changed since `last`. The position of its sample moves on.
+        bool ChangedFrom(const VoiceState& last) const
+        {
+            return id != last.id || macro != last.macro || step != last.step || wait != last.wait ||
+                   (state != 0) != (last.state != 0);
+        }
+    };
+
+    static constexpr uint32_t kFree = 0xffffffff;
+    static constexpr uint64_t kForever = UINT64_MAX;
+
+    // A held effect loops 10 s after its sound last changed at the earliest.
+    static constexpr uint64_t kHoldFrames = 10 * kLengthRules.sample_rate / kLengthRules.block_frames;
+
+    // The byte at `address` in the game's memory, or 0 where no memory is.
+    uint8_t Byte(uint32_t address) const
+    {
+        return static_cast<uint8_t>(Word(address & ~3u) >> (8 * (3 - (address & 3))));
+    }
+
+    // Reads the voices. LibrarySong calls this once a frame.
+    bool Playing() override
+    {
+        frame_ = frames_++;
+        const uint32_t synth = Word(voices_.synth);
+        const uint32_t dsp = Word(voices_.dsp);
+        if (synth == 0 || dsp == 0)
+        {
+            return false;
+        }
+
+        bool busy = false;
+        bool changed = false;
+        settled_ = true;
+        sampling_ = 0;
+        for (uint32_t i = 0; i < voices_.count; i++)
+        {
+            const uint32_t s = synth + i * voices_.synth_size;
+            const uint32_t d = dsp + i * voices_.dsp_size;
+            VoiceState v;
+            v.id = Word(s + voices_.id_offset);
+            v.macro = Word(s + voices_.macro_offset);
+            v.step = Word(s + voices_.step_offset);
+            v.wait = uint64_t{Word(s + voices_.wait_offset)} << 32 | Word(s + voices_.wait_offset + 4);
+            v.state = Byte(d + voices_.state_offset);
+            v.position = Word(d + voices_.position_offset);
+            v.loop = Word(d + voices_.loop_offset);
+
+            changed = changed || v.ChangedFrom(now_[i]);
+            busy = busy || v.Busy();
+            settled_ = settled_ && v.Settled();
+            sampling_ += v.state != 0 ? 1 : 0;
+            now_[i] = v;
+        }
+
+        if (changed)
+        {
+            ++changes_;
+            changed_frame_ = frame_;
+        }
+
+        return busy;
+    }
+
+    // MusyX runs a LOOP step of the macro of the voice in r3. The step is in r4: two words. The step's count is the
+    // high half of the second word. Bit 16 of the first word makes the count random.
+    void StepLoops()
+    {
+        const uint32_t synth = Word(voices_.synth);
+        const uint32_t voice = cpu_.state_.gpr[3];
+        const uint32_t step = cpu_.state_.gpr[4];
+        if (synth == 0 || voice < synth || voices_.synth_size == 0)
+        {
+            return;
+        }
+
+        const uint32_t i = (voice - synth) / voices_.synth_size;
+        if (i >= voices_.count || Word(step + 4) >> 16 != 0xffff || (Word(step) >> 16 & 1) != 0)
+        {
+            return;
+        }
+
+        ++loops_[i];
+        if (!first_)
+        {
+            first_ = i;
+        }
+        if (i == *first_)
+        {
+            looped_ = true;
+        }
+    }
+
+    bool Looped() override
+    {
+        return std::exchange(looped_, false);
+    }
+
+    bool OthersDone() override
+    {
+        for (uint32_t i = 0; i < voices_.count; i++)
+        {
+            const VoiceState& v = now_[i];
+            if (i != first_ && v.Busy() && !v.Settled() && loops_[i] < xsflib::rip::kLengthLoops)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    const MusyXVoices voices_;
+    ppc::Cpu& cpu_;
+    std::vector<VoiceState> now_;   // each voice's state in this frame
+    std::vector<int> loops_;        // each voice's loops so far
+    std::optional<uint32_t> first_; // the first voice that looped
+    bool looped_ = false;           // whether that voice has looped since the last frame
+    bool settled_ = false;          // whether every voice has settled
+    int sampling_ = 0;              // the DSP voices that play
+    uint64_t changes_ = 0;          // the changes of the sound so far
+    uint64_t frames_ = 0;           // the frames so far
+    uint64_t frame_ = 0;            // this frame
+    uint64_t changed_frame_ = 0;    // the frame of the sound's last change
 };
 
 // A piece of a Red game (see LibrarySong). It plays while one of Red's music controls plays a piece. It loops in a
@@ -3224,8 +5060,402 @@ private:
     bool looped_ = false;           // whether that track has looped since the last frame
 };
 
-// The length of a song that `song` follows: two loops and a 10 s fade, or its last sound and a 0.5 s tail.
-std::optional<Timing> MeasureSong(LibrarySong& song)
+// An effect of a HAL game (see LibrarySong). It plays while the driver's handle holds the effect's entry in the sound
+// library's table. The driver clears the handle once the sound library has freed the entry. The sound library frees
+// it once the effect's script has ended and its voices have stopped. The output rests at 0. The analysis follows no
+// loops of the scripts. The Bonus Disc's effects have none.
+class HalEffect : public LibrarySong
+{
+public:
+    explicit HalEffect(Player& player) : LibrarySong(player, true)
+    {
+    }
+
+private:
+    bool Playing() override
+    {
+        return Word(DriverBlock::kAddress + kParamsHandleOffset) != 0;
+    }
+
+    bool Looped() override
+    {
+        return false;
+    }
+};
+
+// A script of the Nintendo 64's sound library: a sequence player's, a channel's or a layer's. Their order is that of
+// GameProfile::n64_command_reads and n64_flow_returns.
+enum class N64Script : uint8_t
+{
+    kPlayer,
+    kChannel,
+    kLayer,
+};
+
+// Where Animal Crossing's build of the Nintendo 64's sound library keeps what the length analysis reads. A script's
+// state holds its program counter at +0, the depth of its calls and loops at +0x18, and its value at +0x19. A sequence
+// player holds its script's state at +0x78, its sequence's data at +0x18 and the ticks left to wait at +0x10. A channel
+// holds its script's state at +0x64, its player at +0x50 and the ticks left to wait at +0x22. A layer holds its
+// script's state at +0x64, its channel at +0x60 and the ticks left to wait at +0x1a.
+constexpr uint32_t kN64Pc = 0x00;
+constexpr uint32_t kN64Depth = 0x18;
+constexpr uint32_t kN64Value = 0x19;
+constexpr uint32_t kN64PlayerScript = 0x78;
+constexpr uint32_t kN64PlayerData = 0x18;
+constexpr uint32_t kN64PlayerWait = 0x10;
+constexpr uint32_t kN64ChannelScript = 0x64;
+constexpr uint32_t kN64ChannelPlayer = 0x50;
+constexpr uint32_t kN64ChannelWait = 0x22;
+constexpr uint32_t kN64LayerScript = 0x64;
+constexpr uint32_t kN64LayerChannel = 0x60;
+constexpr uint32_t kN64LayerWait = 0x1a;
+
+// The commands of the Nintendo 64's sound library that end a script at depth 0, or return from a call. From 0xf2 to
+// 0xfe, the commands jump, call, loop and wait in all three kinds of script.
+constexpr uint8_t kN64End = 0xff;
+constexpr uint8_t kN64FirstFlow = 0xf2;
+
+// The codes that the analysis passes to ntdlib's LoopFinder in place of a command: a command that changes the sound,
+// one that doesn't, and the end of a script.
+constexpr uint8_t kN64Changes = 0x00;
+constexpr uint8_t kN64Still = 0xfe;
+
+// Whether a command of a script changes the sound: a note, a channel or layer started or stopped, or a parameter of the
+// sound. Waits, jumps, calls, loops and the commands on ports and values don't. A layer's commands are notes up to
+// 0xbf. 0xc0 waits.
+bool N64ChangesSound(N64Script script, uint8_t command)
+{
+    if (command >= kN64FirstFlow)
+    {
+        return false;
+    }
+
+    switch (script)
+    {
+    case N64Script::kPlayer:
+        // 0x00 to 0x3f test the channels, and 0x50 to 0x8f use the ports and loads. 0x40 to 0x4f stop channels, and
+        // 0x90 to 0xaf start them. 0xb0 to 0xc1 load sequences, call the game and set nothing. 0xc2 jumps through a
+        // table, 0xc5 counts, and 0xc7 to 0xcf work on the value. 0xc3 mutes channels, and 0xc4 and 0xc6 start and
+        // stop sequences. From 0xd0, the commands set the player's parameters.
+        if (command < 0x40 || (command >= 0x50 && command < 0x90) || (command >= 0xb0 && command < 0xc2))
+        {
+            return false;
+        }
+
+        return command != 0xc2 && command != 0xc5 && !(command >= 0xc7 && command <= 0xcf) && command != 0xef;
+    case N64Script::kChannel:
+        // 0x00 to 0x1f wait and load voices. 0x20 to 0x2f start channels. 0x30 to 0x77 use the ports and the value.
+        // 0x78 to 0x7b start layers, and 0x80 to 0x83 test them. 0x88 to 0x9b start and stop layers. 0xa0 to 0xbe
+        // work on the value and the channel's state, apart from the filters, the random variation and the sample's
+        // start (0xa4, 0xb0, 0xb1, 0xb3, 0xb9 to 0xbb and 0xbd). From 0xc1, the commands set the channel's instrument
+        // and parameters, apart from the jumps through tables (0xc2, 0xc5, 0xe4) and the work on the value (0xc7 to
+        // 0xcf but 0xca and 0xcd).
+        if (command < 0x20 || (command >= 0x30 && command < 0x78) || (command >= 0x80 && command < 0x88))
+        {
+            return false;
+        }
+
+        if (command < 0xa0)
+        {
+            return true;
+        }
+
+        if (command < 0xc1)
+        {
+            return command == 0xa4 || command == 0xb0 || command == 0xb1 || command == 0xb3 ||
+                   (command >= 0xb9 && command <= 0xbb) || command == 0xbd;
+        }
+
+        return command != 0xc2 && command != 0xc5 && command != 0xe4 &&
+               !(command >= 0xc7 && command <= 0xcf && command != 0xca && command != 0xcd);
+    case N64Script::kLayer:
+        return command != 0xc0;
+    }
+
+    return true;
+}
+
+// The length of a sound of the Nintendo 64's sound library, which the driver has started (see LengthAnalyzer::Analyze).
+// For a piece of music, the driver's handle holds the piece's sequence player. The analysis follows the player's
+// script, its channels' and their layers' through ntdlib's LoopFinder, as it follows a JAudio sound's tracks
+// (ntdlib::jaudio::AnalyzeGameSound). A script is a track. The player's script is the root. For an effect, the handle
+// holds the channel of the effects sequence that plays the effect. The channel's script is the root, and its layers
+// follow. A track's position is an offset in the sequence's data. The sound ends when the driver clears the handle.
+std::optional<Timing> AnalyzeN64Sound(Player& player, const GameProfile& profile, uint32_t handle_address, bool effect)
+{
+    using ntdlib::jaudio::FramesToMs;
+    using ntdlib::jaudio::LoopFinder;
+    using ntdlib::jaudio::TrackEvent;
+    constexpr const ntdlib::jaudio::GameLengthRules& rules = kLengthRules;
+    const auto ms = [](uint64_t frames)
+    {
+        return FramesToMs(frames, rules.sample_rate);
+    };
+
+    AnalysisMachine machine(player);
+    ppc::Cpu& cpu = machine.Cpu();
+    std::vector<TrackEvent> events;
+    std::map<uint32_t, N64Script> scripts; // each track's kind, by its script's state
+    uint32_t root = 0; // the sound's sequence player or channel, once the driver has started the sound
+    uint32_t data = 0; // the sequence's data
+    uint64_t frames = 0;
+
+    // The script that a call of the library's functions came from, by its return address.
+    const auto script_of = [](uint32_t lr, const std::array<uint32_t, 3>& returns) -> std::optional<N64Script>
+    {
+        const auto it = std::find(returns.begin(), returns.end(), lr);
+        return it != returns.end() ? std::optional(static_cast<N64Script>(it - returns.begin())) : std::nullopt;
+    };
+
+    // The channel that a script's state belongs to, or 0 for a sequence player's.
+    const auto channel_of = [&machine](N64Script script, uint32_t state) -> uint32_t
+    {
+        switch (script)
+        {
+        case N64Script::kPlayer:
+            return 0;
+        case N64Script::kChannel:
+            return state - kN64ChannelScript;
+        case N64Script::kLayer:
+            return machine.Word(state - kN64LayerScript + kN64LayerChannel);
+        }
+
+        return 0;
+    };
+
+    // Whether a script belongs to the sound: to its sequence player, or to its channel.
+    const auto belongs = [&](N64Script script, uint32_t state)
+    {
+        const uint32_t channel = channel_of(script, state);
+        if (effect)
+        {
+            return channel != 0 && channel == root;
+        }
+
+        const uint32_t owner = channel ? machine.Word(channel + kN64ChannelPlayer) : state - kN64PlayerScript;
+        return owner == root;
+    };
+
+    // Each command's start, from the reads of commands, and each jump that the flow function takes. A jump's position
+    // is after its arguments. A relative jump counts from there.
+    const auto on_watch = [&](uint32_t pc)
+    {
+        const auto& s = cpu.state_;
+        if (!root)
+        {
+            return;
+        }
+
+        if (pc == profile.n64_read_byte)
+        {
+            const std::optional<N64Script> script = script_of(s.lr, profile.n64_command_reads);
+            const uint32_t state = s.gpr[3];
+            if (!script || !belongs(*script, state))
+            {
+                return;
+            }
+
+            const uint32_t position = machine.Word(state + kN64Pc);
+            const uint8_t command = machine.Byte(position).value_or(0);
+            const uint8_t depth = machine.Byte(state + kN64Depth).value_or(0);
+            const uint8_t code = command == kN64End                  ? (depth == 0 ? kN64End : kN64Still)
+                                 : N64ChangesSound(*script, command) ? kN64Changes
+                                                                     : kN64Still;
+            scripts.emplace(state, *script);
+            events.push_back({TrackEvent::Kind::kCommand, state, position - data, 0, depth, code, frames});
+            return;
+        }
+
+        const std::optional<N64Script> script = script_of(s.lr, profile.n64_flow_returns);
+        const uint32_t state = s.gpr[4];
+        if (!script || !belongs(*script, state))
+        {
+            return;
+        }
+
+        const uint32_t position = machine.Word(state + kN64Pc);
+        const auto value = static_cast<int8_t>(machine.Byte(state + kN64Value).value_or(0));
+        const uint32_t argument = s.gpr[6];
+        const uint32_t absolute = data + (argument & 0xffff);
+        const uint32_t relative = position + static_cast<uint32_t>(static_cast<int8_t>(argument & 0xff));
+        std::optional<uint32_t> target;
+        switch (s.gpr[5] & 0xff)
+        {
+        case 0xfb: // jump
+            target = absolute;
+            break;
+        case 0xfa: // jump if the value is 0
+            target = value == 0 ? std::optional(absolute) : std::nullopt;
+            break;
+        case 0xf9: // jump if it's negative
+            target = value < 0 ? std::optional(absolute) : std::nullopt;
+            break;
+        case 0xf5: // jump if it isn't
+            target = value >= 0 ? std::optional(absolute) : std::nullopt;
+            break;
+        case 0xf4: // relative jump
+            target = relative;
+            break;
+        case 0xf3: // relative jump if the value is 0
+            target = value == 0 ? std::optional(relative) : std::nullopt;
+            break;
+        case 0xf2: // relative jump if it's negative
+            target = value < 0 ? std::optional(relative) : std::nullopt;
+            break;
+        default:
+            break;
+        }
+
+        if (target)
+        {
+            const uint8_t depth = machine.Byte(state + kN64Depth).value_or(0);
+            events.push_back({TrackEvent::Kind::kJump, state, position - data, *target - data, depth,
+                              static_cast<uint8_t>(s.gpr[5]), frames});
+        }
+    };
+
+    cpu.Watch({profile.n64_read_byte, profile.n64_flow}, on_watch);
+    struct Unwatch
+    {
+        ppc::Cpu& cpu;
+        ~Unwatch()
+        {
+            cpu.Watch({}, nullptr);
+        }
+    } unwatch{cpu};
+
+    // What a track waits for: the ticks left to wait. No script of the library waits for its notes.
+    const auto read_wait = [&](uint32_t track) -> ntdlib::jaudio::TrackWait
+    {
+        const auto it = scripts.find(track);
+        if (it == scripts.end())
+        {
+            return {0, false};
+        }
+
+        switch (it->second)
+        {
+        case N64Script::kPlayer:
+            return {static_cast<int32_t>(machine.Word(track - kN64PlayerScript + kN64PlayerWait) >> 16), false};
+        case N64Script::kChannel:
+            return {static_cast<int32_t>(machine.Word(track - kN64ChannelScript + kN64ChannelWait) >> 16), false};
+        case N64Script::kLayer:
+            return {static_cast<int16_t>(machine.Word(track - kN64LayerScript + kN64LayerWait) >> 16), false};
+        }
+
+        return {0, false};
+    };
+
+    // Play until the sound ends, loops twice, holds, falls silent for good or reaches the limit.
+    std::vector<int16_t> block(rules.block_frames * 2);
+    std::optional<LoopFinder> finder;
+    std::optional<uint64_t> first_sound;
+    uint64_t last_sound = 0;
+    std::optional<uint64_t> released;
+    const auto ended = [&]() -> Timing
+    {
+        if (!first_sound)
+        {
+            return {rules.tail_ms, 0, true};
+        }
+
+        return {ms(last_sound + 1) + rules.tail_ms, 0, false};
+    };
+
+    const auto changes = [](uint8_t code)
+    {
+        return code != kN64Still;
+    };
+
+    while (ms(frames) < rules.limit_ms)
+    {
+        events.clear();
+        if (machine.Render(block.data(), rules.block_frames) != rules.block_frames)
+        {
+            return std::nullopt;
+        }
+
+        for (std::size_t i = 0; i < rules.block_frames; i++)
+        {
+            if (xsflib::rip::Audible(std::span<const int16_t>(&block[2 * i], 2)))
+            {
+                last_sound = frames + i;
+                first_sound = first_sound.value_or(last_sound);
+            }
+        }
+
+        const uint32_t handle = machine.Word(handle_address);
+        if (handle && !finder)
+        {
+            root = handle;
+            const uint32_t track = root + (effect ? kN64ChannelScript : kN64PlayerScript);
+            data = machine.Word((effect ? machine.Word(root + kN64ChannelPlayer) : root) + kN64PlayerData);
+            scripts.emplace(track, effect ? N64Script::kChannel : N64Script::kPlayer);
+            finder.emplace(track, rules.sample_rate, +changes);
+        }
+
+        // The tracks' loops. Loops before the first sound don't count.
+        const ntdlib::jaudio::Sounded sounded = {first_sound.has_value(), last_sound};
+        for (const TrackEvent& event : events)
+        {
+            const LoopFinder::Verdict verdict = finder ? finder->Take(event, sounded) : LoopFinder::Verdict::kNone;
+            if (verdict == LoopFinder::Verdict::kLoops)
+            {
+                return Timing{ms(event.frame), rules.loop_fade_ms, false};
+            }
+
+            if (verdict == LoopFinder::Verdict::kEnded)
+            {
+                return ended();
+            }
+        }
+
+        frames += rules.block_frames;
+        if (finder)
+        {
+            finder->TakeWaits(read_wait);
+        }
+
+        // The driver clears the handle when the player stops. The notes can still sound after that: the output runs
+        // behind the sequence, and a release fades on.
+        if (!handle && finder && !released)
+        {
+            released = frames;
+        }
+
+        if (released && (ms(frames - std::max(*released, last_sound)) >= rules.tail_ms ||
+                         ms(frames - *released) >= ntdlib::jaudio::kStillMs))
+        {
+            return ended();
+        }
+
+        // A sound that holds loops where it holds, if it still sounds.
+        if (first_sound && finder && finder->Holds(frames))
+        {
+            if (ms(frames - last_sound) <= rules.holding_ms)
+            {
+                return Timing{ms(frames), rules.loop_fade_ms, false};
+            }
+
+            return ended();
+        }
+
+        if (first_sound && ms(frames - last_sound) >= rules.silence_ms)
+        {
+            return ended();
+        }
+    }
+
+    if (!first_sound)
+    {
+        return ended();
+    }
+
+    return Timing{rules.limit_ms, rules.loop_fade_ms, false};
+}
+
+// The rules of a song's length: two loops and a 10 s fade, or its last sound and a 0.5 s tail.
+xsflib::rip::LengthRules SongRules()
 {
     xsflib::rip::LengthRules rules;
     rules.frame_ms = 1000.0 * kLengthRules.block_frames / kLengthRules.sample_rate;
@@ -3235,7 +5465,13 @@ std::optional<Timing> MeasureSong(LibrarySong& song)
     rules.fade_ms = static_cast<double>(kLengthRules.loop_fade_ms);
     rules.tail_ms = static_cast<double>(kLengthRules.tail_ms);
 
-    return xsflib::rip::MeasureLength(song, rules);
+    return rules;
+}
+
+// The length of a song that `song` follows (see SongRules).
+std::optional<Timing> MeasureSong(LibrarySong& song)
+{
+    return xsflib::rip::MeasureLength(song, SongRules());
 }
 
 } // namespace
@@ -3322,9 +5558,20 @@ std::optional<Timing> LengthAnalyzer::Play(uint32_t id, const FileChunk* file, c
         return std::nullopt;
     }
 
+    if (profile.library == SoundLibrary::kMusyX && IsMusyXEffect(impl_->library, id))
+    {
+        if (profile.musyx_voices.count == 0)
+        {
+            return std::nullopt;
+        }
+
+        MusyXEffect effect(player, profile);
+        return xsflib::rip::MeasureLength(effect, SongRules());
+    }
+
     if (profile.library == SoundLibrary::kMusyX)
     {
-        MusyXSong song(player, profile);
+        MusyXSong song(player, profile, SoundSections(impl_->library, id));
         return MeasureSong(song);
     }
 
@@ -3338,6 +5585,18 @@ std::optional<Timing> LengthAnalyzer::Play(uint32_t id, const FileChunk* file, c
     {
         RedPiece piece(player, profile);
         return MeasureSong(piece);
+    }
+
+    if (profile.library == SoundLibrary::kNintendo64)
+    {
+        return AnalyzeN64Sound(player, profile, DriverBlock::kAddress + kParamsHandleOffset,
+                               id >> 24 == kN64EffectKind);
+    }
+
+    if (profile.library == SoundLibrary::kHal)
+    {
+        HalEffect effect(player);
+        return MeasureSong(effect);
     }
 
     // An AutoBgm piece never repeats. Once its root track idles in its polling routine, the passes of its other tracks

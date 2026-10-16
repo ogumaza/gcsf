@@ -11,12 +11,14 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "ntdlib/disc/containers.h"
 #include "ntdlib/disc/game.h"
+#include "ntdlib/dol.h"
 #include "ntdlib/jaudio/archive.h"
 #include "xsflib/rip/length.h"
 
@@ -58,6 +60,79 @@ enum class Driver : uint8_t
     // driver/crystal_chronicles.c: Final Fantasy Crystal Chronicles' managers. It loads the wave bank that a piece or
     // an effect names, or the blocks of effects.
     kCrystalChronicles,
+    // driver/animal_crossing.c: Animal Crossing's sound library. The sound library reads all of the game's sound data.
+    kAnimalCrossing,
+    // driver/colosseum_bonus.c: the sound library of the Pokémon Colosseum Bonus Disc's download program, with the
+    // effects' scripts and samples.
+    kColosseumBonus,
+    // driver/musyx.c: MusyX's functions, not a game's layer over them. It loads the groups that a sound of the rip's
+    // catalogue names (see GameProfile::musyx_files).
+    kMusyX,
+};
+
+// Where a game for driver/musyx.c keeps its MusyX files. The ripper gathers them into the catalogue of the game's
+// sounds (see rip/musyx.h).
+enum class MusyXFiles : uint8_t
+{
+    kNone,
+    // Retro Studios' packs: the songs in MidiData.pak, and the audio group sets in AudioGrp.pak.
+    kRetro,
+    // Tales of Symphonia's files: a song table in the game's code (GameProfile::musyx_songs), the songs' files, and
+    // the groups in `bank_files`. A group's file holds MusyX's four files (see GatherMusyX).
+    kTales,
+    // Star Fox Adventures' files: a song table in the game's code (GameProfile::musyx_songs), the songs in
+    // audio/midi.wad, the music's triggers in audio/data/Music.bin, and the groups of two sets of MusyX's files in
+    // audio/.
+    kStarFox,
+    // Star Wars Rogue Squadron II: Rogue Leader's files: audio/data in the pack Rogue2/data.dat holds the banks of
+    // groups and their songs, and the game's music hall names the songs (GameProfile::musyx_songs).
+    kRogue,
+    // Pokémon Colosseum's FSYS archives: the module common_rel in common.fsys holds the table of sounds
+    // (GameProfile::musyx_songs), the table of the songs' files and the reverbs' settings. bgm_archive.fsys holds the
+    // songs. common.fsys holds the music's projects, pools and sample directories. sound/ holds their samples.
+    kColosseum,
+    // Resident Evil Zero's files in bio0/sound/: a song table in the game's code (GameProfile::musyx_songs) names each
+    // song's file and the archive that holds the song's group. The archive holds MusyX's project, pool and sample
+    // directory. A file with the archive's name holds the samples.
+    kResidentEvil,
+    // Paper Mario: The Thousand-Year Door's files: one set of MusyX's files, sound/proj/pmario, and the table of the
+    // game's sounds in its code (GameProfile::musyx_effects).
+    kPaperMario,
+    // Star Wars Rogue Squadron III: Rebel Strike's files: audio/data in the pack Rogue3/data.dat holds the banks of
+    // groups. Rogue Leader's pack has the same layout. The rip takes the effects that the banks' projects list.
+    kRebelStrike,
+};
+
+// A reverb of MusyX at `block` in the game's memory, and the settings that the game gives it. The reverb is a standard
+// one (SND_AUX_REVERBSTD), or with `high` MusyX's high-quality reverb (SND_AUX_REVERBHI). That one also takes the
+// crosstalk between its channels. The driver writes the settings into the block before it prepares the reverb.
+struct MusyXReverb
+{
+    uint32_t block = 0;
+    float coloration = 0, mix = 0, time = 0, damping = 0, pre_delay = 0;
+    bool high = false;
+    float crosstalk = 0;
+};
+
+// What the length analysis reads of MusyX's voices to follow an effect. Each voice of MusyX has two parts. A
+// synthesizer voice runs the voice's macro. A DSP voice plays the voice's sample. The word at `synth` points at the
+// `count` synthesizer voices, `synth_size` bytes each. In a synthesizer voice, the word at `id_offset` is 0xFFFFFFFF
+// while the voice is free. The word at `macro_offset` is the start of the voice's macro, or 0 once the macro has ended.
+// The word at `step_offset` points at the macro's next step. The 64-bit word at `wait_offset` gives the time at which
+// the voice's wait ends: 0 for no wait, and all ones for a wait that only an event ends. The word at `dsp` points at
+// the DSP voices, `dsp_size` bytes each. In a DSP voice, the byte at `state_offset` is 0 while the voice plays nothing.
+// The word at `position_offset` is the voice's place in ARAM, in nibbles. The word at `loop_offset` is the length of
+// the sample's loop, or 0 for a sample without a loop. MusyX's handler of a macro's LOOP step starts at
+// `loop_handler`. The handler takes the synthesizer voice in r3 and the step in r4. The length analysis measures no
+// effect of a profile whose `count` is 0.
+struct MusyXVoices
+{
+    uint32_t count = 0;
+    uint32_t synth = 0, synth_size = 0;
+    uint32_t id_offset = 0xf4, macro_offset = 0x34, step_offset = 0x38, wait_offset = 0x98;
+    uint32_t dsp = 0, dsp_size = 0;
+    uint32_t state_offset = 0, position_offset = 0x20, loop_offset = 0x8c;
+    uint32_t loop_handler = 0;
 };
 
 // A game's sound library. The format of the start-up archive and the commands of the sequences depend on it.
@@ -68,6 +143,12 @@ enum class SoundLibrary : uint8_t
     kMusyX,   // songs in SNG files, which tables in the game's code list
     kJac,     // an early JAudio1 that the game runs through its C functions: a sequence index in the game's code
     kRed,     // Square's Red driver: pieces in BGM files, effects in SEP and SEB files, wave banks in WD files
+    // Nintendo's sound library for the Nintendo 64, ported to the GameCube inside an early JAudio1: the sequences, the
+    // banks and the samples in one file of sound data, which tables in the game's code divide
+    kNintendo64,
+    // HAL Laboratory's sound library: a script for each effect in a file of scripts, and the effects' samples in a
+    // bank file
+    kHal,
 };
 
 // The most waves that a .minigcsf can name, for a driver that loads only the waves that a sound uses.
@@ -106,8 +187,8 @@ struct GameProfile
     const char* packed_archive = nullptr;
     const char* packed_sound_archive = nullptr;
 
-    // The sound name table (.asn) on the disc. It names the sounds of a JAudio1 game's sound table. Null if the game
-    // has none.
+    // The sound name table (.asn) on the disc. It names the sounds of a JAudio1 game's sound table. A HAL game's header
+    // of names goes here too (see kHal). Null if the game has none.
     const char* sound_names = nullptr;
 
     // A Jac game's sequence index (a BARC) in its code. The game plays a piece of music by its number in the index.
@@ -224,6 +305,10 @@ struct GameProfile
     uint32_t song_name_size = 0;
     std::vector<const char*> bank_files = {};
     const char* library_name = nullptr;
+    // With `library_per_disc`, the library's name ends with "Disc" and the disc's number, for example
+    // `ResidentEvilZeroDisc2`. A game whose discs hold different sounds with the same code sets it. Rips of both discs
+    // can then share a folder.
+    bool library_per_disc = false;
 
     // Words that the rip writes over the game's code, each with its address.
     std::vector<std::pair<uint32_t, uint32_t>> patches = {};
@@ -234,12 +319,49 @@ struct GameProfile
     // at the song's name. Such a game keeps every song in its sound files. The library holds `bank_files` whole.
     uint32_t named_songs = 0, named_song_count = 0, named_song_size = 0, named_song_name = 0;
 
-    // What the length analysis reads of MusyX: the sequencer's slots for a song's tracks, `track_slot_count` of
-    // `track_slot_size` bytes from `track_slots`, and the heads of the two lists of the songs that play, at
-    // `song_lists`. A slot's first word is the tick at which the track's next region starts. It falls when the song
-    // loops.
+    // A game for driver/musyx.c: where it keeps its MusyX files, and the table of songs in its code (see MusyXFiles).
+    // A table without an end marker holds `musyx_song_count` entries. A game whose main.dol is a loader for a second
+    // DOL keeps that DOL at `embedded_dol`. `params` holds the driver's parameters from os_sleep_thread on. The
+    // reverbs of studio 0's aux A and aux B get their settings from `reverbs`. A game that picks aux A's reverb for
+    // each song keeps a byte for each song ID at `song_reverbs`. A byte of 2 picks `other_reverb` for aux A.
+    MusyXFiles musyx_files = MusyXFiles::kNone;
+    uint32_t musyx_songs = 0, musyx_song_count = 0;
+    uint32_t embedded_dol = 0;
+    // Words that the driver writes for each sound after sndInit, each with its address (see MusyXCatalogue::Write).
+    std::vector<std::pair<uint32_t, uint32_t>> musyx_writes = {};
+    // The songs that play a stream from the disc along with their notes, each as its group << 16 | its song ID. GCSF
+    // doesn't rip streams. A rip of such a song would play only its notes. The ripper leaves it out as a stream.
+    std::vector<uint32_t> musyx_streamed_songs = {};
+    // The volumes of songs whose volume the game's table of songs doesn't give, each with the song's group << 16 | its
+    // song ID.
+    std::vector<std::pair<uint32_t, uint8_t>> musyx_song_volumes = {};
+    // Pokémon Colosseum's tables in common_rel, as offsets in the module's file (see MusyXFiles::kColosseum): the
+    // songs' files, in `musyx_file_count` entries, and the settings of the reverb's presets.
+    uint32_t musyx_file_table = 0, musyx_file_count = 0, musyx_reverb_presets = 0;
+    std::array<MusyXReverb, 2> reverbs = {};
+    uint32_t song_reverbs = 0;
+    MusyXReverb other_reverb = {};
+
+    // What the length analysis reads of MusyX: the heads of the two lists of the songs that play, at `song_lists`, and
+    // how often each section of a song has looped (see MusyXSections in rip/musyx.h). MusyX counts a section's loops
+    // in a halfword. The 16 sections' counts are `section_loop_size` bytes apart from `section_loops`. A profile
+    // without them gives the sequencer's slots for a song's tracks instead: `track_slot_count` of `track_slot_size`
+    // bytes from `track_slots`. A slot's first word is the tick at which the track's next region starts. It falls when
+    // the track's section loops.
     uint32_t track_slots = 0, track_slot_size = 0, track_slot_count = 0;
     std::array<uint32_t, 2> song_lists = {};
+    uint32_t section_loops = 0, section_loop_size = 0;
+    // MusyX's voices, for the lengths of effects (see MusyXVoices).
+    MusyXVoices musyx_voices = {};
+    // A game whose code names its effects in a table: `musyx_effect_count` rows from `musyx_effects` (see
+    // MusyXFiles).
+    uint32_t musyx_effects = 0, musyx_effect_count = 0;
+    // Rebel Strike maps part of its code and data through the CPU's page table. main.dol holds that part at
+    // `packed_module`: two big-endian words, its packed size and its size, then the part, a DOL that zlib packs. The
+    // rip unpacks it and places each of its sections `module_offset` bytes above the section's address. The profile's
+    // patches map the sections there with a BAT. The rip leaves out main.dol's sections that they overlap. Other games
+    // give 0 for both.
+    uint32_t packed_module = 0, module_offset = 0;
 
     // A Red game's pieces of music: the BGM files in `music_folder`, each named "music" and the piece's number in three
     // digits or more. A piece's file names its wave bank: the WD file in `wave_folder` named "wave" and the bank's
@@ -261,6 +383,43 @@ struct GameProfile
     const char* block_folder = nullptr;
     const char* effect_folder = nullptr;
     uint32_t red_blocks = 0, red_effect_control = 0, red_effect_tracks = 0, red_track_size = 0, red_track_loop = 0;
+
+    // A game with the Nintendo 64's sound library (SoundLibrary::kNintendo64). Its file of sound data is at
+    // `sound_archive`. The game numbers its pieces of music. A table of 256 bytes at `music_table` gives each number's
+    // sequence. A table of sequences at `sequence_table` gives each sequence's place in the file of sound data: a
+    // 16-bit count of the sequences, then 16 bytes for each from 16 bytes in, with its offset and its size. A sequence
+    // of size 0 plays the sequence whose number its offset holds.
+    uint32_t music_table = 0, sequence_table = 0;
+
+    // The effects of a game with the Nintendo 64's sound library play in sequence `n64_effects`. Its data holds a table
+    // of banks at `n64_effect_banks`: a 16-bit offset in the data for each bank, where the bank's table starts. A
+    // bank's table holds a 16-bit offset for each effect, where the effect's script starts. The banks' tables follow
+    // the table of banks. An effect's number is its bank's in bits 8 to 11 and its place in the bank in the low byte.
+    uint32_t n64_effects = 0, n64_effect_banks = 0;
+
+    // What the length analysis reads of the Nintendo 64's sound library. It plays each sequence in one of
+    // `n64_player_count` sequence players of `n64_player_size` bytes from `n64_players`. A player's script, its
+    // channels' scripts and their layers' scripts read each byte through the function `n64_read_byte`. The calls from
+    // the places where a player, a channel and a layer read a command return to `n64_command_reads`. The function
+    // `n64_flow` runs the scripts' jumps, calls and loops. The calls from a player, a channel and a layer return to
+    // `n64_flow_returns`.
+    uint32_t n64_players = 0, n64_player_count = 0, n64_player_size = 0;
+    uint32_t n64_read_byte = 0;
+    std::array<uint32_t, 3> n64_command_reads = {};
+    uint32_t n64_flow = 0;
+    std::array<uint32_t, 3> n64_flow_returns = {};
+
+    // A program in a TGC: a GameCube disc image inside the disc, at `tgc`. `game_id` is the disc's ID, and
+    // `program_id` the ID in the TGC's disc header. The ripper rips the program (see OpenProgram).
+    const char* tgc = nullptr;
+    const char* program_id = nullptr;
+
+    // A game with HAL Laboratory's sound library (SoundLibrary::kHal) keeps its effects' scripts in the file at
+    // `sound_archive`, and their samples in the bank file that `other_sound_files` names. The file of scripts holds
+    // four tables, each a 32-bit count and then its entries. The effects form groups. The third table gives each
+    // group's first effect, and the fourth gives each effect's script, as an offset in the file. An effect's ID is its
+    // group in bits 16 to 31 and its place in the group in the low 16 bits. The game's C header at `sound_names`
+    // defines a name for an effect's ID. A game with no header (nullptr) names none.
 };
 
 // The first number of a Red game's effect in a SEP file (see GameProfile::effect_folder). The game's function that
@@ -269,8 +428,20 @@ inline constexpr uint32_t kRedFirstSep = 4000;
 
 const std::vector<GameProfile>& KnownProfiles();
 
-// The profile for a game's main.dol, or nullptr if it isn't supported.
+// The profile for a game's main.dol, or nullptr if it isn't supported. A program from a TGC (OpenProgram) matches the
+// profile's `program_id`.
 const GameProfile* FindProfile(const disc::GameFiles& game);
+
+// Replaces `game` with the program in a TGC on the disc, for a profile whose `tgc` the disc holds. A TGC is a GameCube
+// disc image inside a disc. It holds its disc header, bi2.bin and apploader, its main.dol and its file system table,
+// then its files. Its header gives where each part lies in the TGC (see the source). The program's files then come
+// from the TGC. Returns an error message for a TGC that can't be read, and nothing otherwise. A disc that holds no
+// such TGC stays as it is.
+std::optional<std::string> OpenProgram(disc::GameFiles& game);
+
+// The bytes of the game's code and data from `address` to the end of its section. Throws xsflib::FormatError if no
+// section holds the address.
+std::span<const uint8_t> DolBytes(const ntdlib::Dol& dol, uint32_t address);
 
 // Whether gcsfrip takes the game's sounds from its code or its files (ListSongs): a MusyX game's songs, a Jac game's
 // pieces of music, or a Red game's pieces of music. Other games list theirs in a start-up archive.
@@ -344,8 +515,10 @@ Sound SoundOf(const jaudio::SoundEntry& entry);
 // Its label is the file's name without the extension. Its effects follow: those of its blocks, by number, then its SEP
 // files from kRedFirstSep on, by number. An effect's ID is 0x1000000 plus the game's number of the effect. A block's
 // effect is labelled with the block's file name without the extension, a hyphen and the effect's place in three
-// digits. A SEP file's effect is labelled with the file's name without the extension. The songs and the pieces are
-// music. The effects aren't. Throws xsflib::FormatError if main.dol or a table can't be read.
+// digits. A SEP file's effect is labelled with the file's name without the extension. A game for driver/musyx.c lists
+// the sounds of its catalogue (GatherMusyX), in order. A sound's ID is its number there. The songs and the pieces are
+// music. The effects aren't. A song that the profile's `musyx_streamed_songs` lists is a stream too. Throws
+// xsflib::FormatError if main.dol, a table or a file of the catalogue can't be read.
 std::vector<Sound> ListSongs(const disc::GameFiles& game, const GameProfile& profile);
 
 // The disc path of a MusyX game's song. Camelot's file number holds the file's index above its low bit. The low bit is

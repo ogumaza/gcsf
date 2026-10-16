@@ -7,9 +7,11 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "xsflib/player/player.h"
@@ -57,6 +59,13 @@ public:
         return system_.get();
     }
 
+    // A tool that watches the game's code from the start sets `prepare` before a start. Start calls it with the
+    // emulated GameCube between the boot's set-up and the game's first instruction.
+    void PrepareGame(std::function<void(gc::System&)> prepare)
+    {
+        prepare_game_ = std::move(prepare);
+    }
+
 private:
     friend class xsflib::player::PlayerBase<Player, LoadedSet>;
 
@@ -101,6 +110,7 @@ private:
 
     std::unique_ptr<ntdlib::flipper::FileDisc> disc_; // declared before the system that reads it
     std::unique_ptr<gc::System> system_;
+    std::function<void(gc::System&)> prepare_game_;
     std::vector<int16_t> output_; // the samples that the emulation has produced, two per frame
 };
 

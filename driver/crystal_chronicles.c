@@ -11,10 +11,10 @@
  *   1. the game's memory manager. Its heap covers the OS's arena. The rip moves the heap's top down to the arena's top,
  *      below the driver (see the profile);
  *   2. the game's sound manager. It sets up the ARAM, the audio interface, AX and Red, with Red's threads;
- *   3. the game's file manager, which reads the disc;
+ *   3. the game's file manager. It reads the disc;
  *   4. for a piece of music, the piece's wave bank. The piece's file names the bank. The game's scripts load that bank
- *      before the piece. The game's loader reads the bank from the disc and hands it to Red, which moves its samples to
- *      ARAM. Then the piece, through the game's loader, and the game's play function;
+ *      before the piece. The game's loader reads the bank from the disc and hands it to Red. Red moves the bank's
+ *      samples to ARAM. Then the piece, through the game's loader, and the game's play function;
  *   5. for an effect, the blocks of effects and the two wave banks that the game keeps loaded. The game loads them as
  *      it starts. They take Red's first two slots for banks. An effect's track can pick a wave from either slot,
  *      whatever bank the effect's file names. For an effect in a SEP file, the effect's wave bank and the file come
