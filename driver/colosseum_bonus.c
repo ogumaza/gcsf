@@ -10,30 +10,24 @@
  *
  * The driver then does what the program's start-up does for its sound effects. It leaves out the graphics, the
  * streamed music and the program's heaps. The profile in `driver_params` gives the addresses. The ripper fills in the
- * profile. The steps:
- *   1. the video interface, the audio interface and ARAM. The video interface's retraces pace the driver;
+ * profile. The driver starts the video interface, the audio interface and ARAM first. The video interface's retraces
+ * pace the driver. The steps that follow:
  *   2. the sound library, with an allocator over the OS's arena in place of the program's heap;
- *   3. the effects' scripts: the driver reads the file into memory and gives it to the sound library;
- *   4. the effects' samples: the sound library reads the bank from the disc into ARAM. The driver waits until it has;
- *   5. the effect, by its number, as the program plays it.
+ *   3. the effects' scripts: their file on the disc;
+ *   4. memory for the scripts;
+ *   5. the read of the scripts. The driver gives them to the sound library;
+ *   6. a bank in the sound library for the effects' samples;
+ *   7. the samples: the sound library reads the bank from the disc into ARAM. The driver waits until it has;
+ *   8. the effect, by its number. The program plays it the same way.
  * The sound plays from the audio and DSP interrupts. Once a retrace, the driver checks whether the effect still
- * plays. `driver_params.status` reports the driver's progress to the player (see docs/gcsf.md).
+ * plays. A step that fails stops the driver with its number in the status word (step 1 is the driver's check of its
+ * parameter block). `driver_params.status` reports the driver's progress to the player (see docs/gcsf.md).
  *
  * Build with `driver/build.py colosseum_bonus` (clang). The result is committed as
  * src/rip/driver_colosseum_bonus_blob.h. Building GCSF itself requires no PowerPC toolchain.
  */
 
-typedef unsigned int u32;
-typedef int s32;
-
-#define PARAMS_MAGIC 0x47435344u /* 'GCSD' */
-#define PARAMS_VERSION 1u
-
-/* Values of Params.status. They're macros because an enumerator can't hold 0x80000000 before C23. */
-#define STATUS_BOOTING 0u
-#define STATUS_PLAYING 1u
-#define STATUS_FINISHED 2u
-#define STATUS_ERROR 0x80000000u /* | step number */
+#include "driver.h"
 
 /* The retraces that the driver waits for the samples and for the effect before it gives up: 10 s. */
 #define SETUP_RETRACES 600u
@@ -89,17 +83,6 @@ __attribute__((section(".params"), used)) volatile struct Params driver_params =
     .magic = PARAMS_MAGIC,
     .version = PARAMS_VERSION,
 };
-
-typedef u32 (*fn0)(void);
-typedef u32 (*fn1)(u32);
-typedef u32 (*fn2)(u32, u32);
-typedef u32 (*fn3)(u32, u32, u32);
-typedef u32 (*fn4)(u32, u32, u32, u32);
-typedef u32 (*fn5)(u32, u32, u32, u32, u32);
-
-static u32 word(u32 address) {
-    return *(volatile u32*)address;
-}
 
 static void wait_retrace(void) {
     ((fn0)driver_params.vi_wait_for_retrace)();

@@ -1,40 +1,38 @@
 // SPDX-License-Identifier: MIT
 
 /*
- * GCSF guest driver for games whose sound library is JAudio2, the sound library of Nintendo EAD's JSystem. It's
- * compiled for Gekko and stored in every game-mode .gcsflib. The player boots the game's startup code: the OS
- * initialisation and the static constructors. The rip patches the game's main to branch here.
+ * GCSF guest driver for The Legend of Zelda: Four Swords Adventures (USA) and Four Swords+ (Japan). Their sound library
+ * is JAudio2, the sound library of Nintendo EAD's JSystem. The driver is compiled for Gekko and stored in the game's
+ * .gcsflib. The player boots the game's start-up code: the OS initialisation and the static constructors. The rip
+ * patches the game's main to branch here.
  *
  * The driver then calls the game's functions to do what the game's main does for sound, without its graphics. The
- * profile in `driver_params` gives their addresses. The ripper fills in the profile. The steps:
- *   1. the video interface: its retraces pace the driver as they pace the game's frames;
+ * profile in `driver_params` gives their addresses. The ripper fills in the profile. The driver starts the video
+ * interface first. Its retraces pace the driver as they pace the game's frames. The steps that follow:
  *   2. the heaps and the ARAM manager that JSystem's framework sets up;
- *   3. the game's audio heap, game heap and audio object, where the game keeps them, and the game's disc thread;
- *   4. the game's audio set-up: the driver calls it once a frame until it has loaded the start-up archive and the
+ *   3. the game's audio heap and game heap;
+ *   4. the game's audio object, then the game's disc thread. The driver puts the two heaps and the object where the
+ *      game keeps them;
+ *   5. the game's audio set-up: the driver calls it once a frame until it has loaded the start-up archive and the
  *      sequence archive and initialised the sound library;
- *   5. every wave bank of the sound library's section loaded into ARAM;
- *   6. the sound: the sound manager starts it by its JAudio sound ID;
- *   7. the game's audio frame process, once a frame, forever.
- * `driver_params.status` reports the driver's progress to the player (see docs/gcsf.md).
+ *   6. every wave bank of the sound library's section loaded into ARAM;
+ *   7. the sound: the sound manager starts it by its JAudio sound ID. For the piece that the profile names, the driver
+ *      then mutes the tracks that the game's music start mutes.
+ * Then the game's audio frame process runs once a frame, forever. A step that fails stops the driver with its number in
+ * the status word (step 1 is the driver's check of its parameter block). `driver_params.status` reports the driver's
+ * progress to the player (see docs/gcsf.md).
  *
- * Build with driver/build.py (clang). The result is committed as src/rip/driver_blob.h. Building GCSF itself requires
- * no PowerPC toolchain.
+ * Build with `driver/build.py four_swords` (clang). The result is committed as src/rip/driver_four_swords_blob.h.
+ * Building GCSF itself requires no PowerPC toolchain.
  */
 
-typedef unsigned int u32;
-typedef int s32;
+#include "driver.h"
 
-#define PARAMS_MAGIC 0x47435344u /* 'GCSD' */
-#define PARAMS_VERSION 1u
+/* The children of a track. */
+#define TRACK_CHILDREN 16u
 
-/* Values of Params.status. They're macros because an enumerator can't hold 0x80000000 before C23. */
-#define STATUS_BOOTING 0u
-#define STATUS_PLAYING 1u
-#define STATUS_FINISHED 2u
-#define STATUS_ERROR 0x80000000u /* | step number */
-
-/* The frames that the driver waits for the audio set-up and for the wave archives before it gives up. */
-#define SETUP_FRAMES 600u
+/* The size of a JKRThread in the game's build of JSystem, for the main thread's. */
+#define THREAD_SIZE 0x7cu
 
 struct Params {
     u32 magic;
@@ -77,6 +75,10 @@ struct Params {
     u32 section_data_offset;  /* the section heap's data in the section */
     u32 wave_banks_offset;    /* the data's table of wave banks, and its count after it */
     u32 wave_arc_state_offset; /* a wave archive's state (2 once it is in ARAM), and its disc entry after it */
+    /* the game profile: the piece whose tracks the game's music start mutes */
+    u32 track_mute;     /* void JASTrack::mute(bool) */
+    u32 muted_sound;    /* the piece's JAudio sound ID, or 0 for none */
+    u32 muted_children; /* the children of the piece's track 0 that its start mutes, a bit each from bit 0 */
 };
 
 __attribute__((section(".params"), used)) volatile struct Params driver_params = {
@@ -84,56 +86,30 @@ __attribute__((section(".params"), used)) volatile struct Params driver_params =
     .version = PARAMS_VERSION,
 };
 
-typedef u32 (*fn0)(void);
-typedef u32 (*fn1)(u32);
-typedef u32 (*fn2)(u32, u32);
-typedef u32 (*fn3)(u32, u32, u32);
-typedef u32 (*fn4)(u32, u32, u32, u32);
-typedef u32 (*fn5)(u32, u32, u32, u32, u32);
-
 /* The game's audio set-up sets the byte at +4 of this when it's done. */
 static volatile u32 setup_state[2];
 
-static u32 word(u32 address) {
-    return *(volatile u32*)address;
-}
+#include "aram_manager.h"
+#include "frames.h"
+#include "section_waves.h"
 
-static void wait_frame(void) {
-    for (u32 i = 0; i < driver_params.frame_retraces; i++)
-        ((fn0)driver_params.vi_wait_for_retrace)();
-}
-
-__attribute__((noreturn)) static void fail(u32 step) {
-    driver_params.status = STATUS_ERROR | step;
-    for (;;)
-        wait_frame();
-}
-
-/* A virtual function of `object`. The vtable is the object's first word. */
-static u32 virtual_function(u32 object, u32 slot) {
-    return word(word(object) + slot);
-}
-
-/* Whether every wave archive of the section's wave banks is in ARAM. A bank's vtable gives its archive at slot 0x10
-   and the number of its archives at slot 0x14. An archive without a file on the disc (entry number below 0) is never
-   loaded. */
-static int waves_loaded(u32 section) {
+/* Mutes the children of the sound's track 0 that the profile names and lets the others play. The game's music start
+   does the same. The sound library has opened the tracks by the time startSound returns. A sound's vtable gives its
+   JAISeq at slot 0x18. A JAISeq's vtable gives getChildTrack(int) at slot 0x24: child n >> 4 of the root track, then
+   that track's child n & 15. The game turns external interrupts off around the loop. No tick of the sound library
+   comes between the calls. */
+static void mute_children(u32 sound) {
     volatile struct Params* p = &driver_params;
-    const u32 data = word(section + p->section_data_offset);
-    const u32 banks = word(data + p->wave_banks_offset);
-    const u32 count = word(data + p->wave_banks_offset + 4);
-    for (u32 b = 0; b < count; b++) {
-        const u32 bank = word(banks + b * 4);
-        if (!bank)
-            continue;
-        const u32 arcs = ((fn1)virtual_function(bank, 0x14))(bank);
-        for (u32 i = 0; i < arcs; i++) {
-            const u32 arc = ((fn2)virtual_function(bank, 0x10))(bank, i);
-            if (arc && (s32)word(arc + p->wave_arc_state_offset + 4) >= 0 && word(arc + p->wave_arc_state_offset) != 2)
-                return 0;
-        }
+    const u32 sequence = ((fn1)virtual_function(sound, 0x18))(sound);
+    if (!sequence)
+        return;
+    const u32 msr = disable_interrupts();
+    for (u32 i = 0; i < TRACK_CHILDREN; i++) {
+        const u32 track = ((fn2)virtual_function(sequence, 0x24))(sequence, i);
+        if (track)
+            ((fn2)p->track_mute)(track, (p->muted_children >> i) & 1);
     }
-    return 1;
+    restore_interrupts(msr);
 }
 
 __attribute__((noreturn)) void driver_main(void) {
@@ -148,9 +124,8 @@ __attribute__((noreturn)) void driver_main(void) {
     const u32 root = ((fn2)p->create_root_heap)(p->max_heaps, 0);
     if (!root || !((fn3)p->create_exp_heap)(p->system_heap_size, root, 0))
         fail(2);
-    ((fn5)p->create_aram)(p->aram_audio_size, p->aram_graph_size, (p->aram_priorities >> 16) & 0xff,
-                          (p->aram_priorities >> 8) & 0xff, p->aram_priorities & 0xff);
-    const u32 thread = ((fn1)p->alloc)(0x7c);
+    create_aram_manager();
+    const u32 thread = ((fn1)p->alloc)(THREAD_SIZE);
     if (thread)
         ((fn3)p->thread_ctor)(thread, ((fn0)p->get_current_thread)(), 4);
 
@@ -184,8 +159,8 @@ __attribute__((noreturn)) void driver_main(void) {
     /* Every wave bank into ARAM. The audio frame process runs while the archives load. */
     const u32 section = word(audio + p->section_offset);
     const u32 data = word(section + p->section_data_offset);
-    const u32 banks = word(data + p->wave_banks_offset + 4);
-    for (u32 b = 0; b < banks; b++)
+    const u32 count = word(data + p->wave_banks_offset + 4);
+    for (u32 b = 0; b < count; b++)
         ((fn2)p->load_wave_bank)(section, b);
     for (frames = 0; !waves_loaded(section); frames++) {
         if (frames > SETUP_FRAMES)
@@ -199,6 +174,8 @@ __attribute__((noreturn)) void driver_main(void) {
     const u32 id = p->sound_id;
     if (!(((fn4)virtual_function(manager, 0xc))(manager, (u32)&id, (u32)&p->sound, 0) & 0xff))
         fail(7);
+    if (p->muted_sound && id == p->muted_sound && p->sound)
+        mute_children(p->sound);
     p->status = STATUS_PLAYING;
 
     for (;;) {

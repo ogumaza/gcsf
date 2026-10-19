@@ -3,50 +3,41 @@
 /*
  * GCSF guest driver for The Wind Waker's sound layer (JAIZelBasic), on JAudio1, the first generation of the sound
  * library of Nintendo EAD's JSystem. It's compiled for Gekko and stored in the game's .gcsflib. The player boots the
- * game's startup code: the OS initialisation and the static constructors. The rip patches the game's main to branch
+ * game's start-up code: the OS initialisation and the static constructors. The rip patches the game's main to branch
  * here.
  *
  * The driver calls the game's functions to do what the game's start-up does for sound, without its graphics. The
- * profile in `driver_params` gives their addresses. The ripper fills in the profile. The steps:
- *   1. the video interface: its retraces pace the driver as they pace the game's frames;
- *   2. the heaps and the ARAM manager that the game's machine set-up makes, and the game's disc thread;
- *   3. the game's audio heap, then the game's audio process once a frame until the sound library is up: the process
- *      loads the start-up archive and the sequence archive, and starts the effects sequence;
- *   4. the waves that stay loaded: the sound library loads them by itself once it's up;
- *   5. the waves that the .minigcsf names, one group of a wave system each;
- *   6. the sound library's default camera, which stays still: the game's sound set-up clears the camera, and the
- *      game's camera process sets it once a frame;
- *   7. the sound: the sound library starts it by its JAudio sound ID;
- *   8. the game's audio process, once a frame, forever.
- * `driver_params.status` reports the driver's progress to the player (see docs/gcsf.md).
+ * profile in `driver_params` gives their addresses. The ripper fills in the profile. The driver starts the video
+ * interface first. Its retraces pace the driver as they pace the game's frames. The steps that follow:
+ *   2. the root heap and the system heap that the game's machine set-up makes. Then the ARAM manager and the main
+ *      thread's JKRThread;
+ *   3. the game's heaps. Then the ARAM transfer buffer and the game's disc thread;
+ *   4. the game's audio heap;
+ *   5. the game's audio process, once a frame until the sound library is up: the process loads the start-up archive
+ *      and the sequence archive, and starts the effects sequence. The sound library loads the waves that stay loaded
+ *      by itself once it's up;
+ *   6. the waves that the .minigcsf names, one group of a wave system each;
+ *   7. the sound: the sound library starts it by its JAudio sound ID. Before the sound, the driver sets the sound
+ *      library's default camera once. The game's sound set-up clears the camera. The game's camera process then sets
+ *      it once a frame.
+ * Then the game's audio process runs once a frame, forever. A step that fails stops the driver with its number in the
+ * status word (step 1 is the driver's check of its parameter block). `driver_params.status` reports the driver's
+ * progress to the player (see docs/gcsf.md).
  *
- * Build with `driver/build.py zel` (clang). The result is committed as src/rip/driver_zel_blob.h. Building GCSF itself
- * requires no PowerPC toolchain.
+ * Build with `driver/build.py wind_waker` (clang). The result is committed as src/rip/driver_wind_waker_blob.h.
+ * Building GCSF itself requires no PowerPC toolchain.
  */
 
-typedef unsigned int u32;
-typedef int s32;
-
-#define PARAMS_MAGIC 0x47435344u /* 'GCSD' */
-#define PARAMS_VERSION 1u
-
-/* Values of Params.status. They're macros because an enumerator can't hold 0x80000000 before C23. */
-#define STATUS_BOOTING 0u
-#define STATUS_PLAYING 1u
-#define STATUS_FINISHED 2u
-#define STATUS_ERROR 0x80000000u /* | step number */
-
-/* The frames that the driver waits for the sound library and for the waves before it gives up. */
-#define SETUP_FRAMES 600u
-
-/* The most waves that a .minigcsf names. */
-#define MAX_WAVES 64u
+#include "driver.h"
 
 /* A wave system's load status in the sound library: 2 once its group is in ARAM. */
 #define WAVES_LOADED 2
 
 /* The load types of a wave system in the start-up archive: 0 and 1 stay loaded, 2 is loaded for a scene. */
 #define WAVES_FOR_SCENE 2u
+
+/* A JAISound's state once its sequence plays. */
+#define SOUND_PLAYING 4u
 
 struct Params {
     u32 magic;
@@ -99,7 +90,7 @@ struct Params {
     u32 wave_status;        /* the variable that holds each wave system's load status */
     u32 load_wave_group;    /* void JAInter::BankWave::loadGroupWave(s32 wave_system, s32 group) */
     u32 effects_sequence;   /* the variable that holds the effects sequence's JAISound */
-    u32 sound_state_offset; /* a JAISound's state: 4 (playing) or more once the sequence plays */
+    u32 sound_state_offset; /* a JAISound's state (a byte) */
     u32 set_camera;         /* void JAIBasic::setCameraInfo(Vec* position, Vec* last_position, Mtx, u32 camera) */
     u32 default_camera;     /* the sound library's default camera: its position, last position and matrix */
 };
@@ -109,31 +100,8 @@ __attribute__((section(".params"), used)) volatile struct Params driver_params =
     .version = PARAMS_VERSION,
 };
 
-typedef u32 (*fn0)(void);
-typedef u32 (*fn1)(u32);
-typedef u32 (*fn2)(u32, u32);
-typedef u32 (*fn3)(u32, u32, u32);
-typedef u32 (*fn5)(u32, u32, u32, u32, u32);
-typedef u32 (*fn7)(u32, u32, u32, u32, u32, u32, u32);
-
-static u32 word(u32 address) {
-    return *(volatile u32*)address;
-}
-
-static unsigned char byte(u32 address) {
-    return *(volatile unsigned char*)address;
-}
-
-static void wait_frame(void) {
-    for (u32 i = 0; i < driver_params.frame_retraces; i++)
-        ((fn0)driver_params.vi_wait_for_retrace)();
-}
-
-__attribute__((noreturn)) static void fail(u32 step) {
-    driver_params.status = STATUS_ERROR | step;
-    for (;;)
-        wait_frame();
-}
+#include "aram_manager.h"
+#include "frames.h"
 
 /* Whether the sound library has loaded every wave system that stays loaded. The start-up archive's list gives each
    wave system 12 bytes: its data, its size and its load type. A null pointer ends the list. */
@@ -179,7 +147,7 @@ static int named_waves_loaded(void) {
 static int effects_play(void) {
     volatile struct Params* p = &driver_params;
     const u32 effects = word(p->effects_sequence);
-    return effects && byte(effects + p->sound_state_offset) >= 4;
+    return effects && byte(effects + p->sound_state_offset) >= SOUND_PLAYING;
 }
 
 __attribute__((noreturn)) void driver_main(void) {
@@ -201,8 +169,7 @@ __attribute__((noreturn)) void driver_main(void) {
     const u32 system = ((fn3)p->create_exp_heap)(arena - others, root, 0);
     if (!system)
         fail(2);
-    ((fn5)p->create_aram)(p->aram_audio_size, p->aram_graph_size, (p->aram_priorities >> 16) & 0xff,
-                          (p->aram_priorities >> 8) & 0xff, p->aram_priorities & 0xff);
+    create_aram_manager();
     const u32 thread = ((fn1)p->alloc)(p->thread_size);
     if (thread)
         ((fn3)p->thread_ctor)(thread, ((fn0)p->get_current_thread)(), 4);

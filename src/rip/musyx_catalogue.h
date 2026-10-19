@@ -9,6 +9,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -90,6 +91,17 @@ inline constexpr char kMusyXCatalogue[] = "MusyX/sounds.bin";
 
 // The catalogue's file, which the library holds at kMusyXCatalogue. The driver reads a sound's entry from it.
 std::vector<uint8_t> CatalogueFile(const MusyXCatalogue& catalogue);
+
+// What the length analysis reads of a sound in the catalogue's file: its kind, and the number of its song's file
+// (MusyXPath).
+struct CatalogueSound
+{
+    MusyXCatalogue::Kind kind = MusyXCatalogue::Kind::kSong;
+    uint16_t song = MusyXCatalogue::kNoSong;
+};
+
+// Sound `number` of a catalogue's file (CatalogueFile), or nothing if the file has no such sound.
+std::optional<CatalogueSound> ReadCatalogueSound(std::span<const uint8_t> file, uint32_t number);
 
 // The path of a file set's file or a song's file in the library: "MusyX/", the number, and the extension (".proj",
 // ".pool", ".sdir", ".samp" or ".sng").

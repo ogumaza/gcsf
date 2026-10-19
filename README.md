@@ -167,11 +167,12 @@ compression method and layout. The test then checks that every file reads back t
 ```
 src/gc/       the GameCube: its disc interface, and the machine that game mode runs
 src/gcsf/     the format and the player
-src/rip/      the ripper, the game profiles, the length analysis and the drivers' images
+src/rip/      the ripper: its stages, the game profiles, a file for each sound library, the length analysis's
+              shared parts and the drivers' images
 src/cli/      gcsfrip and gcsfplay
 plugins/foobar2000/  the foobar2000 component
 plugins/xmplay/      the XMPlay plugin
-driver/       the drivers' sources and the script that builds them
+driver/       the drivers' sources, the headers that they share and the script that builds them
 docs/         the format's specification and the release notes
 tests/        ctest suites
 externals/xsflib/  xsflib: the PSF container, the player framework, the tools' frames, and the build's shared parts
@@ -181,8 +182,8 @@ externals/ntdlib/  ntdlib: the CPU, the DSP and the devices that the GameCube sh
 
 A driver runs on the emulated GameCube. `driver/build.py` builds one for PowerPC with ntdlib's
 `tools/build_ppc_driver.py`, and requires a clang with the PowerPC target. The drivers' images are committed in
-`src/rip/`: `driver_blob.h` for Four Swords Adventures, `driver_twilight_princess_blob.h` for Twilight Princess,
-`driver_zel_blob.h` for The Wind Waker, `driver_luigis_mansion_blob.h` for Luigi's Mansion,
+`src/rip/`: `driver_four_swords_blob.h` for Four Swords Adventures, `driver_twilight_princess_blob.h` for Twilight
+Princess, `driver_wind_waker_blob.h` for The Wind Waker, `driver_luigis_mansion_blob.h` for Luigi's Mansion,
 `driver_super_mario_sunshine_blob.h` for Super Mario Sunshine, `driver_pikmin_blob.h` for Pikmin,
 `driver_jungle_beat_blob.h` for Donkey Kong Jungle Beat, `driver_double_dash_blob.h` for Mario Kart: Double Dash!!,
 `driver_mario_golf_blob.h` for Mario Golf: Toadstool Tour and Mario Power Tennis, `driver_warioware_blob.h` for

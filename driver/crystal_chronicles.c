@@ -8,37 +8,29 @@
  *
  * The driver then does what the game's system set-up does for sound. It leaves out the graphics and the controllers.
  * The profile in `driver_params` gives the addresses. The ripper fills in the profile. The steps:
- *   1. the game's memory manager. Its heap covers the OS's arena. The rip moves the heap's top down to the arena's top,
- *      below the driver (see the profile);
- *   2. the game's sound manager. It sets up the ARAM, the audio interface, AX and Red, with Red's threads;
- *   3. the game's file manager. It reads the disc;
- *   4. for a piece of music, the piece's wave bank. The piece's file names the bank. The game's scripts load that bank
- *      before the piece. The game's loader reads the bank from the disc and hands it to Red. Red moves the bank's
- *      samples to ARAM. Then the piece, through the game's loader, and the game's play function;
- *   5. for an effect, the blocks of effects and the two wave banks that the game keeps loaded. The game loads them as
- *      it starts. They take Red's first two slots for banks. An effect's track can pick a wave from either slot,
- *      whatever bank the effect's file names. For an effect in a SEP file, the effect's wave bank and the file come
- *      next. The file names the bank. Then the game's function that plays an effect, with the arguments that the
- *      game's code passes.
+ *   - the game's memory manager. Its heap covers the OS's arena. The rip moves the heap's top down to the arena's top,
+ *     below the driver (see the profile);
+ *   - the game's sound manager. It sets up the ARAM, the audio interface, AX and Red, with Red's threads;
+ *   - the game's file manager. It reads the disc;
+ *   - for a piece of music, the piece's wave bank. The piece's file names the bank. The game's scripts load that bank
+ *     before the piece. The game's loader reads the bank from the disc and hands it to Red. Red moves the bank's
+ *     samples to ARAM. Then the piece, through the game's loader, and the game's play function;
+ *   - for an effect, the blocks of effects and the two wave banks that the game keeps loaded. The game loads them as
+ *     it starts. They take Red's first two slots for banks. An effect's track can pick a wave from either slot,
+ *     whatever bank the effect's file names. For an effect in a SEP file, the effect's wave bank and the file come
+ *     next. The file names the bank. Then the game's function that plays an effect, with the arguments that the
+ *     game's code passes.
  * The driver's thread then sleeps for good. The sound plays on Red's threads. The audio interrupt drives them. The OS's
- * idle loop runs while no thread can. `driver_params.status` reports the driver's progress to the player (see
- * docs/gcsf.md).
+ * idle loop runs while no thread can. A step that fails stops the driver with its number in the status word: 1 for
+ * the driver's check of its parameter block, 2 for its check of the sound ID, 3 for a file that names the sound's wave
+ * bank and doesn't open, and 4 for such a file without the magic of its kind. `driver_params.status` reports the
+ * driver's progress to the player (see docs/gcsf.md).
  *
  * Build with `driver/build.py crystal_chronicles` (clang). The result is committed as
  * src/rip/driver_crystal_chronicles_blob.h. Building GCSF itself requires no PowerPC toolchain.
  */
 
-typedef unsigned int u32;
-typedef unsigned char u8;
-
-#define PARAMS_MAGIC 0x47435344u /* 'GCSD' */
-#define PARAMS_VERSION 1u
-
-/* Values of Params.status. They're macros because an enumerator can't hold 0x80000000 before C23. */
-#define STATUS_BOOTING 0u
-#define STATUS_PLAYING 1u
-#define STATUS_FINISHED 2u
-#define STATUS_ERROR 0x80000000u /* | step number */
+#include "driver.h"
 
 /* A sound ID's kind: its top byte. Its low 24 bits are the sound's number. */
 #define KIND_MUSIC 0u
@@ -102,26 +94,9 @@ __attribute__((section(".params"), used)) volatile struct Params driver_params =
     .version = PARAMS_VERSION,
 };
 
-typedef u32 (*fn1)(u32);
-typedef u32 (*fn2)(u32, u32);
-typedef u32 (*fn4)(u32, u32, u32, u32);
-typedef u32 (*fn5)(u32, u32, u32, u32, u32);
 typedef int (*sprintf_fn)(char*, const char*, ...);
 
-/* An OSThreadQueue (head and tail) that nothing wakes. */
-static u32 never_woken[2];
-
-/* The driver's thread sleeps for good. The OS then runs its idle loop. The player's CPU skips that loop to the next
- * interrupt. */
-__attribute__((noreturn)) static void sleep_forever(void) {
-    for (;;)
-        ((fn1)driver_params.os_sleep_thread)((u32)never_woken);
-}
-
-__attribute__((noreturn)) static void fail(u32 step) {
-    driver_params.status = STATUS_ERROR | step;
-    sleep_forever();
-}
+#include "sleep.h"
 
 /* The wave bank that a file names: the bank's number in the bytes at `high` and `low`. The file starts with the word
  * `magic`. A SEP file also has `magic_last` at 4. The file manager reads the file, as the game's loaders do. */
@@ -133,7 +108,7 @@ static u32 file_bank(const char* path, u32 magic, u32 magic_last, u32 high, u32 
     ((fn2)p->file_read)(p->file_manager, handle);
     ((fn2)p->file_sync)(p->file_manager, handle);
     const u8* data = *(const u8* volatile*)(p->file_manager + 8);
-    const u32 start = (u32)data[0] << 24 | (u32)data[1] << 16 | (u32)data[2] << 8 | data[3];
+    const u32 start = be32(data);
     const u32 last = data[4];
     const u32 bank = (u32)data[high] << 8 | data[low];
     ((fn2)p->file_close)(p->file_manager, handle);

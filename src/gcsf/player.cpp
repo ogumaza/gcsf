@@ -28,9 +28,6 @@ constexpr uint64_t kStepCycles = gc::System::kCpuClock / 1000;
 // Longest time allowed from boot until the driver reports that the sound plays.
 constexpr uint64_t kBootTimeout = uint64_t{10} * gc::System::kCpuClock;
 
-// The disc's header, stored in the set as a FILE chunk. The disc starts with it.
-constexpr char kHeaderPath[] = "sys/boot.bin";
-
 } // namespace
 
 // The emulation's part of a snapshot.
@@ -63,7 +60,7 @@ bool Player::StartSource()
 {
     // The disc: its header and the set's files.
     system_.reset();
-    disc_ = ntdlib::flipper::DiscFromFiles(set_.files, kHeaderPath, ntdlib::disc::kGameCubeMagicOffset,
+    disc_ = ntdlib::flipper::DiscFromFiles(set_.files, kDiscHeaderPath, ntdlib::disc::kGameCubeMagicOffset,
                                            ntdlib::disc::kGameCubeMagic, 1);
     system_ = std::make_unique<gc::System>(*disc_);
 

@@ -78,13 +78,13 @@ void TestWaves()
 
     XSFLIB_CHECK(empty.chunks.memory.size() == 2 && Words(empty.chunks.memory[1]) == std::vector<uint32_t>({0}));
 
-    // A mini names at most kMaxMiniWaves waves.
-    const std::vector<uint32_t> most(rip::kMaxMiniWaves, 7);
+    // A mini names at most DriverBlock::kMaxWaves waves.
+    const std::vector<uint32_t> most(DriverBlock::kMaxWaves, 7);
 
     XSFLIB_CHECK(Words(Parse(rip::BuildMini(1, "game.gcsflib", {}, nullptr, &most)).chunks.memory[1]).size() ==
-                 rip::kMaxMiniWaves + 1);
+                 DriverBlock::kMaxWaves + 1);
 
-    const std::vector<uint32_t> too_many(rip::kMaxMiniWaves + 1, 7);
+    const std::vector<uint32_t> too_many(DriverBlock::kMaxWaves + 1, 7);
     bool refused = false;
 
     try

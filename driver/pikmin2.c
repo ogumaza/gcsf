@@ -3,7 +3,7 @@
 /*
  * GCSF guest driver for Pikmin 2's sound layer (PSSystem, PSGame and PSM), on JAudio1, the first generation of the
  * sound library of Nintendo EAD's JSystem. It's compiled for Gekko and stored in the game's .gcsflib. The player boots
- * the game's startup code: the OS initialisation and the static constructors. The rip patches the game's main to
+ * the game's start-up code: the OS initialisation and the static constructors. The rip patches the game's main to
  * branch here.
  *
  * The game plays its music through objects of its sound layer. A sound scene holds the objects. A piece's object
@@ -19,8 +19,8 @@
  * play_data and rappas).
  *
  * The profile in `driver_params` gives the game's addresses and sizes, and a table of the pieces. The ripper fills it
- * in. The steps:
- *   1. the video interface: its retraces pace the driver as they pace the game's frames;
+ * in. The driver starts the video interface first. Its retraces pace the driver as they pace the game's frames. The
+ * steps that follow:
  *   2. the heaps, the ARAM manager and the main thread's JKRThread that JFWSystem::init makes. Then the heap that the
  *      game's system object makes for the sound system;
  *   3. the sound system that System::createSoundSystem makes: the start-up archive from the disc, the factory of the
@@ -29,33 +29,18 @@
  *   5. a piece's object (see Piece), in a scene with no game objects. An effect gets no scene;
  *   6. the scene's resources: the piece's sequence, its conductor, and the wave groups that the .minigcsf names;
  *   7. the sound: the scene starts the piece's first sequence. A boss's music starts as the boss starts it, at a part
- *      of the music. The sound system starts an effect;
- *   8. the sound layer's frame work, once a frame, forever.
- * `driver_params.status` reports the driver's progress to the player (see docs/gcsf.md).
+ *      of the music. The sound system starts an effect.
+ * Then the sound layer's frame work runs once a frame, forever. A step that fails stops the driver with its number in
+ * the status word. Step 1 is the driver's check of its parameter block and of the piece's number in the profile's
+ * table. `driver_params.status` reports the driver's progress to the player (see docs/gcsf.md).
  *
  * Build with `driver/build.py pikmin2` (clang). The result is committed as src/rip/driver_pikmin2_blob.h. Building GCSF
  * itself requires no PowerPC toolchain.
  */
 
-typedef unsigned int u32;
-typedef int s32;
-typedef unsigned short u16;
-typedef unsigned char u8;
+#include "driver.h"
 
-#define PARAMS_MAGIC 0x47435344u /* 'GCSD' */
-#define PARAMS_VERSION 1u
-
-/* Values of Params.status. They're macros because an enumerator can't hold 0x80000000 before C23. */
-#define STATUS_BOOTING 0u
-#define STATUS_PLAYING 1u
-#define STATUS_FINISHED 2u
-#define STATUS_ERROR 0x80000000u /* | step number */
-
-/* The frames that the driver waits for a scene's resources before it gives up. */
-#define LOAD_FRAMES 600u
-
-/* The most waves that a .minigcsf names, and the most pieces in the profile's table. */
-#define MAX_WAVES 64u
+/* The most pieces in the profile's table. */
 #define MAX_PIECES 64u
 
 /* A scene loads at most two wave groups, one in each of its areas. 255 names none. */
@@ -157,18 +142,9 @@ __attribute__((section(".params"), used)) volatile struct Params driver_params =
     .version = PARAMS_VERSION,
 };
 
-typedef u32 (*fn0)(void);
-typedef u32 (*fn1)(u32);
-typedef u32 (*fn2)(u32, u32);
-typedef u32 (*fn3)(u32, u32, u32);
-typedef u32 (*fn4)(u32, u32, u32, u32);
-typedef u32 (*fn5)(u32, u32, u32, u32, u32);
-typedef u32 (*fn6)(u32, u32, u32, u32, u32, u32);
-typedef u32 (*fn7)(u32, u32, u32, u32, u32, u32, u32);
-
 /* The game's paths: the folder of its sound files and its start-up archive. */
-static const char kAudioFolder[] = "/AudioRes";
-static const char kStartUpArchive[] = "PSound.aaf";
+static const char audio_folder[] = "/AudioRes";
+static const char start_up_archive[] = "PSound.aaf";
 
 /* The offsets of the game's objects that the driver reads and writes. */
 #define FACTORY_HEAP 0x00         /* SysFactory: the heap for the sound system */
@@ -206,24 +182,8 @@ static u32 play_data[0x40];
 #define RAPPA_SHORTEST_WAIT 3u
 static u32 rappas[2][RAPPA_SIZE / 4];
 
-static u32 word(u32 address) {
-    return *(volatile u32*)address;
-}
-
-static u8 byte(u32 address) {
-    return *(volatile u8*)address;
-}
-
-static void wait_frame(void) {
-    for (u32 i = 0; i < driver_params.frame_retraces; i++)
-        ((fn0)driver_params.vi_wait_for_retrace)();
-}
-
-__attribute__((noreturn)) static void fail(u32 step) {
-    driver_params.status = STATUS_ERROR | step;
-    for (;;)
-        wait_frame();
-}
+#include "aram_manager.h"
+#include "frames.h"
 
 /* Calls a virtual function: the function at `slot` in the vtable that `object` holds at `vtable`. */
 static u32 call_virtual(u32 object, u32 vtable, u32 slot, u32 argument) {
@@ -237,7 +197,7 @@ static int load_scene(u32 scene) {
     *(volatile u8*)((u32)task + TASK_COUNT) = 0;
     call_virtual(scene, 0, SCENE_LOAD, (u32)task);
     for (u32 frames = 0; byte((u32)task + TASK_COUNT) != 0; frames++) {
-        if (frames > LOAD_FRAMES)
+        if (frames > SETUP_FRAMES)
             return 0;
         wait_frame();
     }
@@ -323,8 +283,7 @@ __attribute__((noreturn)) void driver_main(void) {
     const u32 root = ((fn2)p->create_root_heap)(p->max_heaps, 0);
     if (!root || !((fn3)p->create_exp_heap)(p->system_heap_size, root, 0))
         fail(2);
-    ((fn5)p->create_aram)(p->aram_audio_size, p->aram_graph_size, (p->aram_priorities >> 16) & 0xff,
-                          (p->aram_priorities >> 8) & 0xff, p->aram_priorities & 0xff);
+    create_aram_manager();
     const u32 thread = ((fn1)p->alloc)(p->thread_size);
     if (thread)
         ((fn3)p->thread_ctor)(thread, ((fn0)p->get_current_thread)(), 4);
@@ -343,8 +302,8 @@ __attribute__((noreturn)) void driver_main(void) {
     if (!files)
         fail(3);
     ((fn1)p->become_current_heap)(files);
-    const u32 archive = ((fn2)p->get_resource)((u32)kStartUpArchive,
-                                               ((fn3)p->mount_file_cache)((u32)kAudioFolder, files, 0));
+    const u32 archive = ((fn2)p->get_resource)((u32)start_up_archive,
+                                               ((fn3)p->mount_file_cache)((u32)audio_folder, files, 0));
     if (!archive)
         fail(3);
     const u32 factory = ((fn1)p->alloc)(p->factory_size);

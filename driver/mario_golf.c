@@ -1,36 +1,29 @@
 // SPDX-License-Identifier: MIT
 
 /*
- * GCSF guest driver for Mario Golf: Toadstool Tour, whose sound library is MusyX, under a layer of Camelot code. It's
- * compiled for Gekko and stored in the game's .gcsflib. The player boots the game's start-up code: the OS
- * initialisation and the static constructors. The rip patches the game's main to branch here.
+ * GCSF guest driver for Mario Golf: Toadstool Tour and Mario Power Tennis. Their sound library is MusyX, under a layer
+ * of Camelot code. The driver is compiled for Gekko and stored in the game's .gcsflib. The player boots the game's
+ * start-up code: the OS initialisation and the static constructors. The rip patches the game's main to branch here.
  *
  * The driver then does what the game's main does for sound, without its graphics. The profile in `driver_params`
  * gives the addresses. The ripper fills in the profile. The steps:
- *   1. the video interface: a jingle's thread waits for its retraces;
- *   2. the OS's arena, below the driver, and the OS heap in it;
- *   3. the ARAM and its queue;
- *   4. Camelot's heaps 1 and 7 (MusyX allocates from heap 7), as the game's system set-up makes them;
- *   5. the game's sound set-up: MusyX, its output mode and volumes;
- *   6. Camelot's heap 0, then the game's sound banks: two MusyX groups from the disc;
- *   7. the song, by its number in the game's song table, or the jingle, by its number in the jingle table.
+ *   - the video interface: a jingle's thread waits for its retraces;
+ *   - the OS's arena, below the driver, and the OS heap in it;
+ *   - the ARAM and its queue;
+ *   - Camelot's heaps 1 and 7 (MusyX allocates from heap 7), as the game's system set-up makes them;
+ *   - the game's sound set-up: MusyX, its output mode and volumes;
+ *   - Camelot's heap 0, then the game's sound banks: two MusyX groups from the disc;
+ *   - the song, by its number in the game's song table, or the jingle, by its number in the jingle table.
  * The driver's thread then sleeps for good, and the song plays from the audio and DSP interrupts. The OS's idle loop
- * runs while no thread can. `driver_params.status` reports the driver's progress to the player (see docs/gcsf.md).
+ * runs while no thread can. A step that fails stops the driver with its number in the status word: 1 for the
+ * driver's check of its parameter block, 2 for its check of the sound ID, and 10 + n for Camelot's heap n.
+ * `driver_params.status` reports the driver's progress to the player (see docs/gcsf.md).
  *
  * Build with `driver/build.py mario_golf` (clang). The result is committed as src/rip/driver_mario_golf_blob.h.
  * Building GCSF itself requires no PowerPC toolchain.
  */
 
-typedef unsigned int u32;
-
-#define PARAMS_MAGIC 0x47435344u /* 'GCSD' */
-#define PARAMS_VERSION 1u
-
-/* Values of Params.status. They're macros because an enumerator can't hold 0x80000000 before C23. */
-#define STATUS_BOOTING 0u
-#define STATUS_PLAYING 1u
-#define STATUS_FINISHED 2u
-#define STATUS_ERROR 0x80000000u /* | step number */
+#include "driver.h"
 
 /* A sound ID's table: its section byte, as in docs/gcsf.md. Its low half is the number in that table. */
 #define SECTION_SONGS 0u
@@ -62,12 +55,12 @@ struct Params {
     u32 os_sleep_thread;     /* void OSSleepThread(OSThreadQueue*) */
     u32 vi_init;             /* void VIInit(void) */
     u32 ar_init;             /* u32 ARInit(u32* stack, u32 count) */
-    u32 ar_stack;            /* the game's ARAM allocation stack */
+    u32 aram_blocks;         /* the ARAM allocator's block list (ARInit's stack) */
     u32 arq_init;            /* void ARQInit(void) */
     /* the game's functions */
     u32 context_init; /* the game's set-up of its main context, called with context_object */
     u32 context_object;
-    u32 heaps_init;      /* Camelot's heap table */
+    u32 heaps_init;      /* sets up Camelot's heap table */
     u32 create_heap;     /* Camelot's heap `index` from `start` to `end` */
     u32 select_heap;     /* selects Camelot's heap `index`, and returns the heap it replaces */
     u32 before_sound[4]; /* the file loader's set-up, and what the system set-up calls before the sound set-up */
@@ -82,29 +75,7 @@ __attribute__((section(".params"), used)) volatile struct Params driver_params =
     .version = PARAMS_VERSION,
 };
 
-typedef u32 (*fn0)(void);
-typedef u32 (*fn1)(u32);
-typedef u32 (*fn2)(u32, u32);
-typedef u32 (*fn3)(u32, u32, u32);
-
-/* An OSThreadQueue (head and tail) that nothing wakes. */
-static u32 never_woken[2];
-
-static u32 word(u32 address) {
-    return *(volatile u32*)address;
-}
-
-/* The driver's thread sleeps for good. The OS then runs its idle loop, which the player's CPU skips to the next
- * interrupt. */
-__attribute__((noreturn)) static void sleep_forever(void) {
-    for (;;)
-        ((fn1)driver_params.os_sleep_thread)((u32)never_woken);
-}
-
-__attribute__((noreturn)) static void fail(u32 step) {
-    driver_params.status = STATUS_ERROR | step;
-    sleep_forever();
-}
+#include "sleep.h"
 
 /* Camelot's heap `index`, `size` bytes from the OS heap. */
 static void make_heap(u32 index, u32 size) {
@@ -139,7 +110,7 @@ __attribute__((noreturn)) void driver_main(void) {
     ((fn1)p->os_set_arena_lo)(hi);
 
     /* The ARAM. */
-    ((fn2)p->ar_init)(p->ar_stack, 2);
+    ((fn2)p->ar_init)(p->aram_blocks, 2);
     ((fn0)p->arq_init)();
 
     /* Camelot's heaps 1 and 7, the sound set-up, then heap 0. */

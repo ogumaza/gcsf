@@ -3,11 +3,11 @@
 /*
  * GCSF guest driver for Donkey Kong Jungle Beat. The game's sound library is JAudio2, the sound library of Nintendo
  * EAD's JSystem. The driver is compiled for Gekko and stored in the game's .gcsflib. The player boots the game's
- * startup code: the OS initialisation and the static constructors. The rip patches the game's main to branch here.
+ * start-up code: the OS initialisation and the static constructors. The rip patches the game's main to branch here.
  *
  * The driver calls the game's functions to do what the game's start-up does for sound, without its graphics. The
- * profile in `driver_params` gives their addresses. The ripper fills in the profile. The steps:
- *   1. the video interface: its retraces pace the driver as they pace the game's frames;
+ * profile in `driver_params` gives their addresses. The ripper fills in the profile. The driver starts the video
+ * interface first. Its retraces pace the driver as they pace the game's frames. The steps that follow:
  *   2. JSystem's root heap, then the game's heaps: the system heap, the game heap and the audio heap. The game heap
  *      becomes the current heap;
  *   3. the ARAM manager and the main thread's JKRThread;
@@ -18,31 +18,16 @@
  *   6. the waves that the .minigcsf names, one group of a wave bank each. The game loads its waves per stage, and its
  *      waves don't all fit in ARAM;
  *   7. the sound, by its JAudio sound ID. Music starts in the game's BGM player, the way the game starts it. The sound
- *      manager starts other sounds;
- *   8. the audio manager's frame process, once a frame, forever.
- * `driver_params.status` reports the driver's progress to the player (see docs/gcsf.md).
+ *      manager starts other sounds.
+ * Then the audio manager's frame process runs once a frame, forever. A step that fails stops the driver with its number
+ * in the status word (step 1 is the driver's check of its parameter block). `driver_params.status` reports the driver's
+ * progress to the player (see docs/gcsf.md).
  *
  * Build with `driver/build.py jungle_beat` (clang). The result is committed as src/rip/driver_jungle_beat_blob.h.
  * Building GCSF itself requires no PowerPC toolchain.
  */
 
-typedef unsigned int u32;
-typedef int s32;
-
-#define PARAMS_MAGIC 0x47435344u /* 'GCSD' */
-#define PARAMS_VERSION 1u
-
-/* Values of Params.status. They're macros because an enumerator can't hold 0x80000000 before C23. */
-#define STATUS_BOOTING 0u
-#define STATUS_PLAYING 1u
-#define STATUS_FINISHED 2u
-#define STATUS_ERROR 0x80000000u /* | step number */
-
-/* The frames that the driver waits for the waves before it gives up. */
-#define SETUP_FRAMES 600u
-
-/* The most waves that a .minigcsf names. */
-#define MAX_WAVES 64u
+#include "driver.h"
 
 /* A wave archive's state once it is in ARAM. */
 #define WAVES_LOADED 2u
@@ -113,36 +98,11 @@ __attribute__((section(".params"), used)) volatile struct Params driver_params =
     .version = PARAMS_VERSION,
 };
 
-typedef u32 (*fn0)(void);
-typedef u32 (*fn1)(u32);
-typedef u32 (*fn2)(u32, u32);
-typedef u32 (*fn3)(u32, u32, u32);
-typedef u32 (*fn4)(u32, u32, u32, u32);
-typedef u32 (*fn5)(u32, u32, u32, u32, u32);
-typedef u32 (*fn9)(u32, u32, u32, u32, u32, u32, u32, u32, u32);
-
 /* The tracks of a BGM that its states set. */
 #define MUSIC_TRACKS 16u
 
-static u32 word(u32 address) {
-    return *(volatile u32*)address;
-}
-
-static void wait_frame(void) {
-    for (u32 i = 0; i < driver_params.frame_retraces; i++)
-        ((fn0)driver_params.vi_wait_for_retrace)();
-}
-
-__attribute__((noreturn)) static void fail(u32 step) {
-    driver_params.status = STATUS_ERROR | step;
-    for (;;)
-        wait_frame();
-}
-
-/* A virtual function of `object`. The vtable is the object's first word. */
-static u32 virtual_function(u32 object, u32 slot) {
-    return word(word(object) + slot);
-}
+#include "aram_manager.h"
+#include "frames.h"
 
 /* A wave archive of the listed `wave`: (wave bank << 16) | group. A bank's vtable gives its archive at slot 0x10 and
    the number of its archives at slot 0x14. Returns 0 if the bank or the group doesn't exist. */
@@ -177,7 +137,7 @@ static int starts_silent(u32 id) {
         return 0;
     const u32 state = p->music_states + (u32)index * 0x40;
     for (u32 track = 0; track < MUSIC_TRACKS; track++) {
-        const u32 code = (*(volatile unsigned char*)(state + track / 2) >> ((track & 1) ? 0 : 4)) & 7;
+        const u32 code = (byte(state + track / 2) >> ((track & 1) ? 0 : 4)) & 7;
         if (code != 0 && code != 2)
             return 0;
     }
@@ -228,8 +188,7 @@ __attribute__((noreturn)) void driver_main(void) {
     ((fn1)p->become_current_heap)(game_heap);
 
     /* The ARAM manager and the main thread's JKRThread. */
-    ((fn5)p->create_aram)(p->aram_audio_size, p->aram_graph_size, (p->aram_priorities >> 16) & 0xff,
-                          (p->aram_priorities >> 8) & 0xff, p->aram_priorities & 0xff);
+    create_aram_manager();
     const u32 thread = ((fn1)p->alloc)(p->thread_size);
     if (thread)
         ((fn3)p->thread_ctor)(thread, ((fn0)p->get_current_thread)(), 4);

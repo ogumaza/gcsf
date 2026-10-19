@@ -3,7 +3,7 @@
 cmake_minimum_required(VERSION 3.20)
 # Shared version for gcsfrip, gcsfplay, the foobar2000 component, the XMPlay plugin, Windows file properties and macOS
 # bundles (xsflib_add_version below). For a release, update it here and add notes in docs/release-notes/.
-project(gcsf VERSION 1.5.0 LANGUAGES C CXX)
+project(gcsf VERSION 1.5.1 LANGUAGES C CXX)
 
 # xsflib, a library for players and rippers of the PSF family, is the submodule externals/xsflib. Its
 # XsflibProject.cmake sets what a project built on it starts with: C++20, a release build by default, the static C
@@ -62,9 +62,12 @@ target_compile_options(gcsf_player PRIVATE ${GCSF_WARNINGS})
 
 # The ripper: the game profiles, the sets and the length analysis.
 add_library(gcsf_rip STATIC
-    src/rip/driver_blob.h
+    src/rip/driver_animal_crossing_blob.h
     src/rip/driver_collectors_edition_blob.h
+    src/rip/driver_colosseum_bonus_blob.h
+    src/rip/driver_crystal_chronicles_blob.h
     src/rip/driver_double_dash_blob.h
+    src/rip/driver_four_swords_blob.h
     src/rip/driver_jungle_beat_blob.h
     src/rip/driver_luigis_mansion_blob.h
     src/rip/driver_mario_golf_blob.h
@@ -75,13 +78,21 @@ add_library(gcsf_rip STATIC
     src/rip/driver_super_mario_sunshine_blob.h
     src/rip/driver_twilight_princess_blob.h
     src/rip/driver_warioware_blob.h
-    src/rip/driver_zel_blob.h
+    src/rip/driver_wind_waker_blob.h
+    src/rip/analysis.h
     src/rip/fsys.cpp
     src/rip/fsys.h
+    src/rip/hal.cpp
+    src/rip/jaudio.cpp
     src/rip/musyx.cpp
-    src/rip/musyx.h
+    src/rip/musyx_catalogue.cpp
+    src/rip/musyx_catalogue.h
+    src/rip/n64.cpp
+    src/rip/profiles.cpp
+    src/rip/red.cpp
     src/rip/rip.cpp
     src/rip/rip.h
+    src/rip/sound_libraries.h
 )
 target_link_libraries(gcsf_rip PUBLIC gcsf_player ntdlib::common ntdlib::disc_containers ntdlib::jaudio xsflib::rip)
 target_compile_options(gcsf_rip PRIVATE ${GCSF_WARNINGS})

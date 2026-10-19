@@ -2,7 +2,7 @@
 
 /*
  * GCSF guest driver for Twilight Princess. The game's sound layer, Z2, sits on JAudio2. The driver is compiled for
- * Gekko and stored in the game's .gcsflib. The player boots the game's startup code: the OS initialisation and the
+ * Gekko and stored in the game's .gcsflib. The player boots the game's start-up code: the OS initialisation and the
  * static constructors. The static constructors construct the game's audio manager. The rip patches the game's main to
  * branch here.
  *
@@ -16,10 +16,8 @@
  * src/rip/driver_twilight_princess_blob.h. Building GCSF itself requires no PowerPC toolchain.
  */
 
+#include "driver.h"
 #include "jaudio/z2.h"
-
-#define PARAMS_MAGIC 0x47435344u /* 'GCSD' */
-#define PARAMS_VERSION 1u
 
 struct Params {
     u32 magic;

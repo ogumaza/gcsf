@@ -3,13 +3,13 @@
 /*
  * GCSF guest driver for Pikmin. The game's sound library is an early JAudio1 with a C interface (Jac, Jaf, Jaq and
  * Jam), without a sound layer above it. It's compiled for Gekko and stored in the game's .gcsflib. The player boots the
- * game's startup code: the OS initialisation and the static constructors. The rip patches the game's main to branch
+ * game's start-up code: the OS initialisation and the static constructors. The rip patches the game's main to branch
  * here.
  *
  * The driver calls the game's functions to do what the game's start-up does for sound, without its graphics. The
- * profile in `driver_params` gives their addresses. The ripper fills in the profile. The steps:
- *   1. the OS, the disc with long file names as the disc's bi2.bin allows them, the video interface and ARAM. The
- *      video interface's retraces pace the driver as they pace the game's frames;
+ * profile in `driver_params` gives their addresses. The ripper fills in the profile. The driver first sets up the OS,
+ * the disc with long file names as the disc's bi2.bin allows them, the video interface and ARAM. The video interface's
+ * retraces pace the driver as they pace the game's frames. The steps that follow:
  *   2. the sound library, with a block of the arena. The sound library loads the game's sequence index, its banks and
  *      the effects' first wave group. Then it starts its threads. The game then gives it a buffer for the disc, from
  *      two words of the game's system object. Only the system object's set-up fills them in. The driver doesn't run
@@ -17,33 +17,22 @@
  *      32 KB buffers;
  *   3. the wait until the sound library is up;
  *   4. the piece of music: its sequence and its wave group. The game's scene set-up reads them the same way;
- *   5. the piece, in the first of the two slots that the game plays music in, once the disc has read it;
- *   6. a wait for ever. The sound library's threads play the piece. The driver watches the piece's root track and
- *      reports its end.
+ *   5. the piece, in the first of the two slots that the game plays music in, once the disc has read it.
+ * The driver then waits for ever. The sound library's threads play the piece. The driver watches the piece's root
+ * track and reports its end.
  * The music of the game's cutscenes is one piece in parts. The sound library plays that piece from its start-up. The
  * piece's root track polls a port. A cutscene writes the number of a part to that port. The root track then opens a
- * track that plays the part. For a part, the driver loads the part's wave group in step 4. In step 5, the driver
- * writes the part's number to the port. A cutscene does the same. The driver then watches the track that plays the
- * part.
- * `driver_params.status` reports the driver's progress to the player (see docs/gcsf.md).
+ * track that plays the part. For a part, the driver loads the part's wave group in step 4. In place of step 5, the
+ * driver finds the piece's root track (step 6) and writes the part's number to the port. A cutscene does the same.
+ * The driver then waits for the track that plays the part (step 7) and watches that track.
+ * A step that fails stops the driver with its number in the status word (step 1 is the driver's check of its parameter
+ * block). `driver_params.status` reports the driver's progress to the player (see docs/gcsf.md).
  *
  * Build with `driver/build.py pikmin` (clang). The result is committed as src/rip/driver_pikmin_blob.h. Building GCSF
  * itself requires no PowerPC toolchain.
  */
 
-typedef unsigned int u32;
-
-#define PARAMS_MAGIC 0x47435344u /* 'GCSD' */
-#define PARAMS_VERSION 1u
-
-/* Values of Params.status. They're macros because an enumerator can't hold 0x80000000 before C23. */
-#define STATUS_BOOTING 0u
-#define STATUS_PLAYING 1u
-#define STATUS_FINISHED 2u
-#define STATUS_ERROR 0x80000000u /* | step number */
-
-/* The frames that the driver waits for the sound library and the disc before it gives up. */
-#define SETUP_FRAMES 600u
+#include "driver.h"
 
 /* The fields of Params.sound_id: 0x80000000 | group << 24 | wave system << 16 | part << 8 | piece. The piece field
    holds the piece's number in the sequence index. The driver loads the wave group `group` of the wave system. Part 0
@@ -73,18 +62,18 @@ struct Params {
     u32 sound_id; /* the piece or part to play (see SOUND_PIECE); patched by each .minigcsf */
     u32 sound;    /* the address of `piece_root` while the sound plays, and 0 after it (written by the driver) */
     /* the game profile: sizes and values that the game's start-up gives */
-    u32 frame_retraces;   /* video retraces between the game's frames */
-    u32 audio_heap_size;  /* the block of memory for the sound library */
-    u32 audio_heap_align; /* its alignment */
-    u32 aram_audio_size;  /* ARAM for the sound library */
-    u32 aram_blocks;      /* the ARAM allocator's block list (ARInit's stack) */
-    u32 aram_block_count; /* its number of entries */
-    u32 sound_path;       /* the sound files' folder on the disc, a string in the game's data */
-    u32 system;           /* the variable that holds the game's system object */
-    u32 disc_buffer;      /* the system object's word: the disc buffer that the game gives the sound library */
-    u32 disc_buffer_size; /* the system object's word: that buffer's size in units of 64 bytes */
-    u32 music_slot;       /* the slot that the game plays its music in */
-    u32 music_handle;     /* that slot's root sequence */
+    u32 frame_retraces;       /* video retraces between the game's frames */
+    u32 audio_heap_size;      /* the block of memory for the sound library */
+    u32 audio_heap_alignment; /* its alignment */
+    u32 aram_audio_size;      /* ARAM for the sound library */
+    u32 aram_blocks;          /* the ARAM allocator's block list (ARInit's stack) */
+    u32 aram_block_count;     /* its number of entries */
+    u32 sound_path;           /* the sound files' folder on the disc, a string in the game's data */
+    u32 system;               /* the variable that holds the game's system object */
+    u32 disc_buffer;          /* the system object's word: the disc buffer that the game gives the sound library */
+    u32 disc_buffer_size;     /* the system object's word: that buffer's size in units of 64 bytes */
+    u32 music_slot;           /* the slot that the game plays its music in */
+    u32 music_handle;         /* that slot's root sequence */
     /* the game profile: the addresses of the game's functions and variables */
     u32 os_init;             /* void OSInit(void) */
     u32 long_file_names;     /* the OS's flag that allows file names longer than 8.3 */
@@ -114,30 +103,7 @@ __attribute__((section(".params"), used)) volatile struct Params driver_params =
     .version = PARAMS_VERSION,
 };
 
-typedef u32 (*fn0)(void);
-typedef u32 (*fn1)(u32);
-typedef u32 (*fn2)(u32, u32);
-typedef u32 (*fn3)(u32, u32, u32);
-typedef u32 (*fn4)(u32, u32, u32, u32);
-
-static u32 word(u32 address) {
-    return *(volatile u32*)address;
-}
-
-static unsigned char byte(u32 address) {
-    return *(volatile unsigned char*)address;
-}
-
-static void wait_frame(void) {
-    for (u32 i = 0; i < driver_params.frame_retraces; i++)
-        ((fn0)driver_params.vi_wait_for_retrace)();
-}
-
-__attribute__((noreturn)) static void fail(u32 step) {
-    driver_params.status = STATUS_ERROR | step;
-    for (;;)
-        wait_frame();
-}
+#include "frames.h"
 
 /* The flag that the disc task's pass sets once the disc has read everything before it, and the sound's track: the
    piece's root track, or the track that plays the part. The length analysis reads that track through `sound`. */
@@ -174,7 +140,7 @@ __attribute__((noreturn)) void driver_main(void) {
        system object. Only the system object's set-up fills them in, and the driver doesn't run it. The words hold 0.
        The sound library's disc thread then keeps its two 32 KB buffers. */
     const u32 lo = ((fn0)p->get_arena_lo)();
-    const u32 heap = (lo + p->audio_heap_align - 1) & ~(p->audio_heap_align - 1);
+    const u32 heap = (lo + p->audio_heap_alignment - 1) & ~(p->audio_heap_alignment - 1);
     ((fn1)p->set_arena_lo)(heap + p->audio_heap_size);
     ((fn4)p->start)(heap, p->audio_heap_size, p->aram_audio_size, p->sound_path);
     const u32 system = word(p->system);

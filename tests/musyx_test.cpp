@@ -3,14 +3,14 @@
 // Tests of how a MusyX song's tracks loop (rip::SectionsOf), with made-up SNG files: songs without sections, songs in
 // sections, and damaged songs. Then a test of the catalogue's file (rip::CatalogueFile) with an effect's controllers.
 
-#include "rip/musyx.h"
-
 #include <cstddef>
 #include <cstdint>
 #include <vector>
 
 #include "xsflib/bytes.h"
 #include "xsflib/testing/check.h"
+
+#include "rip/musyx_catalogue.h"
 
 using namespace gcsf;
 using xsflib::testing::Check;

@@ -6,21 +6,27 @@
  * the OS initialisation and the static constructors. The rip patches the game's main to branch here.
  *
  * The driver then does what a game's start-up does for MusyX. It leaves out the graphics. The profile in
- * `driver_params` gives the addresses and MusyX's settings. The ripper fills in the profile. The steps:
- *   1. the start-up functions that the game calls before its sound, such as DVDInit;
- *   2. the ARAM, its queue and the audio interface;
- *   3. MusyX: its memory hooks, sndInit with the game's numbers of voices and its share of ARAM, the functions that the
+ * `driver_params` gives the addresses and MusyX's settings. The ripper fills in the profile. The driver first calls
+ * the start-up functions that the game calls before its sound, such as DVDInit. Then it sets up the ARAM, its queue
+ * and the audio interface. The steps that follow:
+ *   2. MusyX: its memory hooks, sndInit with the game's numbers of voices and its share of ARAM, the functions that the
  *      game calls after sndInit, the output mode, and sndVolume for some games;
- *   4. the sound's description, from the rip's catalogue of sounds (see docs/gcsf.md, "MusyX catalogue");
- *   5. the words that the catalogue gives the sound, such as the settings of the game's reverbs, then the aux effects
- *      of studio 0;
+ *   3. the header of the rip's catalogue of sounds (see docs/gcsf.md, "MusyX catalogue");
+ *   4. the sound's description in the catalogue;
+ *   5. the sound's groups, words and controllers in the catalogue. Then the words that the catalogue gives the sound,
+ *      such as the settings of the game's reverbs, and the aux effects of studio 0;
  *   6. the sound's groups: each group's project, pool, sample directory and samples, read from the rip's files, then
  *      pushed with sndPushGroup. Groups in a row from one set of files share the files. MusyX moves the samples to
  *      ARAM;
- *   7. the sound: a song's file, then sndSeqPlayEx and the song's volume, or an effect through sndFXStartEx and the
- *      effect's MIDI controllers.
+ *   7. the sound's kind: a song that has a file, or an effect;
+ *   8. a song: its file, then sndSeqPlayEx and the song's volume;
+ *   9. an effect: sndFXStartEx and the effect's MIDI controllers.
  * The driver's thread then sleeps for good. The sound plays from the audio and DSP interrupts. The OS's idle loop runs
- * while no thread can. `driver_params.status` reports the driver's progress to the player (see docs/gcsf.md).
+ * while no thread can. A step that fails stops the driver with its number in the status word (step 1 is the driver's
+ * check of its parameter block). A file of the rip that doesn't open fails as step 10 for the catalogue, 20, 30, 40 and
+ * 50 for a group's project, pool, sample directory and samples, and 60 for a song. A failed allocation for the file
+ * adds 1 to that step, a read that doesn't start adds 2 and a read that fails adds 3. `driver_params.status` reports
+ * the driver's progress to the player (see docs/gcsf.md).
  *
  * MusyX allocates its memory through the hooks. The driver hands out the OS's arena, from the bottom up, and never
  * takes memory back. The sound's files follow MusyX's memory in the arena.
@@ -29,18 +35,7 @@
  * itself requires no PowerPC toolchain.
  */
 
-typedef unsigned int u32;
-typedef unsigned short u16;
-typedef unsigned char u8;
-
-#define PARAMS_MAGIC 0x47435344u /* 'GCSD' */
-#define PARAMS_VERSION 1u
-
-/* Values of Params.status. They're macros because an enumerator can't hold 0x80000000 before C23. */
-#define STATUS_BOOTING 0u
-#define STATUS_PLAYING 1u
-#define STATUS_FINISHED 2u
-#define STATUS_ERROR 0x80000000u /* | step number */
+#include "driver.h"
 
 #define STARTUP_CALLS 4u
 #define AFTER_INIT_CALLS 2u
@@ -70,10 +65,6 @@ typedef unsigned char u8;
  * sndFXCtrl14. Without it, sndFXCtrl sends a 7-bit value. */
 #define CONTROLLER_14_BIT 0x100u
 
-/* The bit of the machine state register that lets external interrupts in, such as the audio interface's and the
- * DSP's. */
-#define MSR_EE 0x8000u
-
 /* The DVD library's states of a read. */
 #define DVD_STATE_END 0
 #define DVD_STATE_BUSY 1
@@ -99,15 +90,18 @@ struct Params {
     u32 os_get_arena_hi;                /* void* OSGetArenaHi(void) */
     u32 startup[STARTUP_CALLS];         /* functions without arguments, called first; 0 for none */
     u32 dvd_open;                       /* BOOL DVDOpen(const char*, DVDFileInfo*) */
-    u32 dvd_read_async_prio;            /* BOOL DVDReadAsyncPrio(DVDFileInfo*, void*, s32, s32, callback, s32) */
+    u32 dvd_read_async_prio;            /* BOOL DVDReadAsyncPrio(DVDFileInfo*, void*, s32, s32, callback, s32). For a
+                                           game without it, the profile gives DVDReadPrio. That function waits for the
+                                           read. It takes the priority in place of the callback. The driver passes 0
+                                           there. */
     u32 dvd_get_command_block_status;   /* s32 DVDGetCommandBlockStatus(DVDCommandBlock*) */
     u32 dvd_close;                      /* BOOL DVDClose(DVDFileInfo*) */
     /* the ARAM and the audio interface */
-    u32 ar_init;        /* u32 ARInit(u32* stack, u32 count) */
-    u32 ar_stack;       /* the game's ARAM allocation stack */
-    u32 ar_stack_count; /* its number of entries */
-    u32 arq_init;       /* void ARQInit(void) */
-    u32 ai_init;        /* void AIInit(u8* stack): 0 for no call */
+    u32 ar_init;          /* u32 ARInit(u32* stack, u32 count) */
+    u32 aram_blocks;      /* the ARAM allocator's block list (ARInit's stack) */
+    u32 aram_block_count; /* its number of entries */
+    u32 arq_init;         /* void ARQInit(void) */
+    u32 ai_init;          /* void AIInit(u8* stack): 0 for no call */
     /* MusyX */
     u32 snd_set_hooks; /* void sndSetHooks(SND_HOOKS*): 0 if the library has no hooks */
     u32 snd_init;      /* s32 sndInit(voices, music, sfx, [studios,] flags, aram_size) */
@@ -127,7 +121,8 @@ struct Params {
     u32 aux_callback[2]; /* the effects' callbacks */
     u32 aux_user[2];     /* their parameter blocks in the game's memory */
     u32 aux_prepare[2];  /* bool prepare(void* user): 0 for no call */
-    u32 aux_midi[2];     /* the MIDI channel that controls each effect, or 0xff for none */
+    u32 aux_midi[2];     /* the MIDI channel that controls each effect, or 0xff for none. The driver reads it only
+                            with sndSetAuxProcessingCallbacks. */
     /* void sndVolume(u8 volume, u16 time, u8 group): 0 for no call. MusyX starts every volume group at a volume of 0.
      * The start-ups of Metroid Prime and Metroid Prime 2 call sndVolume(127, 0, 0xff). That call gives every group its
      * full volume. A song's start sets the song's group again. Nothing else sets an effect's group. */
@@ -143,18 +138,6 @@ __attribute__((section(".params"), used)) volatile struct Params driver_params =
     .version = PARAMS_VERSION,
 };
 
-typedef u32 (*fn0)(void);
-typedef u32 (*fn1)(u32);
-typedef u32 (*fn2)(u32, u32);
-typedef u32 (*fn3)(u32, u32, u32);
-typedef u32 (*fn4)(u32, u32, u32, u32);
-typedef u32 (*fn5)(u32, u32, u32, u32, u32);
-typedef u32 (*fn6)(u32, u32, u32, u32, u32, u32);
-typedef void (*fn9)(u32, u32, u32, u32, u32, u32, u32, u32, u32);
-
-/* An OSThreadQueue (head and tail) that nothing wakes. */
-static u32 never_woken[2];
-
 /* The OS's arena, which the driver hands out from the bottom up. */
 static u32 heap_next;
 static u32 heap_end;
@@ -165,17 +148,7 @@ static u32 hooks[2];
 /* A DVDFileInfo: the command block (0x30 bytes), the file's start and length, and the callback. */
 static u32 file_info[16] __attribute__((aligned(32)));
 
-/* The driver's thread sleeps for good. The OS then runs its idle loop. The player's CPU skips that loop to the next
- * interrupt. */
-__attribute__((noreturn)) static void sleep_forever(void) {
-    for (;;)
-        ((fn1)driver_params.os_sleep_thread)((u32)never_woken);
-}
-
-__attribute__((noreturn)) static void fail(u32 step) {
-    driver_params.status = STATUS_ERROR | step;
-    sleep_forever();
-}
+#include "sleep.h"
 
 /* `size` bytes of the arena, at a 32-byte boundary: the DSP and the disc require that for their transfers. Returns 0
  * when the arena is used up. */
@@ -193,26 +166,6 @@ static u32 hook_malloc(u32 size) {
 
 static void hook_free(u32 address) {
     (void)address;
-}
-
-/* Turns external interrupts off. Returns the machine state to restore. */
-static u32 disable_interrupts(void) {
-    u32 msr;
-    __asm__ volatile("mfmsr %0" : "=r"(msr));
-    __asm__ volatile("mtmsr %0" : : "r"(msr & ~MSR_EE) : "memory");
-    return msr;
-}
-
-static void restore_interrupts(u32 msr) {
-    __asm__ volatile("mtmsr %0" : : "r"(msr) : "memory");
-}
-
-static u32 be16(const u8* p) {
-    return (u32)p[0] << 8 | p[1];
-}
-
-static u32 be32(const u8* p) {
-    return (u32)p[0] << 24 | (u32)p[1] << 16 | (u32)p[2] << 8 | p[3];
 }
 
 /* The path "MusyX/<number><extension>" in `out`, which holds at least 32 bytes. */
@@ -271,7 +224,7 @@ __attribute__((noreturn)) void driver_main(void) {
             ((fn0)p->startup[i])();
 
     /* The ARAM, its queue and the audio interface. */
-    ((fn2)p->ar_init)(p->ar_stack, p->ar_stack_count);
+    ((fn2)p->ar_init)(p->aram_blocks, p->aram_block_count);
     ((fn0)p->arq_init)();
     if (p->ai_init)
         ((fn1)p->ai_init)(0);

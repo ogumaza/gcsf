@@ -3,47 +3,32 @@
 /*
  * GCSF guest driver for Super Mario Sunshine. The game's sound library is JAudio1, with a sound layer above it
  * (JAIBasic) and the game's sound object (MSound) above that. It's compiled for Gekko and stored in the game's
- * .gcsflib. The player boots the game's startup code: the OS initialisation and the static constructors. The rip
+ * .gcsflib. The player boots the game's start-up code: the OS initialisation and the static constructors. The rip
  * patches the game's main to branch here.
  *
  * The driver calls the game's functions to do what the game's start-up does for sound, without its graphics. The
- * profile in `driver_params` gives their addresses. The ripper fills in the profile. The steps:
- *   1. the video interface: its retraces pace the driver as they pace the game's frames;
+ * profile in `driver_params` gives their addresses. The ripper fills in the profile. The driver starts the video
+ * interface first. Its retraces pace the driver as they pace the game's frames. The steps that follow:
  *   2. the disc, with long file names as the disc's bi2.bin allows them, the root heap and the system heap, the ARAM
  *      manager and its transfer buffer. The game's start-up makes them the same way;
  *   3. the game's sound object. It sets the sound library up. The game takes the start-up archive from a compressed
  *      archive and hands it to the sound object. The driver hands it none. The sound library then reads the start-up
- *      archive from a file of the rip;
- *   4. the waves that the game loads at start-up and before its title: the game's sound object loads each;
- *   5. the game's sound frame, once a frame, until the sound library is up and those waves are in ARAM;
- *   6. the scene's waves: the group of the scene system that the .minigcsf names. The game's scene loader puts it at
+ *      archive from a file of the rip. Then the waves that the game loads at start-up and before its title. The
+ *      game's sound object loads each;
+ *   4. the game's sound frame, once a frame, until the sound library is up and those waves are in ARAM;
+ *   5. the scene's waves: the group of the scene system that the .minigcsf names. The game's scene loader puts it at
  *      the top of ARAM. Groups of that system share some waves, with the same samples;
- *   7. the sound: the sound library starts it by its JAudio sound ID. The game starts its music the same way. A music
- *      piece plays at the volume that the game gives its music;
- *   8. the game's sound frame, once a frame, forever.
- * `driver_params.status` reports the driver's progress to the player (see docs/gcsf.md).
+ *   6. the sound: the sound library starts it by its JAudio sound ID. The game starts its music the same way. A music
+ *      piece plays at the volume that the game gives its music.
+ * Then the game's sound frame runs once a frame, forever. A step that fails stops the driver with its number in the
+ * status word (step 1 is the driver's check of its parameter block). `driver_params.status` reports the driver's
+ * progress to the player (see docs/gcsf.md).
  *
  * Build with `driver/build.py super_mario_sunshine` (clang). The result is committed as
  * src/rip/driver_super_mario_sunshine_blob.h. Building GCSF itself requires no PowerPC toolchain.
  */
 
-typedef unsigned int u32;
-typedef int s32;
-
-#define PARAMS_MAGIC 0x47435344u /* 'GCSD' */
-#define PARAMS_VERSION 1u
-
-/* Values of Params.status. They're macros because an enumerator can't hold 0x80000000 before C23. */
-#define STATUS_BOOTING 0u
-#define STATUS_PLAYING 1u
-#define STATUS_FINISHED 2u
-#define STATUS_ERROR 0x80000000u /* | step number */
-
-/* The frames that the driver waits for the sound library and for the waves before it gives up. */
-#define SETUP_FRAMES 600u
-
-/* The most waves that a .minigcsf names. */
-#define MAX_WAVES 64u
+#include "driver.h"
 
 /* The most wave loads that the game's start-up makes. */
 #define MAX_STAYING_WAVES 4u
@@ -114,33 +99,20 @@ __attribute__((section(".params"), used)) volatile struct Params driver_params =
     .version = PARAMS_VERSION,
 };
 
-typedef u32 (*fn0)(void);
-typedef u32 (*fn1)(u32);
-typedef u32 (*fn2)(u32, u32);
-typedef u32 (*fn3)(u32, u32, u32);
-typedef u32 (*fn5)(u32, u32, u32, u32, u32);
-typedef u32 (*fn6)(u32, u32, u32, u32, u32, u32);
-typedef u32 (*fn7)(u32, u32, u32, u32, u32, u32, u32);
-typedef void (*set_volume_fn)(u32, float, u32, u32);
-
-static u32 word(u32 address) {
-    return *(volatile u32*)address;
+/* Calls JAISound::setVolume at `fn` for `sound`. The volume is the float whose bits are at `volume`. The game's code
+   passes the sound in r3, the volume in f1, the move time in r4 and the kind in r5. The driver is built without
+   floating point. A float that it passed would go in a general register. */
+__attribute__((naked)) static void call_set_volume(u32 fn, const u32* volume, u32 sound, u32 move_time, u32 kind) {
+    __asm__ volatile("mtctr 3\n"
+                     "lfs 1, 0(4)\n"
+                     "mr 3, 5\n"
+                     "mr 4, 6\n"
+                     "mr 5, 7\n"
+                     "bctr\n");
 }
 
-static unsigned char byte(u32 address) {
-    return *(volatile unsigned char*)address;
-}
-
-static void wait_frame(void) {
-    for (u32 i = 0; i < driver_params.frame_retraces; i++)
-        ((fn0)driver_params.vi_wait_for_retrace)();
-}
-
-__attribute__((noreturn)) static void fail(u32 step) {
-    driver_params.status = STATUS_ERROR | step;
-    for (;;)
-        wait_frame();
-}
+#include "aram_manager.h"
+#include "frames.h"
 
 /* The load status of a wave system in the sound library. */
 static s32 wave_status(u32 system) {
@@ -225,8 +197,7 @@ __attribute__((noreturn)) void driver_main(void) {
         fail(2);
     ((fn1)p->become_system_heap)(system);
     ((fn1)p->become_current_heap)(root);
-    ((fn5)p->create_aram)(p->aram_audio_size, p->aram_graph_size, (p->aram_priorities >> 16) & 0xff,
-                          (p->aram_priorities >> 8) & 0xff, p->aram_priorities & 0xff);
+    create_aram_manager();
     const u32 buffer = ((fn3)p->heap_alloc)(p->aram_buffer_size, 0x20, root);
     if (!buffer)
         fail(2);
@@ -259,11 +230,8 @@ __attribute__((noreturn)) void driver_main(void) {
     if (!p->sound)
         fail(6);
     if ((p->sound_id & SOUND_TYPE_MASK) == SOUND_SEQUENCE && p->set_volume) {
-        union {
-            u32 bits;
-            float value;
-        } volume = {p->music_volume};
-        ((set_volume_fn)p->set_volume)(p->sound, volume.value, 0, p->music_volume_kind);
+        const u32 volume = p->music_volume;
+        call_set_volume(p->set_volume, &volume, p->sound, 0, p->music_volume_kind);
     }
     p->status = STATUS_PLAYING;
 

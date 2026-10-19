@@ -9,38 +9,29 @@
  *
  * The driver calls the game's functions to do what the game's start-up does for sound, without its graphics. The
  * profile in `driver_params` gives their addresses. The ripper fills in the profile. The steps:
- *   1. the OS, its alarms, the disc, the video interface and ARAM. The video interface's retraces pace the driver as
- *      they pace the game's frames;
- *   2. the sound library, with the sound of the game's start-up screen, as the game's start-up gives them. The sound
- *      library starts its threads. One of them reads the game's sound data from the disc into ARAM;
+ *   2. the sound ID's kind and the size of ARInit's block list. Then the OS, its alarms, the disc, the video interface
+ *      and ARAM. The video interface's retraces pace the driver as they pace the game's frames. Then the sound
+ *      library, with the sound of the game's start-up screen. The game's start-up starts the library the same way.
+ *      The sound library starts its threads. One of them reads the game's sound data from the disc into ARAM;
  *   3. the game's sound frame, once a retrace, until the sound library is up. The game's start-up waits the same way;
- *   4. the weather, for a piece of music that plays the hour, then the piece, by the game's number of the piece. In
- *      the museum, the room picks the arrangement of the museum's piece. The first part of one of Kapp'n's songs gets
- *      an empty second part, and a second part plays as a piece of its own. For an effect, the driver waits for the
- *      effects sequence. The game's sound frame starts that sequence once the sound library is up. The driver then
- *      starts the effect by the game's number of the effect;
- *   5. the game's sound frame, once a frame, for ever. The driver watches the sequence player that plays the piece, or
- *      the game's slot of the effect, and reports the end. A piece of a music disc plays from a stereo. Before each
- *      frame, the driver places the listener at the stereo, as the game places the listener once a frame.
- * `driver_params.status` reports the driver's progress to the player (see docs/gcsf.md).
+ *   4. for a piece of music, the weather, for a piece that plays the hour, then the piece, by the game's number of the
+ *      piece. In the museum, the room picks the arrangement of the museum's piece. The first part of one of Kapp'n's
+ *      songs gets an empty second part. A second part plays as a piece of its own;
+ *   5. the piece's sequence player, once the game's sound frame has started it;
+ *   6. for an effect, the effects sequence. The game's sound frame starts that sequence once the sound library is up;
+ *   7. the effect, by the game's number of the effect. The game's function for it takes a free slot for effects.
+ * Then the game's sound frame runs once a frame, for ever. The driver watches the sequence player that plays the
+ * piece, or the game's slot of the effect, and reports the end. A piece of a music disc plays from a stereo. Before
+ * each frame, the driver places the listener at the stereo. The game places the listener once a frame too. A step that
+ * fails stops the driver with its number in the status word (step 1 is the driver's check of its parameter block). A
+ * read of the disc that fails in the sound library stops the driver at step 9. `driver_params.status` reports the
+ * driver's progress to the player (see docs/gcsf.md).
  *
  * Build with `driver/build.py animal_crossing` (clang). The result is committed as
  * src/rip/driver_animal_crossing_blob.h. Building GCSF itself requires no PowerPC toolchain.
  */
 
-typedef unsigned int u32;
-
-#define PARAMS_MAGIC 0x47435344u /* 'GCSD' */
-#define PARAMS_VERSION 1u
-
-/* Values of Params.status. They're macros because an enumerator can't hold 0x80000000 before C23. */
-#define STATUS_BOOTING 0u
-#define STATUS_PLAYING 1u
-#define STATUS_FINISHED 2u
-#define STATUS_ERROR 0x80000000u /* | step number */
-
-/* The frames that the driver waits for the sound library and for a piece to start before it gives up. */
-#define SETUP_FRAMES 600u
+#include "driver.h"
 
 /* The fields of Params.sound_id: the kind of sound in the top byte, the museum's room in bits 16 to 23, the weather in
    bits 8 to 15 and the game's number of the piece in the low byte. The weather picks the arrangement of a piece that
@@ -115,21 +106,8 @@ __attribute__((section(".params"), used)) volatile struct Params driver_params =
     .version = PARAMS_VERSION,
 };
 
-typedef u32 (*fn0)(void);
-typedef u32 (*fn1)(u32);
-typedef u32 (*fn2)(u32, u32);
-typedef u32 (*fn6)(u32, u32, u32, u32, u32, u32);
-
-static unsigned char byte(u32 address) {
-    return *(volatile unsigned char*)address;
-}
-
 static unsigned short halfword(u32 address) {
     return *(volatile unsigned short*)address;
-}
-
-static u32 word(u32 address) {
-    return *(volatile u32*)address;
 }
 
 static void wait_retraces(u32 count) {

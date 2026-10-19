@@ -6,7 +6,8 @@ its DSP program. The game plays the sound itself. The rip is therefore exact.
 
 GCSF works like 2SF for the DS. A rip requires a driver profile for the game (see "Ripping"). Version 1 rips games
 whose sound library is JAudio, in either of its generations: JAudio1 or JAudio2. JAudio is the sound library of
-Nintendo EAD's JSystem. Version 1 also rips games whose sound library is MusyX, Factor 5's sound library.
+Nintendo EAD's JSystem. Version 1 also rips games on four other sound libraries: Factor 5's MusyX, Square's Red driver,
+a port of Nintendo's sound library for the Nintendo 64, and HAL Laboratory's sound library.
 
 ## Files
 
@@ -131,13 +132,18 @@ Nothing else changes memory while the CPU runs. The result is therefore the same
 
 ## Driver
 
-Rips contain one of GCSF's drivers. Each driver calls the functions of one game's sound layer. The game's profile names
-the driver. Four Swords Adventures' driver is `driver/driver.c`. Mario Golf: Toadstool Tour's driver is
-`driver/mario_golf.c`. A driver is loaded at 0x81700000. Its entry point is at the same address. The rip patches the
-game's `main` to branch to it. The driver calls the game's functions to do what the game's start-up does for sound. It
-leaves out the graphics. Four Swords Adventures' driver sets up the video interface, JSystem's heaps and ARAM manager,
-the game's audio object and disc thread, and the game's audio set-up. It loads every wave bank into ARAM. Then it starts
-the sound by its JAudio sound ID. From then on it calls the game's audio frame process once per video retrace.
+Rips contain one of GCSF's drivers. Most drivers call the functions of a game's sound layer. The MusyX driver calls the
+functions of MusyX itself. Several games use it (see below). The game's profile names the driver. A driver is loaded at
+0x81700000. Its entry point is at the same address. The rip patches the game's `main` to branch to it. The driver calls
+the game's functions to do what the game's start-up does for sound. It leaves out the graphics. Every driver includes
+`driver/driver.h`. The header holds the C types, the values of the parameter block's first words (see below) and the
+helpers that read the game's memory.
+
+Four Swords Adventures' driver is `driver/four_swords.c`. It sets up the video interface, JSystem's heaps and ARAM
+manager, the game's audio object and disc thread, and the game's audio set-up. It loads every wave bank into ARAM. Then
+it starts the sound by its JAudio sound ID. The game's music start mutes some tracks of one piece, `JA_BGM_SELECT`:
+every child of the root track's child 0 but children 2 and 7. The driver mutes the same tracks once the piece has
+started. From then on it calls the game's audio frame process once per video retrace.
 
 Twilight Princess's driver is `driver/twilight_princess.c`. It sets up the video interface, JSystem's heaps, ARAM
 manager and thread switch manager, the game's heaps and disc thread, and the game's audio set-up. It loads the wave
@@ -145,8 +151,8 @@ groups of the wave list (see below) as the game's scene manager loads them. Then
 calls the audio manager's frame process every second video retrace. The game's frames are a 30th of a second. An entry
 of its wave list holds a wave bank in its high 16 bits and a group of that bank's wave system in its low 16 bits.
 
-The Wind Waker's driver is `driver/zel.c`. It sets up the video interface, JSystem's heaps and ARAM manager, and the
-game's disc thread, as the game's machine set-up does. Then it calls the game's audio process once a frame until the
+The Wind Waker's driver is `driver/wind_waker.c`. It sets up the video interface, JSystem's heaps and ARAM manager, and
+the game's disc thread, as the game's machine set-up does. Then it calls the game's audio process once a frame until the
 sound library is up. The library loads its start-up archive and the waves that stay loaded. It starts the effects
 sequence. The driver then loads the waves that the `.minigcsf` names. It gives the sound library back its default
 camera, which stays still. The game's sound set-up clears the camera, and the game's camera process sets it once a
@@ -205,11 +211,11 @@ process once per video retrace. Some effects are level sounds, such as the engin
 level sound a lifetime of one frame. The game starts the sound again each frame for as long as it should play. The
 driver starts it again before each frame until the sound ends.
 
-Mario Golf: Toadstool Tour's driver sets up the video interface, the OS's arena and heap, the ARAM and the game's heaps.
-The game's sound set-up then starts MusyX, and the driver loads the game's two MusyX sound groups. The driver starts the
-song by its number in the game's song table, or the jingle by its number in the jingle table. The game starts a jingle
-from another thread. The jingle sounds half a second later. The driver's thread then sleeps. The song plays from the
-audio and DSP interrupts. Mario Power Tennis plays through the same driver.
+Mario Golf: Toadstool Tour's driver is `driver/mario_golf.c`. It sets up the video interface, the OS's arena and heap,
+the ARAM and the game's heaps. The game's sound set-up then starts MusyX, and the driver loads the game's two MusyX
+sound groups. The driver starts the song by its number in the game's song table, or the jingle by its number in the
+jingle table. The game starts a jingle from another thread. The jingle sounds half a second later. The driver's thread
+then sleeps. The song plays from the audio and DSP interrupts. Mario Power Tennis plays through the same driver.
 
 WarioWare, Inc.: Mega Party Game$!'s driver is `driver/warioware.c`. It sets up the game's heaps. The game's file loader
 then reads the game's five sound files from the disc. The driver puts each one where the game's sound set-up looks for
@@ -328,7 +334,7 @@ volume, its pitch wheel and its send to the reverb that way. The driver turns ex
 start to its last controller. No audio frame plays the effect without its controllers. The driver's thread then sleeps.
 The sound plays from the audio and DSP interrupts.
 
-Its parameter block is at **0x81700010**. The block's words are big-endian:
+Every driver's parameter block is at **0x81700010**. The block's words are big-endian:
 
 ```
 0x00  u32  magic "GCSD"
@@ -336,8 +342,9 @@ Its parameter block is at **0x81700010**. The block's words are big-endian:
 0x08  u32  status (written by the driver): 0 booting, 1 playing, 2 finished, 0x80000000 | step on error
 0x0C  u32  sound ID: the sound to play
 0x10  u32  the sound's handle (written by the game): the sound's object while it plays, then 0
-0x14  ...  game profile: retraces between audio frames, the sizes that the game's start-up uses, then the
-           addresses of the game's functions and the offsets of their objects (see driver.c)
+0x14  ...  game profile (see the driver's source). Four Swords Adventures' profile holds the retraces between
+           audio frames, the sizes that the game's start-up uses, then the addresses of the game's functions and the
+           offsets of their objects
 ```
 
 A game's waves may not fit in the audio memory. A driver for such a game loads only the waves that the sound uses. Its
@@ -403,8 +410,8 @@ The descriptor's status address points at the status word (0x81700018). A player
 
 - **Start.** The player runs the rip from boot and discards the output until the status first reads 1 or 2. The boot
   and the loading of the sound then don't count towards its length. The player stops with an error if the status has
-  bit 31 set (the low byte is the step that failed). It also stops with an error if the status hasn't reached 1 after
-  10 emulated seconds.
+  bit 31 set. The low byte is the step that failed. Step 1 is the driver's check of its block. The driver's source
+  lists the other steps. The player also stops with an error if the status hasn't reached 1 after 10 emulated seconds.
 - **End.** Like any PSF player, a player plays for the tagged length plus fade. Without a length tag, it plays until
   half a second after the driver reports that the sound has finished (status 2). It stops sooner if a default length and
   fade end first. The player checks the status after every millisecond of emulated time.
@@ -737,7 +744,7 @@ group 0, is in `S/inst.snd`. That file starts with the number of its parts, 4, t
 big-endian word each. The parts are MusyX's project, pool, sample directory and samples. The ripper lists the table's
 111 songs in its order. A song is named after its file without the extension, for example `bgm_t000`. `--bgm` takes
 every song. The game plays a song at the music's volume of its options, 127 at their default. The play function sets
-the reverb of aux A for each song (see the profile in `src/rip/rip.cpp`). A song's catalogue entry holds those
+the reverb of aux A for each song (see the profile in `src/rip/profiles.cpp`). A song's catalogue entry holds those
 settings. The disc holds six songs that the table leaves out: `bgm_etc004` and `temp1` to `temp5`. The game's code
 names none of them, and the ripper leaves them out. Both discs hold the same code and the same music. A rip of either
 disc gives the same set. The game's sound effects and voices aren't ripped.
@@ -780,7 +787,7 @@ rip plays them at MusyX's full volume. The game's sound effects aren't ripped.
 
 `main.dol` is a loader. It holds the OS, MusyX and a second DOL: the game. The loader maps the game in at 0x7FC00000.
 The driver runs only the loader's code. A rip skips the loader's set-up of the game's heaps and the game's static
-constructors. The profile in `src/rip/rip.cpp` lists the rip's other patches.
+constructors. The profile in `src/rip/profiles.cpp` lists the rip's other patches.
 
 Sixty of Rogue Leader's songs play only streams. Each of them holds a single note. The note's program plays stream
 buffers: samples of one second that loop. A stream buffer has the sample type 5 in its bank's sample directory. The game
@@ -789,7 +796,7 @@ those of the banks that hold the songs with streams, 21 to 28 and 30 to 37, and 
 rip streams. These songs make no sound in a rip, and the ripper skips them. Eight more songs play a stream along with
 their notes: The Battle Of Yavin I and III, Hyperspace, Imperial Attack, The Asteroid Field, Celebration & End Titles,
 and two songs that the hall doesn't list (group 0x4D's song 0x1A and group 0x61's song 0x3D). A rip of one of them would
-play only its notes. The ripper leaves them out, as streams. The profile in `src/rip/rip.cpp` lists them.
+play only its notes. The ripper leaves them out, as streams. The profile in `src/rip/profiles.cpp` lists them.
 
 Pokémon Colosseum keeps most of its files in FSYS archives (see `src/rip/fsys.h`). The module `common_rel` in
 `common.fsys` holds the game's table of sounds: 1,236 entries of 12 bytes. An entry's first byte has bit 7 set for an
@@ -797,8 +804,8 @@ effect. A song's entry gives its group at +1, its reverb's preset at +2, the num
 ID in a big-endian half at +4. The module's table of 79 files gives each file's FSYS ID. `bgm_archive.fsys` holds the
 songs under those IDs and names them. The music's groups are in `common.fsys`: group 0 in `snd_music_proj`,
 `snd_music_pool` and `snd_music_sdir`, and group 1 in the same files of `snd_music_atmos`. Their samples are
-`sound/snd_music.samp` and `sound/snd_music_atmos.samp`. The profile in `src/rip/rip.cpp` gives the tables' places in
-the module. The ripper lists the table's 78 songs in its order. A song is named after its file, for example
+`sound/snd_music.samp` and `sound/snd_music_atmos.samp`. The profile in `src/rip/profiles.cpp` gives the tables' places
+in the module. The ripper lists the table's 78 songs in its order. A song is named after its file, for example
 `title_song`. `--bgm` takes every song. `null_bgm_song` holds no notes. The game plays it to silence its music. The
 ripper skips it. The game plays its songs at volume 127. Studio 0's aux A holds MusyX's high-quality reverb. The
 module holds 12 presets of the reverb's settings. A song's entry picks one. A song's catalogue entry holds the

@@ -3,40 +3,28 @@
 /*
  * GCSF guest driver for Luigi's Mansion. The game's sound library is an early JAudio1, with a sound layer above it
  * (JAIBasic) and the game's wrapper above that. It's compiled for Gekko and stored in the game's .gcsflib. The player
- * boots the game's startup code: the OS initialisation and the static constructors. The rip patches the game's main
+ * boots the game's start-up code: the OS initialisation and the static constructors. The rip patches the game's main
  * to branch here.
  *
  * The driver calls the game's functions to do what the game's start-up does for sound, without its graphics. The
- * profile in `driver_params` gives their addresses. The ripper fills in the profile. The steps:
- *   1. the video interface: its retraces pace the driver as they pace the game's frames;
+ * profile in `driver_params` gives their addresses. The ripper fills in the profile. The driver starts the video
+ * interface first. Its retraces pace the driver as they pace the game's frames. The steps that follow:
  *   2. the disc, with long file names as the disc's bi2.bin allows them, the root heap and the game's heap, and the
  *      ARAM manager, as the game's main makes them;
- *   3. the game's sound set-up, with a block of the game's heap for the sound library;
- *   4. the wave systems of load type 0: the game's start-up loads them before its first frame;
- *   5. the game's sound frame, once a frame, until the sound library is up and every wave system that stays loaded is
+ *   3. the game's sound set-up, with a block of the game's heap for the sound library. Then the wave systems of load
+ *      type 0. The game's start-up loads them before its first frame;
+ *   4. the game's sound frame, once a frame, until the sound library is up and every wave system that stays loaded is
  *      in ARAM. The sound library loads those of load type 1 by itself once it's up;
- *   6. the sound: the sound library starts it by its JAudio sound ID, as the game starts its music;
- *   7. the game's sound frame, once a frame, forever.
- * `driver_params.status` reports the driver's progress to the player (see docs/gcsf.md).
+ *   5. the sound: the sound library starts it by its JAudio sound ID. The game starts its music the same way.
+ * Then the game's sound frame runs once a frame, forever. A step that fails stops the driver with its number in the
+ * status word (step 1 is the driver's check of its parameter block). `driver_params.status` reports the driver's
+ * progress to the player (see docs/gcsf.md).
  *
  * Build with `driver/build.py luigis_mansion` (clang). The result is committed as
  * src/rip/driver_luigis_mansion_blob.h. Building GCSF itself requires no PowerPC toolchain.
  */
 
-typedef unsigned int u32;
-typedef int s32;
-
-#define PARAMS_MAGIC 0x47435344u /* 'GCSD' */
-#define PARAMS_VERSION 1u
-
-/* Values of Params.status. They're macros because an enumerator can't hold 0x80000000 before C23. */
-#define STATUS_BOOTING 0u
-#define STATUS_PLAYING 1u
-#define STATUS_FINISHED 2u
-#define STATUS_ERROR 0x80000000u /* | step number */
-
-/* The frames that the driver waits for the sound library and its waves before it gives up. */
-#define SETUP_FRAMES 600u
+#include "driver.h"
 
 /* The sound library's state once it's up and its effects sequence plays. */
 #define STATE_RUNNING 4u
@@ -85,31 +73,8 @@ __attribute__((section(".params"), used)) volatile struct Params driver_params =
     .version = PARAMS_VERSION,
 };
 
-typedef u32 (*fn0)(void);
-typedef u32 (*fn1)(u32);
-typedef u32 (*fn2)(u32, u32);
-typedef u32 (*fn3)(u32, u32, u32);
-typedef u32 (*fn5)(u32, u32, u32, u32, u32);
-typedef u32 (*fn6)(u32, u32, u32, u32, u32, u32);
-
-static u32 word(u32 address) {
-    return *(volatile u32*)address;
-}
-
-static unsigned char byte(u32 address) {
-    return *(volatile unsigned char*)address;
-}
-
-static void wait_frame(void) {
-    for (u32 i = 0; i < driver_params.frame_retraces; i++)
-        ((fn0)driver_params.vi_wait_for_retrace)();
-}
-
-__attribute__((noreturn)) static void fail(u32 step) {
-    driver_params.status = STATUS_ERROR | step;
-    for (;;)
-        wait_frame();
-}
+#include "aram_manager.h"
+#include "frames.h"
 
 /* Whether the sound library is up, and every wave system that stays loaded is in ARAM. The library loads them in the
    order of its list, one at a time, and each load that finishes sets the library's last load to the system's number
@@ -151,8 +116,7 @@ __attribute__((noreturn)) void driver_main(void) {
         fail(2);
     ((fn1)p->become_system_heap)(game);
     ((fn1)p->become_current_heap)(game);
-    ((fn5)p->create_aram)(p->aram_audio_size, p->aram_graph_size, (p->aram_priorities >> 16) & 0xff,
-                          (p->aram_priorities >> 8) & 0xff, p->aram_priorities & 0xff);
+    create_aram_manager();
 
     /* The game's sound set-up, with its block of the game's heap, and the wave systems of load type 0. */
     const u32 block = ((fn3)p->heap_alloc)(p->audio_heap_size, p->audio_heap_alignment, game);

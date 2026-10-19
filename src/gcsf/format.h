@@ -7,7 +7,6 @@
 #include <cstdint>
 #include <optional>
 #include <string>
-#include <string_view>
 #include <vector>
 
 #include "xsflib/psf/program.h"
@@ -62,8 +61,14 @@ using xsflib::psf::ParseProgram;
 using xsflib::psf::ProgramBuilder;
 using xsflib::psf::ProgramChunks;
 
+// The path of the FILE chunk that holds the disc's 0x440-byte header. The emulated disc starts with it (docs/gcsf.md,
+// "The emulated system").
+constexpr char kDiscHeaderPath[] = "sys/boot.bin";
+
 // The parameter block of GCSF's game-mode driver (docs/gcsf.md, "Driver"). A game-mode set loads it at kAddress. Like
-// the rest of the GameCube's memory, its words are big-endian.
+// the rest of the GameCube's memory, its words are big-endian. The game writes the sound's handle at kHandleOffset. The
+// game profile follows the handle. A driver with a wave list holds the list there instead: the number of waves, then
+// kMaxWaves entries. Its game profile follows the list.
 struct DriverBlock
 {
     static constexpr uint32_t kAddress = 0x81700010;
@@ -72,6 +77,11 @@ struct DriverBlock
     static constexpr uint32_t kVersionOffset = 0x04;
     static constexpr uint32_t kStatusOffset = 0x08;
     static constexpr uint32_t kSoundOffset = 0x0c;
+    static constexpr uint32_t kHandleOffset = 0x10;
+    static constexpr uint32_t kProfileOffset = 0x14;
+    static constexpr uint32_t kWaveListOffset = 0x14;
+    static constexpr uint32_t kMaxWaves = 64;
+    static constexpr uint32_t kListedProfileOffset = kWaveListOffset + 4 + 4 * kMaxWaves;
 };
 
 // What xsflib::psf's set loader requires of GCSF: its descriptor, version byte, name and driver block.
@@ -89,17 +99,11 @@ struct SetFormat
 };
 
 // A complete set: the chunks of a file and its libraries in loading order, the effective descriptor and the tags of the
-// top-level file.
+// top-level file. LoadSet loads a GCSF or miniGCSF file with its _lib and _libN chain. Paths in _lib tags are relative
+// to the directory of the file that names them: that file's path up to the last of `separators`. LoadSet returns an
+// error for a set that a version 1 player can't play. That's a set without a process descriptor, a set whose
+// descriptor fails its Check(), or a game-mode set whose driver block has another version.
 using LoadedSet = xsflib::psf::LoadedSet<SetFormat>;
-
-// Loads a GCSF/miniGCSF file with its _lib/_libN chain. Paths in _lib tags are relative to the directory of the file
-// that names them: that file's path up to the last of `separators`. Returns an error for a set that a version 1 player
-// can't play. That's a set whose descriptor fails its Check(), or a game-mode set whose driver block has another
-// version.
-inline std::optional<std::string> LoadSet(const std::string& path, const FileReader& reader, LoadedSet& out,
-                                          std::string_view separators = "/\\")
-{
-    return xsflib::psf::LoadSet(path, reader, out, separators);
-}
+using xsflib::psf::LoadSet;
 
 } // namespace gcsf

@@ -32,7 +32,6 @@ protected:
     uint32_t immediate_ = 0;
     uint32_t error_ = 0;         // what the next RequestError reports
     uint64_t done_ = UINT64_MAX; // the CPU cycle at which the command in progress completes
-    bool failed_ = false;        // whether it completes with an error
 };
 
 class DiscInterface : private DiscInterfaceState

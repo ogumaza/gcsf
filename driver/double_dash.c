@@ -3,12 +3,12 @@
 /*
  * GCSF guest driver for Mario Kart: Double Dash!!. The game's sound library is JAudio2, the sound library of Nintendo
  * EAD's JSystem, in its earliest known build. The driver is compiled for Gekko and stored in the game's .gcsflib. The
- * player boots the game's startup code: the OS initialisation and the static constructors. The static constructors
+ * player boots the game's start-up code: the OS initialisation and the static constructors. The static constructors
  * construct the game's audio object. The rip patches the game's main to branch here.
  *
  * The driver calls the game's functions to do what the game's start-up does for sound, without its graphics. The
- * profile in `driver_params` gives their addresses. The ripper fills in the profile. The steps:
- *   1. the video interface: its retraces pace the driver as they pace the game's frames;
+ * profile in `driver_params` gives their addresses. The ripper fills in the profile. The driver starts the video
+ * interface first. Its retraces pace the driver as they pace the game's frames. The steps that follow:
  *   2. what JSystem's framework sets up first: OSInit, DVDInit, the root heap and the system heap;
  *   3. the ARAM manager, the main thread's JKRThread, the ARAM streams' transfer buffer, and the game's audio heap;
  *   4. the audio object's first step;
@@ -16,33 +16,18 @@
  *      The set-up copies what it keeps. The archive's buffer is then freed;
  *   6. every wave bank of the sound library's section loaded into ARAM. The game keeps them all loaded. Its voices
  *      come from other start-up archives. The driver doesn't load those;
- *   7. the sound: the sound manager starts it by its JAudio sound ID;
- *   8. the audio object's frame process, once a frame, forever. A level sound, such as an engine's, lasts a frame
- *      unless the game starts it again. The game starts it again each frame for as long as the sound should play. The
- *      driver does the same until the sound ends.
- * `driver_params.status` reports the driver's progress to the player (see docs/gcsf.md).
+ *   7. the sound: the sound manager starts it by its JAudio sound ID.
+ * Then the audio object's frame process runs once a frame, forever. A level sound, such as an engine's, lasts a frame
+ * unless the game starts it again. The game starts it again each frame for as long as the sound should play. The
+ * driver does the same until the sound ends. A step that fails stops the driver with its number in the status word
+ * (step 1 is the driver's check of its parameter block). `driver_params.status` reports the driver's progress to the
+ * player (see docs/gcsf.md).
  *
  * Build with `driver/build.py double_dash` (clang). The result is committed as src/rip/driver_double_dash_blob.h.
  * Building GCSF itself requires no PowerPC toolchain.
  */
 
-typedef unsigned int u32;
-typedef int s32;
-
-#define PARAMS_MAGIC 0x47435344u /* 'GCSD' */
-#define PARAMS_VERSION 1u
-
-/* Values of Params.status. They're macros because an enumerator can't hold 0x80000000 before C23. */
-#define STATUS_BOOTING 0u
-#define STATUS_PLAYING 1u
-#define STATUS_FINISHED 2u
-#define STATUS_ERROR 0x80000000u /* | step number */
-
-/* The frames that the driver waits for the wave archives before it gives up. */
-#define SETUP_FRAMES 600u
-
-/* A wave archive's state once it is in ARAM. */
-#define WAVES_LOADED 2u
+#include "driver.h"
 
 /* JKRDvdRipper's options: decode Yaz0, and allocate from a heap's tail. */
 #define EXPAND 1u
@@ -62,7 +47,7 @@ struct Params {
     u32 aram_graph_size;  /* ARAM for graphics */
     u32 aram_priorities;  /* the ARAM manager's three thread priorities, a byte each, from bit 16 down */
     u32 thread_size;      /* a JKRThread, for the main thread's */
-    u32 transfer_size;    /* the ARAM streams' transfer buffer */
+    u32 aram_buffer_size; /* the ARAM streams' transfer buffer */
     u32 audio_heap_size;
     /* the game profile: the addresses of the game's functions and variables */
     u32 os_init;              /* void OSInit(void) */
@@ -74,7 +59,7 @@ struct Params {
     u32 create_exp_heap;      /* JKRExpHeap* JKRExpHeap::create(u32 size, JKRHeap* parent, bool) */
     u32 create_solid_heap;    /* JKRSolidHeap* JKRSolidHeap::create(u32 size, JKRHeap* parent, bool) */
     u32 create_aram;          /* JKRAram* JKRAram::create(u32 audio, u32 graph, s32, s32, s32) */
-    u32 set_transfer_buffer;  /* void JKRAramStream::setTransBuffer(u8*, u32 size, JKRHeap*) */
+    u32 set_aram_buffer;      /* void JKRAramStream::setTransBuffer(u8*, u32 size, JKRHeap*) */
     u32 alloc;                /* void* operator new(u32 size) from the current heap */
     u32 free;                 /* void operator delete(void*) */
     u32 thread_ctor;          /* JKRThread::JKRThread(OSThread*, int message_count) */
@@ -101,57 +86,9 @@ __attribute__((section(".params"), used)) volatile struct Params driver_params =
     .version = PARAMS_VERSION,
 };
 
-typedef u32 (*fn0)(void);
-typedef u32 (*fn1)(u32);
-typedef u32 (*fn2)(u32, u32);
-typedef u32 (*fn3)(u32, u32, u32);
-typedef u32 (*fn4)(u32, u32, u32, u32);
-typedef u32 (*fn5)(u32, u32, u32, u32, u32);
-typedef u32 (*fn6)(u32, u32, u32, u32, u32, u32);
-typedef u32 (*fn9)(u32, u32, u32, u32, u32, u32, u32, u32, u32);
-
-static u32 word(u32 address) {
-    return *(volatile u32*)address;
-}
-
-static void wait_frame(void) {
-    for (u32 i = 0; i < driver_params.frame_retraces; i++)
-        ((fn0)driver_params.vi_wait_for_retrace)();
-}
-
-__attribute__((noreturn)) static void fail(u32 step) {
-    driver_params.status = STATUS_ERROR | step;
-    for (;;)
-        wait_frame();
-}
-
-/* A virtual function of `object`. The vtable is the object's first word. */
-static u32 virtual_function(u32 object, u32 slot) {
-    return word(word(object) + slot);
-}
-
-/* Whether every wave archive of the section's wave banks is in ARAM. A bank's vtable gives its archive at slot 0x10
-   and the number of its archives at slot 0x14. An archive without a file on the disc (entry number below 0) is never
-   loaded. */
-static int waves_loaded(u32 section) {
-    volatile struct Params* p = &driver_params;
-    const u32 data = word(section + p->section_data_offset);
-    const u32 banks = word(data + p->wave_banks_offset);
-    const u32 count = word(data + p->wave_banks_offset + 4);
-    for (u32 b = 0; b < count; b++) {
-        const u32 bank = word(banks + b * 4);
-        if (!bank)
-            continue;
-        const u32 arcs = ((fn1)virtual_function(bank, 0x14))(bank);
-        for (u32 i = 0; i < arcs; i++) {
-            const u32 arc = ((fn2)virtual_function(bank, 0x10))(bank, i);
-            if (arc && (s32)word(arc + p->wave_arc_state_offset + 4) >= 0 &&
-                word(arc + p->wave_arc_state_offset) != WAVES_LOADED)
-                return 0;
-        }
-    }
-    return 1;
-}
+#include "aram_manager.h"
+#include "frames.h"
+#include "section_waves.h"
 
 __attribute__((noreturn)) void driver_main(void) {
     volatile struct Params* p = &driver_params;
@@ -161,7 +98,7 @@ __attribute__((noreturn)) void driver_main(void) {
     /* The video interface, for the retraces. */
     ((fn0)p->vi_init)();
 
-    /* What JSystem's framework sets up first. The system heap becomes the system heap and the current heap. */
+    /* What JSystem's framework sets up first. The new heap becomes JKRHeap's system heap and the current heap. */
     ((fn0)p->os_init)();
     ((fn0)p->dvd_init)();
     const u32 root = ((fn2)p->create_root_heap)(p->max_heaps, 0);
@@ -171,12 +108,11 @@ __attribute__((noreturn)) void driver_main(void) {
 
     /* The ARAM manager, the main thread's JKRThread and the ARAM streams' transfer buffer. The buffer comes from the
        system heap. Then the game's audio heap, from the root heap. */
-    ((fn5)p->create_aram)(p->aram_audio_size, p->aram_graph_size, (p->aram_priorities >> 16) & 0xff,
-                          (p->aram_priorities >> 8) & 0xff, p->aram_priorities & 0xff);
+    create_aram_manager();
     const u32 thread = ((fn1)p->alloc)(p->thread_size);
     if (thread)
         ((fn3)p->thread_ctor)(thread, ((fn0)p->get_current_thread)(), 4);
-    ((fn3)p->set_transfer_buffer)(0, p->transfer_size, system);
+    ((fn3)p->set_aram_buffer)(0, p->aram_buffer_size, system);
     const u32 audio_heap = ((fn3)p->create_solid_heap)(p->audio_heap_size, root, 0);
     if (!audio_heap)
         fail(3);

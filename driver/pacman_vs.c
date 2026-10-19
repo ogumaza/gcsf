@@ -3,15 +3,15 @@
 /*
  * GCSF guest driver for Pac-Man Vs.'s sound layer: a thin wrapper in the game's code around a JAIBasic. The sound
  * library is JAudio1, the first generation of the sound library of Nintendo EAD's JSystem. The driver is compiled for
- * Gekko and stored in the game's .gcsflib. The player boots the game's startup code: the OS initialisation and the
+ * Gekko and stored in the game's .gcsflib. The player boots the game's start-up code: the OS initialisation and the
  * static constructors. The rip patches the game's main to branch here.
  *
  * The game streams its music. Its sequenced sounds are effects. They play in the tracks of the effects sequence. The
  * sound library starts that sequence when the library starts. The driver calls the game's functions to do what the
  * game's start-up does for sound. The driver leaves out the graphics. The profile in `driver_params` gives the
  * functions' addresses. The ripper fills in the profile. The steps:
- *   1. the game's heaps: the root heap and the system heap. The game's main makes them first;
- *   2. the video interface: its retraces pace the driver as they pace the game's frames;
+ *   2. the game's heaps: the root heap and the system heap. The game's main makes them first. Then the video
+ *      interface. Its retraces pace the driver as they pace the game's frames;
  *   3. the game's task thread. The game runs its steps there. The driver runs the steps that follow there too. The
  *      game's reader of files stops on a thread whose priority number is below 17. The main thread runs at 16. The
  *      main thread then waits for the retraces for good;
@@ -20,29 +20,16 @@
  *      ARAM. Then the ARAM transfer buffer;
  *   6. the sound library. The game's wrapper starts it. The wrapper's frame work then runs once a frame until every
  *      wave system is in ARAM and the effects sequence plays;
- *   7. the sound: the game's wrapper starts it by its JAudio sound ID. The game starts its effects without a position;
- *   8. the wrapper's frame work, once a frame, forever.
- * `driver_params.status` reports the driver's progress to the player (see docs/gcsf.md).
+ *   7. the sound: the game's wrapper starts it by its JAudio sound ID. The game starts its effects without a position.
+ * Then the wrapper's frame work runs once a frame, forever. A step that fails stops the driver with its number in the
+ * status word (step 1 is the driver's check of its parameter block). `driver_params.status` reports the driver's
+ * progress to the player (see docs/gcsf.md).
  *
  * Build with `driver/build.py pacman_vs` (clang). The result is committed as src/rip/driver_pacman_vs_blob.h. Building
  * GCSF itself requires no PowerPC toolchain.
  */
 
-typedef unsigned int u32;
-typedef int s32;
-typedef unsigned char u8;
-
-#define PARAMS_MAGIC 0x47435344u /* 'GCSD' */
-#define PARAMS_VERSION 1u
-
-/* Values of Params.status. They're macros because an enumerator can't hold 0x80000000 before C23. */
-#define STATUS_BOOTING 0u
-#define STATUS_PLAYING 1u
-#define STATUS_FINISHED 2u
-#define STATUS_ERROR 0x80000000u /* | step number */
-
-/* The frames that the driver waits for the waves and the effects sequence before it gives up. */
-#define SETUP_FRAMES 600u
+#include "driver.h"
 
 /* How the game mounts the sequence archive: JKRArchive's mount mode for ARAM, and its direction from the heap's
    head. */
@@ -99,31 +86,8 @@ __attribute__((section(".params"), used)) volatile struct Params driver_params =
     .version = PARAMS_VERSION,
 };
 
-typedef u32 (*fn0)(void);
-typedef u32 (*fn1)(u32);
-typedef u32 (*fn2)(u32, u32);
-typedef u32 (*fn3)(u32, u32, u32);
-typedef u32 (*fn4)(u32, u32, u32, u32);
-typedef u32 (*fn5)(u32, u32, u32, u32, u32);
-
-static u32 word(u32 address) {
-    return *(volatile u32*)address;
-}
-
-static u8 byte(u32 address) {
-    return *(volatile u8*)address;
-}
-
-static void wait_frame(void) {
-    for (u32 i = 0; i < driver_params.frame_retraces; i++)
-        ((fn0)driver_params.vi_wait_for_retrace)();
-}
-
-__attribute__((noreturn)) static void fail(u32 step) {
-    driver_params.status = STATUS_ERROR | step;
-    for (;;)
-        wait_frame();
-}
+#include "aram_manager.h"
+#include "frames.h"
 
 /* Whether the sound library has loaded every wave system. Each has one group. The game waits for the first. */
 static int waves_loaded(void) {
@@ -148,8 +112,7 @@ __attribute__((noreturn)) static void driver_task(void) {
 
     /* The game's boot step: the disc, the ARAM manager and the track callback. */
     ((fn0)p->dvd_init)();
-    ((fn5)p->create_aram)(p->aram_audio_size, p->aram_graph_size, (p->aram_priorities >> 16) & 0xff,
-                          (p->aram_priorities >> 8) & 0xff, p->aram_priorities & 0xff);
+    create_aram_manager();
     ((fn0)p->track_callback)();
 
     /* The sound files. The start-up archive goes into the current heap. The sequence archive goes into ARAM. Its
