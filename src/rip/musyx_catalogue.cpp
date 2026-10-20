@@ -3,6 +3,7 @@
 #include "rip/musyx_catalogue.h"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -12,6 +13,7 @@
 #include <iterator>
 #include <map>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <utility>
@@ -1489,6 +1491,141 @@ MusyXCatalogue GatherRebelStrike(const disc::GameFiles& game, const GameProfile&
     return catalogue;
 }
 
+// The names that Pokémon Channel's sound viewer gives the effects, by the effects' IDs (see GatherPokemonChannel). The
+// viewer's script holds its names from `viewer_names` on. Each name starts and ends with a tab, and a byte 0 follows
+// it. The first string that doesn't start with a tab ends the names. From `viewer_effects` on, the script's code gives
+// the names' effects in a run of entries. An entry holds 0x31 0x00 and the name's number in a big-endian word, 0x02 and
+// a word, then 0x19 and the value. The value is 0x00 and the effect's ID in a big-endian word, or one byte other than
+// 0. The rip can't tell which effect such a byte gives. The bytes 0x1F 0x35 follow every entry but the last. An effect
+// that several names give takes the first name. Throws xsflib::FormatError if a name doesn't end.
+std::map<uint16_t, std::string> ViewerNames(std::span<const uint8_t> script, const GameProfile& profile)
+{
+    constexpr uint8_t kTab = '\t';
+    std::vector<std::string> names;
+    for (std::size_t at = profile.viewer_names; at < script.size() && script[at] == kTab;)
+    {
+        const std::string text = TerminatedText(script.subspan(at), "a name of the sound viewer doesn't end");
+        if (text.size() < 2 || text.back() != kTab)
+        {
+            break;
+        }
+
+        names.push_back(text.substr(1, text.size() - 2));
+        at += text.size() + 1;
+    }
+
+    // An entry's parts: its number at +2, the 0x02 at +6, the 0x19 at +11 and its value from +12.
+    constexpr std::size_t kNumber = 2, kJump = 6, kValue = 11, kShortEntry = 13, kLongEntry = 17;
+    std::map<uint16_t, std::string> by_effect;
+    std::size_t at = profile.viewer_effects;
+    while (at + kShortEntry <= script.size() && script[at] == 0x31 && script[at + 1] == 0 &&
+           script[at + kJump] == 0x02 && script[at + kValue] == 0x19)
+    {
+        const uint32_t number = xsflib::LoadBe32(&script[at + kNumber]);
+        std::size_t next = at + kShortEntry;
+        if (script[at + kValue + 1] == 0)
+        {
+            if (at + kLongEntry > script.size())
+            {
+                break;
+            }
+
+            const uint32_t id = xsflib::LoadBe32(&script[at + kValue + 2]);
+            if (number < names.size() && id <= 0xffff)
+            {
+                by_effect.try_emplace(static_cast<uint16_t>(id), names[number]);
+            }
+
+            next = at + kLongEntry;
+        }
+
+        if (next + 2 > script.size() || script[next] != 0x1f || script[next + 1] != 0x35)
+        {
+            break;
+        }
+
+        at = next + 2;
+    }
+
+    return by_effect;
+}
+
+// Pokémon Channel's sounds (see MusyXFiles::kPokemonChannel). en/pch/pchsound.proj, .pool, .sdir and .samp hold
+// every MusyX group of the game. The game's code lists its music at `musyx_songs`, in `musyx_song_count` rows of 8 bytes: the
+// effect's ID, then the number of a sound whose group the game pushes first, a big-endian word each. Each piece of
+// music is an effect. The effect's layer starts two voices that play a stereo recording, panned hard left and right.
+// The game's music function (0x80015398) pushes the group that the project gives the effect. It then starts the
+// effect. A rip lists the music first, in the order of the table. The project's other effects follow, in the order of
+// their IDs. Each sound pushes its group alone.
+//
+// The game starts every sound through 0x80015570: sndFXStartEx with a volume of 0x7F and the default pan, then MIDI
+// controller 7 with the sound's volume, and the pan through controllers 0x83 (the surround pan) and 10. The music plays
+// at a volume of 127 and a pan of 0x40 until a scene changes them. A scene's effect takes the volume and the pan of an
+// object of the scene. A rip plays every sound at the music's volume and pan.
+//
+// The game's sound viewer, pch/scripts/sndviewer.pkc, names most of the sounds (ViewerNames). A sound that it doesn't
+// name is named after the set and its ID, such as "pchsound-1064".
+MusyXCatalogue GatherPokemonChannel(const disc::GameFiles& game, const GameProfile& profile)
+{
+    constexpr uint32_t kRow = 8;
+    constexpr uint8_t kStartVolume = 0x7f, kVolume = 7, kSurroundPan = 0x83, kPan = 10;
+    constexpr uint16_t kFullVolume = 127, kCentre = 0x40;
+
+    MusyXCatalogue catalogue;
+    catalogue.sets.push_back({.project = ReadGameFile(game, "en/pch/pchsound.proj"),
+                              .pool = ReadGameFile(game, "en/pch/pchsound.pool"),
+                              .sdir = ReadGameFile(game, "en/pch/pchsound.sdir"),
+                              .samples = ReadGameFile(game, "en/pch/pchsound.samp")});
+    std::vector<ProjectEffect> effects = ProjectEffects(catalogue.sets[0].project);
+    KeepFirstOfEachId(effects);
+    const std::map<uint16_t, std::string> names = ViewerNames(ReadGameFile(game, "pch/scripts/sndviewer.pkc"), profile);
+
+    const auto add = [&](const ProjectEffect& effect, bool music)
+    {
+        MusyXCatalogue::Entry entry;
+        const auto name = names.find(effect.id);
+        entry.label = name != names.end() ? name->second : EffectLabel("pchsound", effect.id);
+        entry.kind = MusyXCatalogue::Kind::kEffect;
+        entry.volume = kStartVolume;
+        entry.id = effect.id;
+        entry.groups = {{effect.group, 0}};
+        entry.writes = SoundWrites(profile, profile.reverbs[0]);
+        entry.controls = {{.controller = kVolume, .value = kFullVolume},
+                          {.controller = kSurroundPan, .value = kCentre},
+                          {.controller = kPan, .value = kCentre}};
+        entry.music = music;
+        catalogue.entries.push_back(std::move(entry));
+    };
+
+    const ntdlib::Dol dol = ntdlib::Dol::ParseMain(game.dol);
+    std::vector<uint16_t> music;
+    for (uint32_t i = 0; i < profile.musyx_song_count; i++)
+    {
+        const std::span<const uint8_t> row =
+            Part(DolBytes(dol, profile.musyx_songs + i * kRow), 0, kRow, "the table of music");
+        const uint32_t id = xsflib::LoadBe32(row.data());
+        const auto found =
+            std::find_if(effects.begin(), effects.end(), [id](const ProjectEffect& effect) { return effect.id == id; });
+        if (found == effects.end())
+        {
+            throw xsflib::FormatError("the table of music names an effect that en/pch/pchsound.proj doesn't hold");
+        }
+
+        add(*found, true);
+        music.push_back(found->id);
+    }
+
+    for (const ProjectEffect& effect : effects)
+    {
+        if (std::find(music.begin(), music.end(), effect.id) == music.end())
+        {
+            add(effect, false);
+        }
+    }
+
+    return catalogue;
+}
+
 // Paper Mario: The Thousand-Year Door's sounds (see MusyXFiles::kPaperMario). sound/proj/pmario.proj, .pool, .sdir and
 // .samp hold every MusyX group of the game. The game pushes groups 0 to 11 at start-up and keeps them all. It streams
 // its music. A rip holds the effects of the project's effects groups, in the order of their IDs. Each pushes its group.
@@ -1584,6 +1721,665 @@ MusyXCatalogue GatherPaperMario(const disc::GameFiles& game, const GameProfile& 
     return catalogue;
 }
 
+// A module of a game's code (a REL) in the module's file, and the places that the module's relocations against the
+// module give. The header's big-endian words give the module's ID at 0, the number of sections at 0xC, the offset of
+// the table of sections at 0x10, and the offset and the size of the table of imports at 0x28 and 0x2C. A section's
+// entry gives the section's offset in the file, with bit 0 set for code, then the section's size. An offset of 0 gives
+// a section without data in the file. An import gives a module's ID and the offset of the relocations against that
+// module. A relocation takes 8 bytes: the distance from the place of the relocation before it in a big-endian half,
+// the type, the section that the relocation points into, and the offset there in a big-endian word. Type 202 starts
+// the relocations in the section that it gives. Type 203 ends the list. Type 201 does nothing. Type 1 writes the
+// address into a word.
+class RelModule
+{
+public:
+    // Throws xsflib::FormatError if the module is damaged.
+    explicit RelModule(std::span<const uint8_t> file) : file_(file)
+    {
+        constexpr std::size_t kHeader = 0x30, kSectionEntry = 8, kImport = 8;
+        const std::span<const uint8_t> header = Part(file, 0, kHeader, "a module's header");
+        const uint32_t id = xsflib::LoadBe32(header.data());
+        const uint32_t count = xsflib::LoadBe32(header.data() + 0xc);
+        const std::span<const uint8_t> entries = Part(file, xsflib::LoadBe32(header.data() + 0x10),
+                                                      std::size_t{count} * kSectionEntry, "a module's sections");
+        for (uint32_t s = 0; s < count; s++)
+        {
+            const uint32_t offset = xsflib::LoadBe32(entries.data() + s * kSectionEntry) & ~1u;
+            const uint32_t size = xsflib::LoadBe32(entries.data() + s * kSectionEntry + 4);
+            if (offset != 0)
+            {
+                Part(file, offset, size, "a module's section");
+            }
+
+            sections_.push_back({.offset = offset, .size = offset == 0 ? 0 : size});
+        }
+
+        const std::span<const uint8_t> imports = Part(file, xsflib::LoadBe32(header.data() + 0x28),
+                                                      xsflib::LoadBe32(header.data() + 0x2c), "a module's imports");
+        for (std::size_t i = 0; i + kImport <= imports.size(); i += kImport)
+        {
+            if (xsflib::LoadBe32(imports.data() + i) == id)
+            {
+                AddRelocations(xsflib::LoadBe32(imports.data() + i + 4));
+            }
+        }
+    }
+
+    // The offset in the file of `offset` in section `section`. Throws xsflib::FormatError if the file holds no such
+    // place.
+    std::size_t At(uint32_t section, uint32_t offset) const
+    {
+        if (section >= sections_.size() || sections_[section].offset == 0 || offset >= sections_[section].size)
+        {
+            throw xsflib::FormatError("a module's section " + std::to_string(section) + " has no data at " +
+                                      xsflib::Hex(offset));
+        }
+
+        return sections_[section].offset + offset;
+    }
+
+    // The offset in the file of the place that the word at `at` points at, or nothing if no relocation sets the word to
+    // a place in the file.
+    std::optional<std::size_t> Pointer(std::size_t at) const
+    {
+        const auto found = pointers_.find(at);
+        if (found == pointers_.end())
+        {
+            return std::nullopt;
+        }
+
+        return found->second;
+    }
+
+    // The object at `at` in the file: its bytes up to the next place in its section that a relocation points at, or up
+    // to the section's end. Throws xsflib::FormatError if no section's data holds `at`.
+    std::span<const uint8_t> Object(std::size_t at) const
+    {
+        for (const Section& section : sections_)
+        {
+            if (section.offset == 0 || at < section.offset || at - section.offset >= section.size)
+            {
+                continue;
+            }
+
+            const std::size_t offset = at - section.offset;
+            const auto next = section.targets.upper_bound(static_cast<uint32_t>(offset));
+            const std::size_t end =
+                next == section.targets.end() ? section.size : std::min<std::size_t>(*next, section.size);
+            return file_.subspan(at, end - offset);
+        }
+
+        throw xsflib::FormatError("an object lies outside a module's sections");
+    }
+
+private:
+    // A section: its offset in the file, or 0 for none, its size, and the offsets in it at which relocations point.
+    struct Section
+    {
+        std::size_t offset = 0, size = 0;
+        std::set<uint32_t> targets;
+    };
+
+    // Reads the list of relocations at `at` in the file. Their targets lie in the module.
+    void AddRelocations(std::size_t at)
+    {
+        constexpr std::size_t kRelocation = 8;
+        constexpr uint8_t kAddress32 = 1, kNothing = 201, kSection = 202, kEnd = 203;
+        std::size_t section = sections_.size(), offset = 0;
+        for (;; at += kRelocation)
+        {
+            const std::span<const uint8_t> relocation = Part(file_, at, kRelocation, "a module's relocations");
+            const uint8_t type = relocation[2], target = relocation[3];
+            if (type == kEnd)
+            {
+                break;
+            }
+
+            if (type == kSection)
+            {
+                section = target;
+                offset = 0;
+                continue;
+            }
+
+            offset += xsflib::LoadBe16(relocation.data());
+            if (type == kNothing)
+            {
+                continue;
+            }
+
+            if (target >= sections_.size())
+            {
+                throw xsflib::FormatError("a module's relocation points outside its sections");
+            }
+
+            const uint32_t addend = xsflib::LoadBe32(relocation.data() + 4);
+            sections_[target].targets.insert(addend);
+            const bool in_file = section < sections_.size() && sections_[section].offset != 0 &&
+                                 offset < sections_[section].size && sections_[target].offset != 0 &&
+                                 addend < sections_[target].size;
+            if (type == kAddress32 && in_file)
+            {
+                pointers_[sections_[section].offset + offset] = sections_[target].offset + addend;
+            }
+        }
+    }
+
+    std::span<const uint8_t> file_;
+    std::vector<Section> sections_;
+    std::map<std::size_t, std::size_t> pointers_; // the place that each word points at, by the word's place
+};
+
+// The pointers of a table at `at` in `module`, each with its number in the table. The table runs up to the next object
+// (RelModule::Object). A word that no relocation sets gives no pointer.
+std::vector<std::pair<uint16_t, std::size_t>> TablePointers(const RelModule& module, std::size_t at)
+{
+    std::vector<std::pair<uint16_t, std::size_t>> pointers;
+    const std::size_t words = module.Object(at).size() / 4;
+    for (std::size_t i = 0; i < words; i++)
+    {
+        if (const std::optional<std::size_t> pointer = module.Pointer(at + i * 4))
+        {
+            pointers.emplace_back(static_cast<uint16_t>(i), *pointer);
+        }
+    }
+
+    return pointers;
+}
+
+// The bytes of an object of `module` (RelModule::Object) at `offset` in section `section`.
+std::vector<uint8_t> ModuleObject(const RelModule& module, uint32_t section, uint32_t offset)
+{
+    const std::span<const uint8_t> object = module.Object(module.At(section, offset));
+    return {object.begin(), object.end()};
+}
+
+// Where a module of Nintendo Puzzle Collection keeps a MusyX group's files: the group's ID, then the offsets of its
+// project, its pool and its sample directory in one section of the module.
+struct PuzzleGroup
+{
+    uint16_t id = 0;
+    uint32_t project = 0, pool = 0, sdir = 0;
+};
+
+// The file set of `group` in section `section` of `module`, with the samples `samples`.
+MusyXCatalogue::FileSet PuzzleSet(const RelModule& module, uint32_t section, const PuzzleGroup& group,
+                                  std::vector<uint8_t> samples)
+{
+    return {.project = ModuleObject(module, section, group.project),
+            .pool = ModuleObject(module, section, group.pool),
+            .sdir = ModuleObject(module, section, group.sdir),
+            .samples = std::move(samples)};
+}
+
+// The label of a song of a module of Nintendo Puzzle Collection: the module's name, a hyphen, then the song's name, or
+// its ID in two digits if `names` has no name for it.
+std::string PuzzleLabel(const char* module, std::span<const char* const> names, uint16_t id)
+{
+    if (id < names.size())
+    {
+        return std::string(module) + "-" + names[id];
+    }
+
+    return std::string(module) + "-" + ZeroPadded(id, 2);
+}
+
+// The settings of MusyX's chorus (SND_AUX_CHORUS): its base delay, its variation and its period, in ms. The chorus's
+// block holds them from 0x90.
+using PuzzleChorus = std::array<uint32_t, 3>;
+
+// The words that set up studio 0's aux effects as a module of Nintendo Puzzle Collection does (see
+// GatherPuzzleCollection). The profile's `params` give aux A MusyX's high-quality reverb and aux B MusyX's chorus. The
+// words write the settings of `reverb`. They write the settings of `chorus` into aux B's block. A standard reverb on
+// aux A takes the callback and the preparation in the profile's `standard_reverb`. Without a chorus, aux B has no
+// effect. The words for a standard reverb and for no chorus change the driver's parameters (kMusyXAuxCallbacks).
+std::vector<MusyXCatalogue::Write> PuzzleAuxWrites(const GameProfile& profile, const MusyXReverb& reverb,
+                                                   const std::optional<PuzzleChorus>& chorus)
+{
+    constexpr uint32_t kChorusSettings = 0x90;
+    const auto parameter = [](uint32_t index)
+    {
+        return DriverBlock::kAddress + DriverBlock::kProfileOffset + index * 4;
+    };
+
+    std::vector<MusyXCatalogue::Write> writes;
+    AddReverb(writes, reverb);
+    if (!reverb.high)
+    {
+        writes.push_back({parameter(kMusyXAuxCallbacks), profile.standard_reverb[0]});
+        writes.push_back({parameter(kMusyXAuxPreparations), profile.standard_reverb[1]});
+    }
+
+    if (chorus)
+    {
+        const uint32_t block = profile.params.at(kMusyXAuxBlocks + 1);
+        for (uint32_t i = 0; i < chorus->size(); i++)
+        {
+            writes.push_back({block + kChorusSettings + i * 4, (*chorus)[i]});
+        }
+    }
+    else
+    {
+        writes.push_back({parameter(kMusyXAuxCallbacks + 1), 0});
+        writes.push_back({parameter(kMusyXAuxPreparations + 1), 0});
+    }
+
+    return writes;
+}
+
+// The size of the menu's table of volumes: two rows of four words, at 0 in the module's section 4.
+constexpr std::size_t kPuzzleMenuVolumeRows = 2, kPuzzleMenuVolumeColumns = 4, kPuzzleMenuVolumeWord = 4;
+
+// The volume of the menu's song `id` of group `group`, from the menu's table of volumes `table`. The low byte of a word
+// of the table gives a volume. The menu's code at 0x3A44 in section 1 picks a word by the song's group and ID. The code
+// at 0x3B68 in section 1 starts the song, then passes the volume to sndVolume with a time of 1 ms and group 0xFD, the
+// songs' groups. A rip gives the song its volume through the catalogue's entry instead (sndSeqVolume).
+uint8_t PuzzleMenuVolume(std::span<const uint8_t> table, uint16_t group, uint16_t id)
+{
+    std::size_t row = 0, column = kPuzzleMenuVolumeColumns - 1;
+    if (group == 1)
+    {
+        column = 2;
+    }
+    else if (group == 2 && id == 1)
+    {
+        row = 1;
+        column = 1;
+    }
+    else if (group == 2 && (id == 2 || id == 3))
+    {
+        column = id == 2 ? 0 : 1;
+    }
+    else if (group == 3)
+    {
+        row = 1;
+        column = id == 4 ? 0 : id == 5 ? 2 : kPuzzleMenuVolumeColumns - 1;
+    }
+
+    const std::size_t word = (row * kPuzzleMenuVolumeColumns + column) * kPuzzleMenuVolumeWord;
+    return table[word + kPuzzleMenuVolumeWord - 1];
+}
+
+// The menu's songs (see GatherPuzzleCollection). menu_relsamp.szp unpacks to four parts. Its first four words give
+// their offsets: the menu's module, then the samples of groups 2, 0 and 4. A part runs up to the next part, and the
+// last one up to the end of the file. The module's section 4 holds a table of six pointers at 0x448. Pointer g points
+// at the table of group g's songs, for g from 1 to 5. A group's table holds a pointer to each of its songs, under the
+// song's ID. The menu's code gives the offsets of each group's files in section 4: at 0x56EC in section 1 for groups 0,
+// 2 and 4, 0x58B8 for group 1, 0x5988 for group 3 and 0x5A58 for group 5. Files in title/ hold the samples of groups 1,
+// 3 and 5. The menu pushes group 0, its effects, at start-up, and a song's group before the song. Each song takes a
+// volume from the table at 0 in section 4 (PuzzleMenuVolume). The menu's code (0x5580 in section 1) gives aux A's
+// reverb the settings of the profile's reverbs[0]. The code gives the chorus a base delay of 13 ms, a variation of 2 ms
+// and a period of 500 ms. A rip labels a song with the song's ID, such as "menu-01".
+void AddPuzzleMenu(MusyXCatalogue& catalogue, const AnyCaseFiles& files, const GameProfile& profile)
+{
+    constexpr uint32_t kData = 4, kVolumes = 0, kSongTables = 0x448;
+    constexpr std::size_t kParts = 4;
+    constexpr PuzzleChorus kChorus = {13, 2, 500};
+
+    // Each group's files, and the part of menu_relsamp.szp or the file that holds its samples.
+    struct Group
+    {
+        PuzzleGroup files;
+        std::size_t part = 0;
+        const char* samples = nullptr;
+    };
+    constexpr Group kGroups[] = {
+        {.files = {.id = 0, .project = 0x111884, .pool = 0x1116c0, .sdir = 0x111938}, .part = 2},
+        {.files = {.id = 1, .project = 0x135184, .pool = 0x133fd8, .sdir = 0x1352b8},
+         .samples = "title/yoshi_title.samp"},
+        {.files = {.id = 2, .project = 0x113d84, .pool = 0x111bc4, .sdir = 0x113fec}, .part = 1},
+        {.files = {.id = 3, .project = 0x133a50, .pool = 0x1339ac, .sdir = 0x133b60},
+         .samples = "title/agb_title.samp"},
+        {.files = {.id = 4, .project = 0x11e284, .pool = 0x11d0d4, .sdir = 0x11e42c}, .part = 3},
+        {.files = {.id = 5, .project = 0x12842c, .pool = 0x125e4c, .sdir = 0x128600},
+         .samples = "title/grand_staff.samp"},
+    };
+
+    const std::vector<uint8_t> file = UnpackYay0(files.Read("menu_relsamp.szp"));
+    const std::span<const uint8_t> header = Part(file, 0, kParts * 4, "menu_relsamp.szp's header");
+    std::array<std::span<const uint8_t>, kParts> parts;
+    for (std::size_t i = 0; i < kParts; i++)
+    {
+        const std::size_t start = xsflib::LoadBe32(header.data() + i * 4);
+        const std::size_t end = i + 1 < kParts ? xsflib::LoadBe32(header.data() + i * 4 + 4) : file.size();
+        parts[i] = Part(file, start, end < start ? 0 : end - start, "a part of menu_relsamp.szp");
+    }
+
+    const RelModule module(parts[0]);
+    std::map<uint16_t, uint16_t> set_of_group;
+    for (const Group& group : kGroups)
+    {
+        std::vector<uint8_t> samples = group.samples != nullptr
+                                           ? files.Read(group.samples)
+                                           : std::vector<uint8_t>(parts[group.part].begin(), parts[group.part].end());
+        set_of_group[group.files.id] = static_cast<uint16_t>(catalogue.sets.size());
+        catalogue.sets.push_back(PuzzleSet(module, kData, group.files, std::move(samples)));
+    }
+
+    // The songs, in the order of their IDs.
+    struct Song
+    {
+        uint16_t group = 0, id = 0;
+        std::size_t at = 0;
+    };
+    std::vector<Song> songs;
+    for (const auto& [group, table] : TablePointers(module, module.At(kData, kSongTables)))
+    {
+        for (const auto& [id, at] : TablePointers(module, table))
+        {
+            songs.push_back({.group = group, .id = id, .at = at});
+        }
+    }
+
+    std::stable_sort(songs.begin(), songs.end(), [](const Song& a, const Song& b) { return a.id < b.id; });
+    const std::vector<MusyXCatalogue::Write> writes = PuzzleAuxWrites(profile, profile.reverbs[0], kChorus);
+    const std::span<const uint8_t> volumes =
+        Part(parts[0], module.At(kData, kVolumes),
+             kPuzzleMenuVolumeRows * kPuzzleMenuVolumeColumns * kPuzzleMenuVolumeWord, "the menu's volumes");
+    for (const Song& song : songs)
+    {
+        const auto set = set_of_group.find(song.group);
+        if (set == set_of_group.end())
+        {
+            throw xsflib::FormatError("the menu has no files for the group of its song " + std::to_string(song.id));
+        }
+
+        const std::span<const uint8_t> data = module.Object(song.at);
+        MusyXCatalogue::Entry entry;
+        entry.label = PuzzleLabel("menu", {}, song.id);
+        entry.volume = PuzzleMenuVolume(volumes, song.group, song.id);
+        entry.id = song.id;
+        entry.song_group = song.group;
+        entry.groups = {{.id = 0, .set = set_of_group.at(0)}, {.id = song.group, .set = set->second}};
+        entry.writes = writes;
+        AddSong(catalogue, std::move(entry), {data.begin(), data.end()});
+    }
+}
+
+// One of the games of Nintendo Puzzle Collection whose module holds its songs and its one set of MusyX's files: Dr.
+// Mario and Panel de Pon (see AddPuzzleGame).
+struct PuzzleGame
+{
+    const char* name = nullptr;           // the start of the songs' labels
+    const char* file = nullptr;           // the module's file
+    uint32_t song_section = 0, songs = 0; // the table of songs: the section that holds it, and its offset there
+    uint32_t file_section = 0;            // the section that holds MusyX's files
+    PuzzleGroup files;                    // their offsets in it
+    const char* samples = nullptr;        // the file of the samples
+    std::span<const char* const> names;   // the songs' names, by their IDs
+    PuzzleChorus chorus = {};
+    uint32_t volumes = 0; // the table of the songs' volumes in `song_section`, or 0 for none
+};
+
+// The names of Dr. Mario's songs, by their IDs. A name that ends in "f" names the fast form of the song before it.
+constexpr const char* kDrMarioSongs[] = {"fever",  "feverf",  "chil",    "chilf",   "game_c",       "game_cf",
+                                         "game_d", "game_df", "game_e",  "game_ef", "game_opening", "tile",
+                                         "menu",   "staff",   "end_a",   "end_b",   "end_bs",       "end_c",
+                                         "end_cs", "story_a", "story_b", "story_c", "ending",       "coffee"};
+
+// Dr. Mario (see AddPuzzleGame). Dr_MARIO.szp unpacks to its module. The module's section 5 holds the table of songs
+// at 0x10. Section 4 holds MusyX's files: the project at 0x10E424, the pool at 0x1035B0 and the sample directory at
+// 0x10F2F4. dr_test.samp holds the samples. During play, the songs play at MusyX's default volume. The game lowers a
+// song's volume during a pause (dm_set_pause_and_volume, 0x13DF4 in section 1), in its manual and in some other states.
+// A rip plays a song as during play. The game's code (0x248 in section 1) gives aux A's reverb the settings of the
+// profile's reverbs[0]. The code gives the chorus a base delay of 13 ms, a variation of 2 ms and a period of 500 ms.
+constexpr PuzzleGame kDrMario = {.name = "dr_mario",
+                                 .file = "Dr_MARIO.szp",
+                                 .song_section = 5,
+                                 .songs = 0x10,
+                                 .file_section = 4,
+                                 .files = {.project = 0x10e424, .pool = 0x1035b0, .sdir = 0x10f2f4},
+                                 .samples = "dr_test.samp",
+                                 .names = kDrMarioSongs,
+                                 .chorus = {13, 2, 500}};
+
+// The names of Panel de Pon's songs, by their IDs.
+constexpr const char* kPanelDePonSongs[] = {"flower_01",
+                                            "flower_02",
+                                            "jewel_01",
+                                            "jewel_02",
+                                            "water_01",
+                                            "water_02",
+                                            "sea_01",
+                                            "sea_02",
+                                            "cloud_01",
+                                            "cloud_02",
+                                            "moon_01",
+                                            "moon_02",
+                                            "green_01",
+                                            "green_02",
+                                            "fire_01",
+                                            "fire_02",
+                                            "ice_01",
+                                            "ice_02",
+                                            "prince_01",
+                                            "prince_02",
+                                            "lion_01",
+                                            "lion_02",
+                                            "dragon_01",
+                                            "dragon_02",
+                                            "joker_01",
+                                            "joker_02",
+                                            "sanatos_01",
+                                            "sanatos_02",
+                                            "goddess_01",
+                                            "goddess_02",
+                                            "whale_01",
+                                            "whale_02",
+                                            "opening",
+                                            "select",
+                                            "ending",
+                                            "ending_easymode",
+                                            "you_lose",
+                                            "you_win",
+                                            "intro_beginning",
+                                            "keyroad_part2",
+                                            "puzzle_edit",
+                                            "keyload_part1",
+                                            "goddess_appear",
+                                            "joker_apper",
+                                            "which_appear",
+                                            "ending_frog",
+                                            "obaba_01",
+                                            "obaba_02",
+                                            "tutorial",
+                                            "intro_storm",
+                                            "ending_whale_eyes",
+                                            "ending_which_photo",
+                                            "keyroad_part3",
+                                            "ending_staff_credits",
+                                            "ending_whale_gets_back_eyes",
+                                            "opening_skip",
+                                            "reslut",
+                                            "reserved1",
+                                            "reserved2"};
+
+// Panel de Pon (see AddPuzzleGame). panepon.szp unpacks to its module. The module's section 5 holds the table of songs
+// at 0xBD0, and MusyX's files: the project at 0x20350, the pool at 0x8FC0 and the sample directory at 0x23010.
+// panepon.samp holds the samples. The game plays a song through PlayMIDI (0xAD230 in section 1). The table at 0x134148
+// in section 5 gives each song 4 bytes. The second byte gives the song's volume. A volume above 127 gives the game's
+// default, 110 (0x8BA40 in section 1). The game's code (0x8664 in section 1) gives aux A's reverb the settings of the
+// profile's reverbs[0]. The code gives the chorus a base delay of 15 ms, no variation and a period of 500 ms.
+constexpr PuzzleGame kPanelDePon = {.name = "panepon",
+                                    .file = "panepon.szp",
+                                    .song_section = 5,
+                                    .songs = 0xbd0,
+                                    .file_section = 5,
+                                    .files = {.project = 0x20350, .pool = 0x8fc0, .sdir = 0x23010},
+                                    .samples = "panepon.samp",
+                                    .names = kPanelDePonSongs,
+                                    .chorus = {15, 0, 500},
+                                    .volumes = 0x134148};
+
+// Adds the songs of `game` to the catalogue. The game pushes groups 1 and 0 of the set. The songs play in group 1. A
+// song's ID is the song's number in the table of songs.
+void AddPuzzleGame(MusyXCatalogue& catalogue, const AnyCaseFiles& files, const GameProfile& profile,
+                   const PuzzleGame& game)
+{
+    constexpr uint16_t kMusic = 1, kEffects = 0;
+    constexpr uint8_t kMaxVolume = 0x7f, kDefaultVolume = 110;
+    constexpr std::size_t kVolumeEntry = 4;
+
+    const std::vector<uint8_t> file = UnpackYay0(files.Read(game.file));
+    const RelModule module(file);
+    const auto set = static_cast<uint16_t>(catalogue.sets.size());
+    catalogue.sets.push_back(PuzzleSet(module, game.file_section, game.files, files.Read(game.samples)));
+    const std::vector<MusyXCatalogue::Write> writes = PuzzleAuxWrites(profile, profile.reverbs[0], game.chorus);
+    for (const auto& [id, at] : TablePointers(module, module.At(game.song_section, game.songs)))
+    {
+        const std::span<const uint8_t> data = module.Object(at);
+        MusyXCatalogue::Entry entry;
+        entry.label = PuzzleLabel(game.name, game.names, id);
+        if (game.volumes != 0)
+        {
+            const std::size_t row = module.At(game.song_section, game.volumes) + id * kVolumeEntry;
+            const uint8_t volume = Part(file, row, kVolumeEntry, "a table of songs' volumes")[1];
+            entry.volume = volume > kMaxVolume ? kDefaultVolume : volume;
+        }
+
+        entry.id = id;
+        entry.song_group = kMusic;
+        entry.groups = {{.id = kMusic, .set = set}, {.id = kEffects, .set = set}};
+        entry.writes = writes;
+        AddSong(catalogue, std::move(entry), {data.begin(), data.end()});
+    }
+}
+
+// Yoshi's Cookie's songs (see GatherPuzzleCollection). ycookie.szp unpacks to the game's module. ycookie.bin holds the
+// game's sound files as items. The table at 0xD16D0 in the module's section 5 gives each item's offset in units of 32
+// bytes. An item runs up to the next item's offset. Items 0 to 8 hold the project, the pool and the sample directory of
+// groups 0, 1 and 2, in that order. Items 9 to 34 hold songs 0 to 25, and items 35 to 37 the samples of groups 0 to 2
+// (0x4574 in section 1). The table of songs at 0x17928C in section 5 gives each song 44 bytes: its group and its ID in
+// big-endian words, then the path of its file in 32 bytes. A rip labels a song with the path's file name. Group 1 holds
+// the game's effects. The game pushes groups 0 and 1 at start-up, and group 2 before a song of that group. The songs
+// play at the volume for music in the game's options. The table at 0x179B74 in section 5 gives the volume of each of
+// the options' levels. A rip plays the songs at the default level, 5. The game's code (0x41E18 in section 1) gives aux
+// A MusyX's standard reverb, and aux B no effect. At start-up, the game also limits MusyX to 40 voices for music and 24
+// for effects (sndSetMaxVoices, 0x414E4 in section 1). A rip writes the limits into MusyX's state, at the profile's
+// `musyx_voice_limits`.
+void AddYoshisCookie(MusyXCatalogue& catalogue, const AnyCaseFiles& files, const GameProfile& profile)
+{
+    constexpr uint32_t kData = 5, kItems = 0xd16d0, kSongs = 0x17928c, kLevels = 0x179b74;
+    constexpr std::size_t kItemUnit = 32, kSongEntry = 44, kPathOffset = 8, kPathSize = 32, kDefaultLevel = 5;
+    constexpr uint32_t kGroups = 3, kFirstSong = 9, kSongCount = 26, kFirstSamples = 35;
+    constexpr uint16_t kStartGroups[] = {0, 1};
+    constexpr uint32_t kMusicVoices = 40, kEffectVoices = 24;
+
+    const std::vector<uint8_t> file = UnpackYay0(files.Read("ycookie.szp"));
+    const RelModule module(file);
+    const std::vector<uint8_t> items = files.Read("ycookie.bin");
+    const std::size_t offsets = module.At(kData, kItems);
+    const auto item = [&](uint32_t number)
+    {
+        const std::span<const uint8_t> bounds = Part(file, offsets + number * 4, 8, "ycookie.bin's table of items");
+        const std::size_t start = xsflib::LoadBe32(bounds.data()) * kItemUnit;
+        const std::size_t end = xsflib::LoadBe32(bounds.data() + 4) * kItemUnit;
+        const std::span<const uint8_t> bytes =
+            Part(items, start, end < start ? 0 : end - start, "an item of ycookie.bin");
+        return std::vector<uint8_t>(bytes.begin(), bytes.end());
+    };
+
+    const auto first_set = static_cast<uint16_t>(catalogue.sets.size());
+    for (uint32_t g = 0; g < kGroups; g++)
+    {
+        catalogue.sets.push_back({.project = item(g * 3),
+                                  .pool = item(g * 3 + 1),
+                                  .sdir = item(g * 3 + 2),
+                                  .samples = item(kFirstSamples + g)});
+    }
+
+    const uint8_t volume =
+        Part(file, module.At(kData, kLevels), kDefaultLevel + 1, "Yoshi's Cookie's volumes")[kDefaultLevel];
+    std::vector<MusyXCatalogue::Write> writes = PuzzleAuxWrites(profile, profile.other_reverb, std::nullopt);
+    const uint32_t limits = profile.params.at(kMusyXVoices) << 24 | kMusicVoices << 16 | kEffectVoices << 8 |
+                            profile.params.at(kMusyXStudios);
+    writes.push_back({profile.musyx_voice_limits, limits});
+    const std::size_t songs = module.At(kData, kSongs);
+    for (uint32_t s = 0; s < kSongCount; s++)
+    {
+        const std::span<const uint8_t> row = Part(file, songs + s * kSongEntry, kSongEntry, "Yoshi's Cookie's songs");
+        const uint32_t group = xsflib::LoadBe32(row.data()), id = xsflib::LoadBe32(row.data() + 4);
+        if (group >= kGroups || id > 0xffff)
+        {
+            throw xsflib::FormatError("Yoshi's Cookie's song " + std::to_string(s) + " has no group");
+        }
+
+        const std::string path = TextBeforeZero(row.subspan(kPathOffset, kPathSize));
+        const std::string name = path.substr(path.find_last_of('/') + 1);
+        MusyXCatalogue::Entry entry;
+        entry.label = "ycookie-" + name.substr(0, name.find_last_of('.'));
+        entry.volume = volume;
+        entry.id = static_cast<uint16_t>(id);
+        entry.song_group = static_cast<uint16_t>(group);
+        for (const uint16_t start_group : kStartGroups)
+        {
+            entry.groups.push_back({.id = start_group, .set = static_cast<uint16_t>(first_set + start_group)});
+        }
+
+        if (std::find(std::begin(kStartGroups), std::end(kStartGroups), group) == std::end(kStartGroups))
+        {
+            entry.groups.push_back({.id = entry.song_group, .set = static_cast<uint16_t>(first_set + group)});
+        }
+
+        entry.writes = writes;
+        AddSong(catalogue, std::move(entry), item(kFirstSong + s));
+    }
+}
+
+// Nintendo Puzzle Collection's songs (see MusyXFiles::kPuzzleCollection). The disc holds a menu and three games: Dr.
+// Mario, Panel de Pon and Yoshi's Cookie. main.dol loads each of them as a module of code, from a file that Yay0 packs
+// (UnpackYay0). Some of the paths in the code differ in case from the disc's names. The disc's library matches
+// names in any case. Each module sets up studio 0's aux effects for its songs (PuzzleAuxWrites). The menu, Dr. Mario
+// and Panel de Pon give aux A the high-quality reverb of the profile's reverbs[0], and aux B a chorus. Yoshi's Cookie
+// gives aux A the standard reverb of the profile's `other_reverb`, and aux B no effect. A rip holds the menu's songs,
+// then those of Dr. Mario, Panel de Pon and Yoshi's Cookie. A song's label starts with the module's name, such as
+// "panepon-flower_01".
+MusyXCatalogue GatherPuzzleCollection(const disc::GameFiles& game, const GameProfile& profile)
+{
+    const AnyCaseFiles files(game);
+    MusyXCatalogue catalogue;
+    AddPuzzleMenu(catalogue, files, profile);
+    AddPuzzleGame(catalogue, files, profile, kDrMario);
+    AddPuzzleGame(catalogue, files, profile, kPanelDePon);
+    AddYoshisCookie(catalogue, files, profile);
+    return catalogue;
+}
+
+// The NDDEMO tech demo's songs (see MusyXFiles::kNdDemo). The demo's code holds the addresses of the songs' paths at
+// `musyx_songs`: `musyx_song_count` words, in the order of the songs' IDs. A song takes its file's name. One set of
+// MusyX's files, audio/nddemo, holds the demo's two groups: group 0 for the songs and group 1 for the effects. The demo
+// pushes both at start-up, in that order, and keeps them. It plays a song through sndSeqPlayEx with group 0 and the
+// song's ID, then sets the song's volume to 0x7F with sndSeqVolume. The rip leaves the four effects out.
+MusyXCatalogue GatherNdDemo(const disc::GameFiles& game, const GameProfile& profile)
+{
+    constexpr uint8_t kSongVolume = 0x7f;
+    constexpr uint16_t kSongGroup = 0, kEffectsGroup = 1;
+
+    const ntdlib::Dol dol = ntdlib::Dol::ParseMain(game.dol);
+    MusyXCatalogue catalogue;
+    catalogue.sets.push_back({.project = ReadGameFile(game, "audio/nddemo.prj"),
+                              .pool = ReadGameFile(game, "audio/nddemo.pol"),
+                              .sdir = ReadGameFile(game, "audio/nddemo.sdr"),
+                              .samples = ReadGameFile(game, "audio/nddemo.smp")});
+    for (uint32_t id = 0; id < profile.musyx_song_count; id++)
+    {
+        const std::span<const uint8_t> row = Part(DolBytes(dol, profile.musyx_songs + id * 4), 0, 4, "the song table");
+        const std::string path = TextBeforeZero(DolBytes(dol, xsflib::LoadBe32(row.data())));
+        const std::string file = path.substr(path.find_last_of('/') + 1);
+
+        MusyXCatalogue::Entry entry;
+        entry.label = file.substr(0, file.find_last_of('.'));
+        entry.volume = kSongVolume;
+        entry.id = static_cast<uint16_t>(id);
+        entry.song_group = kSongGroup;
+        entry.groups = {{kSongGroup, 0}, {kEffectsGroup, 0}};
+        entry.writes = SoundWrites(profile, profile.reverbs[0]);
+        AddSong(catalogue, std::move(entry), ReadGameFile(game, path));
+    }
+
+    return catalogue;
+}
+
 } // namespace
 
 MusyXCatalogue GatherMusyX(const disc::GameFiles& game, const GameProfile& profile)
@@ -1604,13 +2400,85 @@ MusyXCatalogue GatherMusyX(const disc::GameFiles& game, const GameProfile& profi
         return GatherResidentEvil(game, profile);
     case MusyXFiles::kPaperMario:
         return GatherPaperMario(game, profile);
+    case MusyXFiles::kPokemonChannel:
+        return GatherPokemonChannel(game, profile);
     case MusyXFiles::kRebelStrike:
         return GatherRebelStrike(game, profile);
+    case MusyXFiles::kPuzzleCollection:
+        return GatherPuzzleCollection(game, profile);
+    case MusyXFiles::kNdDemo:
+        return GatherNdDemo(game, profile);
     case MusyXFiles::kNone:
         break;
     }
 
     throw xsflib::FormatError(std::string(profile.name) + " has no catalogue of MusyX sounds");
+}
+
+std::vector<uint8_t> UnpackYay0(std::span<const uint8_t> file)
+{
+    constexpr uint32_t kMagic = 0x59617930; // "Yay0"
+    constexpr std::size_t kHeader = 16;
+    constexpr uint32_t kMaxSize = 64u << 20;
+    constexpr uint32_t kTopBit = 0x80000000u;
+    if (file.size() < kHeader || xsflib::LoadBe32(file.data()) != kMagic)
+    {
+        throw xsflib::FormatError("a file isn't packed with Yay0");
+    }
+
+    const uint32_t size = xsflib::LoadBe32(file.data() + 4);
+    if (size > kMaxSize)
+    {
+        throw xsflib::FormatError("a Yay0 file unpacks to more than 64 MiB");
+    }
+
+    // The next `count` bytes of the table at `at`. Moves `at` past them.
+    const auto take = [file](std::size_t& at, std::size_t count)
+    {
+        const uint8_t* bytes = Part(file, at, count, "a Yay0 file's table").data();
+        at += count;
+        return bytes;
+    };
+    std::size_t masks = kHeader;
+    std::size_t copies = xsflib::LoadBe32(file.data() + 8);
+    std::size_t bytes = xsflib::LoadBe32(file.data() + 12);
+    std::vector<uint8_t> out;
+    out.reserve(size);
+    uint32_t mask = 0;
+    int bits = 0;
+    while (out.size() < size)
+    {
+        if (bits == 0)
+        {
+            mask = xsflib::LoadBe32(take(masks, 4));
+            bits = 32;
+        }
+
+        const bool literal = (mask & kTopBit) != 0;
+        mask <<= 1;
+        bits--;
+        if (literal)
+        {
+            out.push_back(*take(bytes, 1));
+            continue;
+        }
+
+        const uint16_t copy = xsflib::LoadBe16(take(copies, 2));
+        const std::size_t distance = (copy & 0xfffu) + std::size_t{1};
+        const std::size_t length =
+            (copy >> 12) != 0 ? (copy >> 12) + std::size_t{2} : *take(bytes, 1) + std::size_t{18};
+        if (distance > out.size())
+        {
+            throw xsflib::FormatError("a Yay0 file copies bytes from before its start");
+        }
+
+        for (std::size_t i = 0; i < length && out.size() < size; i++)
+        {
+            out.push_back(out[out.size() - distance]);
+        }
+    }
+
+    return out;
 }
 
 namespace

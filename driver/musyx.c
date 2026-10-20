@@ -31,8 +31,17 @@
  * MusyX allocates its memory through the hooks. The driver hands out the OS's arena, from the bottom up, and never
  * takes memory back. The sound's files follow MusyX's memory in the arena.
  *
- * Build with `driver/build.py musyx` (clang). The result is committed as src/rip/driver_musyx_blob.h. Building GCSF
- * itself requires no PowerPC toolchain.
+ * driver/musyx_upload.c builds this file with MUSYX_UPLOAD defined. That driver is for a game whose sample file doesn't
+ * fit in main memory. It pushes each group without samples in memory. MusyX then asks for the group's samples through
+ * its upload callback (sndSetSampleDataUploadCallback, from MusyX 1.5.2 on), a chunk at a time. The driver reads each
+ * chunk from the set's sample file. That driver also sets MusyX's master volume after the output mode. Its parameter
+ * block holds four more words. Its step 50 fails when the sample file doesn't open. A read of a chunk that doesn't
+ * start fails as step 52, and one that fails as step 53. The code that only that driver runs stays under
+ * MUSYX_UPLOAD. driver/musyx.c's blob, and with it every other game's rips, then stays as it was.
+ *
+ * Build with `driver/build.py musyx` and `driver/build.py musyx_upload` (clang). The results are committed as
+ * src/rip/driver_musyx_blob.h and src/rip/driver_musyx_upload_blob.h. Building GCSF itself requires no PowerPC
+ * toolchain.
  */
 
 #include "driver.h"
@@ -131,6 +140,16 @@ struct Params {
      * 0 for a game whose catalogue sets no controllers */
     u32 snd_fx_ctrl;
     u32 snd_fx_ctrl14;
+#ifdef MUSYX_UPLOAD
+    /* void sndSetSampleDataUploadCallback(void* (*callback)(u32 offset, u32 bytes), u32 chunk) */
+    u32 snd_set_upload_callback;
+    /* void aramSyncTransferQueue(void): waits until MusyX's queue of copies to ARAM is empty */
+    u32 aram_sync;
+    /* void sndMasterVolume(u8 volume, u16 time, u8 music, u8 fx): 0 for no call. The driver sets the volume of the
+     * music and the effects at once. */
+    u32 snd_master_volume;
+    u32 master_volume;
+#endif
 };
 
 __attribute__((section(".params"), used)) volatile struct Params driver_params = {
@@ -187,6 +206,21 @@ static void file_path(char* out, u32 number, const char* extension) {
     out[n] = 0;
 }
 
+/* Reads `length` bytes from `offset` in the open file `info` to `data`, and waits for them. Fails at `step` + 2 if the
+ * read doesn't start, and at `step` + 3 if it fails. */
+static void read_file(u32 info, u32 data, u32 length, u32 offset, u32 step) {
+    volatile struct Params* p = &driver_params;
+    if (!((fn6)p->dvd_read_async_prio)(info, data, length, offset, 0, 2))
+        fail(step + 2);
+    for (;;) {
+        const int state = (int)((fn1)p->dvd_get_command_block_status)(info);
+        if (state == DVD_STATE_END)
+            break;
+        if (state != DVD_STATE_BUSY && state != DVD_STATE_WAITING)
+            fail(step + 3);
+    }
+}
+
 /* Reads the rip's file at `path` into the arena. Returns its address and sets `*size`. Fails at `step` if the file
  * is missing or can't be read. */
 static u32 load_file(const char* path, u32* size, u32 step) {
@@ -198,21 +232,32 @@ static u32 load_file(const char* path, u32* size, u32 step) {
     const u32 data = heap_alloc(rounded ? rounded : 32);
     if (!data)
         fail(step + 1);
-    if (rounded) {
-        if (!((fn6)p->dvd_read_async_prio)((u32)file_info, data, rounded, 0, 0, 2))
-            fail(step + 2);
-        for (;;) {
-            const int state = (int)((fn1)p->dvd_get_command_block_status)((u32)file_info);
-            if (state == DVD_STATE_END)
-                break;
-            if (state != DVD_STATE_BUSY && state != DVD_STATE_WAITING)
-                fail(step + 3);
-        }
-    }
+    if (rounded)
+        read_file((u32)file_info, data, rounded, 0, step);
     ((fn1)p->dvd_close)((u32)file_info);
     *size = length;
     return data;
 }
+
+#ifdef MUSYX_UPLOAD
+/* The bytes of each chunk that MusyX asks for. The game asks for chunks of that size too. */
+#define UPLOAD_CHUNK 0x20000u
+
+/* The DVDFileInfo of the sample file of the set whose groups the driver pushes, and the buffer for a chunk. */
+static u32 samples_info[16] __attribute__((aligned(32)));
+static u32 upload_buffer;
+
+/* MusyX's upload callback. MusyX asks for `bytes` from `offset` in the sample file. The driver pushes its groups
+ * without samples in memory. Each sample's address is then its offset in the file. The callback reads the bytes into
+ * its buffer and returns the buffer. MusyX then queues a copy of the buffer to ARAM. MusyX 2.0 asks for the next chunk
+ * without waiting for that copy. The callback waits for MusyX's queue to empty before it reads into the buffer. */
+static u32 upload(u32 offset, u32 bytes) {
+    volatile struct Params* p = &driver_params;
+    ((fn0)p->aram_sync)();
+    read_file((u32)samples_info, upload_buffer, (bytes + 31) & ~31u, offset, 50);
+    return upload_buffer;
+}
+#endif
 
 __attribute__((noreturn)) void driver_main(void) {
     volatile struct Params* p = &driver_params;
@@ -247,6 +292,10 @@ __attribute__((noreturn)) void driver_main(void) {
             ((fn0)p->after_init[i])();
     if (p->snd_output_mode)
         ((fn1)p->snd_output_mode)(p->output_mode);
+#ifdef MUSYX_UPLOAD
+    if (p->snd_master_volume)
+        ((fn4)p->snd_master_volume)(p->master_volume, 0, 1, 1);
+#endif
     if (p->snd_volume)
         ((fn3)p->snd_volume)(127, 0, 0xff);
 
@@ -288,6 +337,12 @@ __attribute__((noreturn)) void driver_main(void) {
 
     /* The sound's groups, each from its set of files. A set's number has 16 bits, so `loaded` starts as none. */
     u32 loaded = 0xffffffffu, project = 0, pool = 0, sdir = 0, samples = 0;
+#ifdef MUSYX_UPLOAD
+    upload_buffer = heap_alloc(UPLOAD_CHUNK);
+    if (!upload_buffer)
+        fail(51);
+    ((fn2)p->snd_set_upload_callback)((u32)upload, UPLOAD_CHUNK);
+#endif
     for (u32 g = 0; g < group_count; g++) {
         const u8* group = catalogue + groups_at + (first_group + g) * GROUP_SIZE;
         const u32 group_id = be16(group), set = be16(group + 2);
@@ -300,12 +355,26 @@ __attribute__((noreturn)) void driver_main(void) {
             file_path(path, set, ".sdir");
             sdir = load_file(path, &unused, 40);
             file_path(path, set, ".samp");
+#ifdef MUSYX_UPLOAD
+            /* The sample file stays open while the set's groups are pushed. */
+            if (loaded != 0xffffffffu)
+                ((fn1)p->dvd_close)((u32)samples_info);
+            if (!((fn2)p->dvd_open)((u32)path, (u32)samples_info))
+                fail(50);
+#else
             samples = load_file(path, &unused, 50);
+#endif
             loaded = set;
         }
         if (!((fn5)p->snd_push_group)(project, group_id, samples, sdir, pool))
             fail(6);
     }
+#ifdef MUSYX_UPLOAD
+    /* The last chunk reaches ARAM before the sound starts. */
+    ((fn0)p->aram_sync)();
+    if (loaded != 0xffffffffu)
+        ((fn1)p->dvd_close)((u32)samples_info);
+#endif
 
     /* The sound. */
     if (kind == KIND_SONG) {

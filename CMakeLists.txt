@@ -3,7 +3,7 @@
 cmake_minimum_required(VERSION 3.20)
 # Shared version for gcsfrip, gcsfplay, the foobar2000 component, the XMPlay plugin, Windows file properties and macOS
 # bundles (xsflib_add_version below). For a release, update it here and add notes in docs/release-notes/.
-project(gcsf VERSION 1.5.1 LANGUAGES C CXX)
+project(gcsf VERSION 1.6.0 LANGUAGES C CXX)
 
 # xsflib, a library for players and rippers of the PSF family, is the submodule externals/xsflib. Its
 # XsflibProject.cmake sets what a project built on it starts with: C++20, a release build by default, the static C
@@ -71,7 +71,9 @@ add_library(gcsf_rip STATIC
     src/rip/driver_jungle_beat_blob.h
     src/rip/driver_luigis_mansion_blob.h
     src/rip/driver_mario_golf_blob.h
+    src/rip/driver_mario_party_blob.h
     src/rip/driver_musyx_blob.h
+    src/rip/driver_musyx_upload_blob.h
     src/rip/driver_pacman_vs_blob.h
     src/rip/driver_pikmin2_blob.h
     src/rip/driver_pikmin_blob.h
@@ -84,6 +86,7 @@ add_library(gcsf_rip STATIC
     src/rip/fsys.h
     src/rip/hal.cpp
     src/rip/jaudio.cpp
+    src/rip/msm.cpp
     src/rip/musyx.cpp
     src/rip/musyx_catalogue.cpp
     src/rip/musyx_catalogue.h

@@ -57,6 +57,7 @@ struct MusyXCatalogue
     };
 
     // A sound: its label, what MusyX plays, the groups that it pushes first, its words, and an effect's controllers.
+    // The rip lists a song as music, and an effect whose `music` is set. The game plays such an effect as its music.
     struct Entry
     {
         std::string label;
@@ -70,6 +71,7 @@ struct MusyXCatalogue
         std::vector<Group> groups;
         std::vector<Write> writes;
         std::vector<Control> controls;
+        bool music = false;
     };
 
     // The volume and the pan that leave a sound at MusyX's defaults, and a song number that means no song.
@@ -85,6 +87,15 @@ struct MusyXCatalogue
 // The catalogue of the game's sounds, from its files as the profile's `musyx_files` says. Throws xsflib::FormatError if
 // a file is missing or damaged.
 MusyXCatalogue GatherMusyX(const disc::GameFiles& game, const GameProfile& profile);
+
+// The contents of a file that Yay0 packs, such as a module of Nintendo Puzzle Collection's code. The header holds
+// "Yay0", the unpacked size, the offset of the table of copies and the offset of the table of bytes, as big-endian
+// words. Mask words follow the header. Each bit of a mask, from the top, gives the next step. A set bit takes the next
+// byte of the table of bytes. A clear bit copies earlier output. The copy takes the next big-endian half of the table
+// of copies: the distance back, less 1, in its low 12 bits, and the length, less 2, in its top 4. A length of 0 there
+// takes the length, less 18, from the table of bytes. Throws xsflib::FormatError if the file is damaged, or if it
+// unpacks to more than 64 MiB.
+std::vector<uint8_t> UnpackYay0(std::span<const uint8_t> file);
 
 // The catalogue's path in the library.
 inline constexpr char kMusyXCatalogue[] = "MusyX/sounds.bin";

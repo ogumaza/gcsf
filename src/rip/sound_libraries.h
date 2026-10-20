@@ -116,6 +116,24 @@ std::optional<std::string> AddMusyXFiles(ProgramBuilder& program, const disc::Ga
 std::optional<Timing> MeasureMusyXSound(Player& player, const GameProfile& profile, const LoadedSet& library,
                                         uint32_t id);
 
+// Hudson's sound manager over MusyX (msm.cpp)
+
+// The songs of a game for driver/mario_party.c, in the order of its sound test (GameProfile::sound_test). An entry of
+// the sound test gives a word that is 0 for an empty entry, the message that names the sound, the kind of sound, the
+// group set that the sound test loads, and the sound's number: big-endian words, but halfwords for the kind and the
+// set. A message's ID holds its bank in the top 16 bits and its number in the bank in the low 16 bits (MessageText).
+// Kind 1 plays a stream. Kind 28 plays an effect. Every other kind plays a song of the sound manager's table. A song's
+// ID holds the group set in its top 16 bits and the song's number in its low 16 bits. A stream's ID is 0x80000000 plus
+// its number. The list leaves out the effects. A sound's label is its message's text. Throws xsflib::FormatError if the
+// module or the message file can't be read, or if the sound test or a message lies outside its file.
+std::vector<Sound> MsmSongs(const disc::GameFiles& game, const GameProfile& profile);
+
+// The sound files of a game for driver/mario_party.c: the sound manager's file of sound data, and the stream file up to
+// the streams' samples (see GameProfile::stream_file). The word at 0x1C of the stream file's header gives the samples'
+// offset. Returns the error, or nothing.
+std::optional<std::string> AddMsmFiles(ProgramBuilder& program, const disc::GameFiles& game,
+                                       const GameProfile& profile);
+
 // Red (red.cpp)
 
 // A Red game's pieces of music, then its effects. The pieces are the BGM files in its music folder, by number. A

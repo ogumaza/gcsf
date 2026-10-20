@@ -42,7 +42,9 @@
 #include "rip/driver_jungle_beat_blob.h"
 #include "rip/driver_luigis_mansion_blob.h"
 #include "rip/driver_mario_golf_blob.h"
+#include "rip/driver_mario_party_blob.h"
 #include "rip/driver_musyx_blob.h"
+#include "rip/driver_musyx_upload_blob.h"
 #include "rip/driver_pacman_vs_blob.h"
 #include "rip/driver_pikmin2_blob.h"
 #include "rip/driver_pikmin_blob.h"
@@ -123,9 +125,15 @@ std::optional<DriverImage> ImageOf(Driver driver)
     case Driver::kColosseumBonus:
         return DriverImage{colosseum_bonus::kDriverBlob, colosseum_bonus::kDriverBase, colosseum_bonus::kDriverEntry,
                            colosseum_bonus::kDriverParams, /*wave_list=*/false};
+    case Driver::kMusyXUpload:
+        return DriverImage{musyx_upload::kDriverBlob, musyx_upload::kDriverBase, musyx_upload::kDriverEntry,
+                           musyx_upload::kDriverParams, /*wave_list=*/false};
     case Driver::kMusyX:
         return DriverImage{musyx::kDriverBlob, musyx::kDriverBase, musyx::kDriverEntry, musyx::kDriverParams,
                            /*wave_list=*/false};
+    case Driver::kMarioParty:
+        return DriverImage{mario_party::kDriverBlob, mario_party::kDriverBase, mario_party::kDriverEntry,
+                           mario_party::kDriverParams, /*wave_list=*/false};
     }
 
     return std::nullopt;
@@ -374,9 +382,14 @@ namespace
 // can't be read.
 std::vector<Sound> SoundsFromCodeOrFiles(const disc::GameFiles& game, const GameProfile& profile)
 {
-    if (profile.driver == Driver::kMusyX)
+    if (profile.driver == Driver::kMusyX || profile.driver == Driver::kMusyXUpload)
     {
         return CatalogueSounds(game, profile);
+    }
+
+    if (profile.driver == Driver::kMarioParty)
+    {
+        return MsmSongs(game, profile);
     }
 
     switch (profile.library)
@@ -595,9 +608,14 @@ std::optional<std::string> AddSoundFiles(ProgramBuilder& program, const disc::Ga
 {
     program.AddFile(kDiscHeaderPath, game.boot);
 
-    if (profile.driver == Driver::kMusyX)
+    if (profile.driver == Driver::kMusyX || profile.driver == Driver::kMusyXUpload)
     {
         return AddMusyXCatalogue(program, game, profile);
+    }
+
+    if (profile.driver == Driver::kMarioParty)
+    {
+        return AddMsmFiles(program, game, profile);
     }
 
     switch (profile.library)

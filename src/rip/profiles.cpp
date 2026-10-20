@@ -4,8 +4,10 @@
 // the game's code does for sound.
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "ntdlib/flipper/z2_params.h"
@@ -1560,6 +1562,13 @@ std::vector<uint32_t> MusyXParams::Words() const
             snd_fx_ctrl14};
 }
 
+// The places of some of the parameters among the words (kMusyXAuxCallbacks). Words() lists the fields in their order.
+static_assert(offsetof(MusyXParams, voices) == kMusyXVoices * 4);
+static_assert(offsetof(MusyXParams, studios) == kMusyXStudios * 4);
+static_assert(offsetof(MusyXParams, aux_callback) == kMusyXAuxCallbacks * 4);
+static_assert(offsetof(MusyXParams, aux_user) == kMusyXAuxBlocks * 4);
+static_assert(offsetof(MusyXParams, aux_prepare) == kMusyXAuxPreparations * 4);
+
 // Metroid Prime (USA, disc version 2). Its sound library is MusyX 2.0, under Retro Studios' audio system. Its music
 // streams from the disc, apart from the four songs in MidiData.pak.
 //
@@ -2022,6 +2031,88 @@ const GameProfile kResidentEvilZeroUsa = {
     .section_loop_size = 0x38,
 };
 
+// Nintendo Puzzle Collection (Japan). Its sound library is MusyX 2.0. The disc holds a menu and three games: Dr. Mario,
+// Panel de Pon and Yoshi's Cookie. main.dol holds the OS, the disc's library and MusyX. main.dol loads the menu and
+// each game as a module of code (see MusyXFiles::kPuzzleCollection).
+//
+// OSInit initialises the disc. main.dol's sound set-up (0x80006D5C) initialises the ARAM with a stack of 2 entries at
+// 0x800CAF94 and starts the audio interface. The set-up sets MusyX's memory hooks and calls sndInit: 64 voices, 48 for
+// music, 16 for effects, one studio, and 8 MiB of ARAM. The game's options set the output to mono, stereo or surround
+// (0x800124C8). A rip plays in stereo, the options' default. Each module sets up studio 0's aux effects in the module's
+// memory. A rip places the effects' blocks in a part of main.dol's BSS that only the game's graphics use: aux A's at
+// 0x80100000, and aux B's at 0x80100200. The menu, Dr. Mario and Panel de Pon call sndVolume(127, 0, 0xFF). The menu
+// and Dr. Mario then call sndVolume(110, 0, 0xFF). A song's start sets the song's group again. A rip leaves the second
+// call out.
+//
+// The length analysis reads the first of MusyX's song instances, at 0x80203500. The instance's 16 sections start
+// 0x14E8 bytes in, 0x38 bytes apart. Each section holds a count of loops at +0x34.
+const GameProfile kPuzzleCollectionJpn = {
+    .name = "Nintendo Puzzle Collection",
+    .game_id = "GPZJ01",
+    .dol_sha1 = "00ab0f4fd4cff96b9087ed1176f9a6e839b57dde",
+    .main = 0x80006780,
+    .driver = Driver::kMusyX,
+    .library = SoundLibrary::kMusyX,
+    .params =
+        MusyXParams{
+            .os_sleep_thread = 0x80049d7c,
+            .os_get_arena_lo = 0x80043cdc,
+            .os_get_arena_hi = 0x80043cd4,
+            .startup = {}, // none: OSInit initialises the disc
+            .dvd_open = 0x8004f50c,
+            .dvd_read_async_prio = 0x8004f81c,
+            .dvd_get_command_block_status = 0x80051a90,
+            .dvd_close = 0x8004f5d4,
+            .ar_init = 0x80058db8,
+            .aram_blocks = 0x800caf94,
+            .aram_block_count = 2,
+            .arq_init = 0x8005a8c8,
+            .ai_init = 0x8005874c,
+            .snd_set_hooks = 0x80034924,
+            .snd_init = 0x80031a98,
+            .init_form = 1, // sndInit takes the number of studios
+            .voices = 64,
+            .music = 48,
+            .sfx = 16,
+            .studios = 1,
+            .init_flags = 0, // SND_FLAGS_DEFAULT
+            .aram_size = 0x800000,
+            .snd_output_mode = 0x80022a5c,
+            .output_mode = 1, // SND_OUTPUTMODE_STEREO
+            .snd_push_group = 0x8002bfc0,
+            .snd_seq_play = 0x8002c3b0, // sndSeqPlayEx
+            .seq_play_form = 1,         // sndSeqPlayEx takes a studio
+            .snd_seq_volume = 0x8002264c,
+            .snd_fx_start_ex = 0, // no effects
+            .snd_set_aux_processing_callbacks = 0x80022b54,
+            .aux_callback = {0x80035f00, 0x80037088}, // sndAuxCallbackReverbHI and sndAuxCallbackChorus
+            .aux_user = {0x80100000, 0x80100200},     // aux A's reverb and aux B's chorus (see above)
+            .aux_prepare = {0x80035f5c, 0x800373f4},  // sndAuxCallbackPrepareReverbHI and sndAuxCallbackPrepareChorus
+            .aux_midi = {0xff, 0xff},                 // no MIDI channel controls aux A or aux B
+            .snd_volume = 0x80022968,
+        }
+            .Words(),
+    .library_name = "PuzzleCollection",
+    .musyx_files = MusyXFiles::kPuzzleCollection,
+    // The settings that the menu, Dr. Mario and Panel de Pon give aux A's reverb.
+    .reverbs = {{{.block = 0x80100000,
+                  .coloration = 0.5f,
+                  .mix = 0.8f,
+                  .time = 1.5f,
+                  .damping = 0.5f,
+                  .pre_delay = 0.0f,
+                  .high = true,
+                  .crosstalk = 0.0f}}},
+    // Yoshi's Cookie's reverb.
+    .other_reverb =
+        {.block = 0x80100000, .coloration = 0.5f, .mix = 1.0f, .time = 1.6f, .damping = 1.0f, .pre_delay = 0.02f},
+    .standard_reverb = {0x80035594, 0x800355f0}, // sndAuxCallbackReverbSTD and sndAuxCallbackPrepareReverbSTD
+    .musyx_voice_limits = 0x8020ff10,            // in the state that sndInit (0x80031A98) sets up
+    .song_lists = {0x8022d6fc, 0x8022d6f8},
+    .section_loops = 0x80204a1c,
+    .section_loop_size = 0x38,
+};
+
 // Metroid Prime 2: Echoes (USA). Its sound library is a later build of MusyX 2.0, under Retro Studios' audio system.
 // It streams its music. Its MusyX groups are all effects groups.
 //
@@ -2172,6 +2263,101 @@ const GameProfile kPaperMarioUsa = {
     .musyx_effect_count = 4242,
 };
 
+// The parameters of driver/musyx_upload.c: driver/musyx.c's (MusyXParams), then sndSetSampleDataUploadCallback,
+// aramSyncTransferQueue, sndMasterVolume and the master volume. driver/musyx.c's Params says what each field means.
+struct MusyXUploadParams
+{
+    MusyXParams musyx;
+    uint32_t snd_set_upload_callback = 0, aram_sync = 0, snd_master_volume = 0, master_volume = 0;
+
+    // The words in the order of the driver's parameter block.
+    std::vector<uint32_t> Words() const;
+};
+
+std::vector<uint32_t> MusyXUploadParams::Words() const
+{
+    std::vector<uint32_t> words = musyx.Words();
+    words.insert(words.end(), {snd_set_upload_callback, aram_sync, snd_master_volume, master_volume});
+    return words;
+}
+
+// Pokémon Channel (USA). Its sound library is MusyX 2.0, the build of Metroid Prime's. The game plays its music as
+// MusyX effects (see MusyXFiles::kPokemonChannel). One sample file holds every sample of the game, more than main memory
+// holds. The game hands MusyX the samples a chunk at a time, through MusyX's upload callback. A rip does the same
+// through driver/musyx_upload.c.
+//
+// OSInit initialises the disc. The game's start-up initialises the ARAM with a stack of 2 entries at 0x8035054C (at
+// 0x80034A0C), its queue and the audio interface. The game's sound set-up (0x8001498C) sets MusyX's memory hooks and
+// calls sndInit: 64 voices, none for music, 64 for effects, one studio, the flag that encodes the default studio for
+// Dolby Pro Logic II, and 0xFFC000 bytes of ARAM. The output is in stereo unless the console is set to mono. The
+// set-up then calls sndMasterVolume(100, 100, 1, 1) and sndVolume(127, 100, 0xFF). A rip makes both calls with a time
+// of 0. The game gives studio 0 no aux effects. Its loader of groups (0x80015228) sets the upload callback, with chunks
+// of 0x20000 bytes, before it pushes a group.
+const GameProfile kPokemonChannelUsa = {
+    .name = "Pokémon Channel",
+    .game_id = "GPAE01",
+    .dol_sha1 = "3523501ee45ea3d84e12096616cb05c1b9733c21",
+    .main = 0x80036dfc,
+    .driver = Driver::kMusyXUpload,
+    .library = SoundLibrary::kMusyX,
+    .params =
+        MusyXUploadParams{
+            .musyx =
+                {
+                    .os_sleep_thread = 0x800c9980,
+                    .os_get_arena_lo = 0x800c476c,
+                    .os_get_arena_hi = 0x800c4764,
+                    .startup = {}, // none: OSInit initialises the disc
+                    .dvd_open = 0x800cdde8,
+                    .dvd_read_async_prio = 0x800ce0f8,
+                    .dvd_get_command_block_status = 0x800d0360,
+                    .dvd_close = 0x800cdeb0,
+                    .ar_init = 0x800d5048,
+                    .aram_blocks = 0x8035054c,
+                    .aram_block_count = 2,
+                    .arq_init = 0x800d6b64,
+                    .ai_init = 0x800d4a44,
+                    .snd_set_hooks = 0x8012edac,
+                    .snd_init = 0x8012bda0,
+                    .init_form = 1, // sndInit takes the number of studios
+                    .voices = 64,
+                    .music = 0,
+                    .sfx = 64,
+                    .studios = 1,
+                    .init_flags = 1, // SND_FLAGS_DEFAULT_STUDIO_DPL2
+                    .aram_size = 0xffc000,
+                    .snd_output_mode = 0x80119cf0,
+                    .output_mode = 1, // SND_OUTPUTMODE_STEREO
+                    .snd_push_group = 0x80126348,
+                    .snd_seq_play = 0x80126afc, // sndSeqPlayEx
+                    .seq_play_form = 1,         // sndSeqPlayEx takes a studio
+                    .snd_seq_volume = 0x801199b4,
+                    .snd_fx_start_ex = 0x80119b38,
+                    .snd_volume = 0x80119bfc,
+                    .snd_fx_ctrl = 0x80119a38,
+                    .snd_fx_ctrl14 = 0x80119a98,
+                },
+            .snd_set_upload_callback = 0x80126328,
+            .aram_sync = 0x8012f090,
+            .snd_master_volume = 0x80119c5c,
+            .master_volume = 100,
+        }
+            .Words(),
+    .library_name = "PokémonChannel",
+    .musyx_files = MusyXFiles::kPokemonChannel,
+    .musyx_songs = 0x8015eb50,
+    .musyx_song_count = 38,
+    .musyx_voices = {.count = 64,
+                     .synth = 0x80350d60,
+                     .synth_size = 0x404,
+                     .dsp = 0x80350e3c,
+                     .dsp_size = 0xf4,
+                     .state_offset = 0xec,
+                     .loop_handler = 0x8011eca0},
+    .viewer_names = 0x197c3,
+    .viewer_effects = 0x4552,
+};
+
 // Star Wars Rogue Squadron III: Rebel Strike (USA). Its sound library is MusyX.
 //
 // main.dol is a loader. It holds the OS and the disc's library. The game's code and data, MusyX among them, are a
@@ -2258,13 +2444,164 @@ const GameProfile kRebelStrikeUsa = {
     .module_offset = 0x01000000,
 };
 
-const std::vector<GameProfile> kProfiles = {
-    kFourSwordsUsa,        kFourSwordsJpn,     kTwilightPrincessUsa, kWindWakerUsa,          kMarioGolfUsa,
-    kMarioPowerTennisUsa,  kWarioWareUsa,      kLuigisMansionUsa,    kSuperMarioSunshineUsa, kPikminUsa,
-    kJungleBeatUsa,        kDoubleDashUsa,     kPikmin2Usa,          kPacManVsUsa,           kCollectorsEditionUsa,
-    kCrystalChroniclesUsa, kAnimalCrossingUsa, kColosseumBonusUsa,   kMetroidPrimeUsa,       kTalesOfSymphoniaUsa,
-    kStarFoxAdventuresUsa, kRogueLeaderUsa,    kColosseumUsa,        kResidentEvilZeroUsa,   kMetroidPrime2Usa,
-    kPaperMarioUsa,        kRebelStrikeUsa};
+// Mario Party 4 (USA, disc version 1). Its sound library is MusyX 1.5.4, under Hudson's sound manager. The parameters
+// follow driver/mario_party.c's Params from os_sleep_thread. The sound manager's file holds every sound group, song and
+// effect. The game's audio set-up (0x80032830) gives the sound manager a heap of 0x13FC00 bytes and the ARAM up to
+// 0x808000. It starts the output in surround unless the console is set to mono. The boot module loads the base groups.
+// Each scene then loads a group set.
+//
+// The options module's sound test plays each of its songs with the group set of the song's entry. Its table holds 14
+// pages of 10 entries at 0xAC58 in the module's file. Message bank 47 of the English messages names the sounds. The
+// sound test lists 76 songs and 14 streams. The sound manager's table holds two songs more. Song 0 is a dummy. Song 42
+// is song 41 in another group. The length analysis reads MusyX's lists of the songs that play, and the loop counts of
+// the sequencer's first song.
+const GameProfile kMarioParty4Usa = {
+    .name = "Mario Party 4",
+    .game_id = "GMPE01",
+    .dol_sha1 = "64b42eac733a57a53d2ce25e7e47f54fc1e31915",
+    .main = 0x800057c0,
+    .driver = Driver::kMarioParty,
+    .library = SoundLibrary::kMusyX,
+    .params =
+        {
+            0x800babdc, // os_sleep_thread: OSSleepThread
+            0x800b5da4, // os_get_arena_lo: OSGetArenaLo
+            0x800b5d9c, // os_get_arena_hi: OSGetArenaHi
+            0x800be118, // dvd_init: DVDInit
+            0x80117254, // msm_sys_init: msmSysInit
+            0x8012e9b8, // msm_path: "/sound/mpgcsnd.msm"
+            0x8012e9cb, // pdt_path: "/sound/mpgcstr.pdt"
+            0x13fc00,   // heap_size: the sound manager's heap
+            0x808000,   // aram_end: the end of the sound manager's ARAM
+            0x80115fa0, // msm_sys_set_output_mode: msmSysSetOutputMode
+            2,          // output_mode: SND_OUTPUTMODE_SURROUND
+            0x8011618c, // msm_sys_get_samp_size: msmSysGetSampSize
+            0x80116fbc, // msm_sys_load_group: msmSysLoadGroup
+            0x80116818, // msm_sys_load_group_set: msmSysLoadGroupSet
+            0x801185e4, // msm_mus_play: msmMusPlay
+        },
+    .bank_files = {"sound/mpgcsnd.msm"},
+    .library_name = "MarioParty4",
+    .stream_file = "sound/mpgcstr.pdt",
+    .sound_test_module = "dll/option.rel",
+    .sound_test = 0xac58,
+    .sound_test_count = 140,
+    .messages = "mess/board_e.dat",
+    .song_lists = {0x801d47a4, 0x801d47a0}, // seqActiveRoot and seqPausedRoot
+    .section_loops = 0x801ae214,            // in seqInstance
+    .section_loop_size = 0x38,
+};
+
+// The NDDEMO tech demo. Its disc ID is 00\0E01: a game code of two zeros and a NUL, then E, and the maker code 01. Its
+// disc header leaves out the GameCube's magic word. Its sound library is an early MusyX. That library's sndInit takes
+// no number of studios.
+//
+// __start calls OSInit before main. main initialises the disc, the video and the pads, then sets up the demo's audio
+// (0x80026B00). The set-up starts the audio interface and initialises the ARAM with a stack of 2 entries at 0x8006D1CC
+// and its queue. It sets MusyX's memory hooks and calls sndInit: 48 voices, 40 for music, 8 for effects, no flags and
+// 0x800000 bytes of ARAM. It calls sndVolume(127, 0, 0xFF) and leaves the output at MusyX's default. It gives studio
+// 0's aux A MusyX's high-quality reverb of 5 s and aux B MusyX's chorus. A rip writes the chorus's settings: a delay of
+// 15 ms, no variation and a period of 500 ms.
+//
+// The demo has no DVDReadAsyncPrio. The driver reads through DVDReadPrio (0x80031708) instead. Paper Mario's profile
+// does the same. The demo has no DVDGetCommandBlockStatus either. A getter in the demo's code (0x8001AD24) returns the
+// word at +0xC of a command block, the block's state. The driver reads the state through it. The disc's library takes
+// only paths in the 8.3 form unless bi2.bin allows long names. The demo's bi2.bin doesn't. The rip lets the library
+// take the driver's long names.
+//
+// The length analysis reads the first of MusyX's song instances, at 0x80082A58. Its 16 sections start 0x14E4 bytes
+// into it, 0x2C bytes apart, and each holds its count of loops at +0x26.
+const GameProfile kNdDemoDisc = {
+    .name = "NDDEMO",
+    .game_id = std::string_view("00\0E01", 6),
+    .dol_sha1 = "d46883ce81a884b65c6e40d483b196add1dd1bf4",
+    .main = 0x800065a0,
+    .driver = Driver::kMusyX,
+    .library = SoundLibrary::kMusyX,
+    .params =
+        MusyXParams{
+            .os_sleep_thread = 0x8002f264,
+            .os_get_arena_lo = 0x80028c54,
+            .os_get_arena_hi = 0x80028c4c,
+            .startup = {0x80031844}, // DVDInit
+            .dvd_open = 0x800313f8,
+            .dvd_read_async_prio = 0x80031708,          // DVDReadPrio, in place of DVDReadAsyncPrio (see above)
+            .dvd_get_command_block_status = 0x8001ad24, // the demo's getter of a block's state (see above)
+            .dvd_close = 0x800314c0,
+            .ar_init = 0x80037e8c,
+            .aram_blocks = 0x8006d1cc,
+            .aram_block_count = 2,
+            .arq_init = 0x800390a4,
+            .ai_init = 0x800378ac,
+            .snd_set_hooks = 0x80058458,
+            .snd_init = 0x80055588,
+            .init_form = 0, // sndInit takes no number of studios
+            .voices = 48,
+            .music = 40,
+            .sfx = 8,
+            .aram_size = 0x800000,
+            .snd_push_group = 0x8005032c,
+            .snd_seq_play = 0x800505d8, // sndSeqPlayEx
+            .seq_play_form = 1,         // sndSeqPlayEx takes a studio
+            .snd_seq_volume = 0x80047cec,
+            .snd_set_aux_processing_callbacks = 0x80047f8c,
+            .aux_callback = {0x8005911c, 0x8005a19c}, // sndAuxCallbackReverbHI and sndAuxCallbackChorus
+            .aux_user = {0x8006d1f0, 0x8006d3d0},     // aux A's reverb and aux B's chorus
+            .aux_prepare = {0x80059178, 0x8005a508},  // sndAuxCallbackPrepareReverbHI and sndAuxCallbackPrepareChorus
+            .aux_midi = {0xff, 0xff},                 // no MIDI channel controls aux A or aux B
+            .snd_volume = 0x80047e98,
+        }
+            .Words(),
+    .library_name = "NDDEMO",
+    .patches = {{0x800311d4, 0x480000ac}}, // the disc's paths: long names
+    .musyx_files = MusyXFiles::kNdDemo,
+    .musyx_songs = 0x80065394,
+    .musyx_song_count = 9,
+    .musyx_writes = {{0x8006d460, 15}, {0x8006d464, 0}, {0x8006d468, 500}},
+    .reverbs = {{{.block = 0x8006d1f0,
+                  .coloration = 0.9f,
+                  .mix = 0.5f,
+                  .time = 5.0f,
+                  .damping = 0.6f,
+                  .pre_delay = 0.1f,
+                  .high = true,
+                  .crosstalk = 0.0f}}},
+    .song_lists = {0x800a91ac, 0x800a91a8},
+    .section_loops = 0x80083f62,
+    .section_loop_size = 0x2c,
+};
+
+const std::vector<GameProfile> kProfiles = {kFourSwordsUsa,
+                                            kFourSwordsJpn,
+                                            kTwilightPrincessUsa,
+                                            kWindWakerUsa,
+                                            kMarioGolfUsa,
+                                            kMarioPowerTennisUsa,
+                                            kWarioWareUsa,
+                                            kLuigisMansionUsa,
+                                            kSuperMarioSunshineUsa,
+                                            kPikminUsa,
+                                            kJungleBeatUsa,
+                                            kDoubleDashUsa,
+                                            kPikmin2Usa,
+                                            kPacManVsUsa,
+                                            kCollectorsEditionUsa,
+                                            kCrystalChroniclesUsa,
+                                            kAnimalCrossingUsa,
+                                            kColosseumBonusUsa,
+                                            kMetroidPrimeUsa,
+                                            kTalesOfSymphoniaUsa,
+                                            kStarFoxAdventuresUsa,
+                                            kRogueLeaderUsa,
+                                            kColosseumUsa,
+                                            kResidentEvilZeroUsa,
+                                            kMetroidPrime2Usa,
+                                            kPaperMarioUsa,
+                                            kRebelStrikeUsa,
+                                            kPokemonChannelUsa,
+                                            kMarioParty4Usa,
+                                            kPuzzleCollectionJpn,
+                                            kNdDemoDisc};
 
 } // namespace
 

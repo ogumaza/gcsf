@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: MIT
 
 // Tests of how a MusyX song's tracks loop (rip::SectionsOf), with made-up SNG files: songs without sections, songs in
-// sections, and damaged songs. Then a test of the catalogue's file (rip::CatalogueFile) with an effect's controllers.
+// sections, and damaged songs. Then a test of the catalogue's file (rip::CatalogueFile) with an effect's controllers,
+// and tests of rip::UnpackYay0 with made-up files.
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "xsflib/bytes.h"
@@ -14,6 +17,7 @@
 
 using namespace gcsf;
 using xsflib::testing::Check;
+using xsflib::testing::ErrorOf;
 
 namespace
 {
@@ -135,6 +139,65 @@ void TestControllers()
           "then the pitch wheel, with bit 8 for sndFXCtrl14");
 }
 
+// A made-up Yay0 file: the header for `size` bytes, then the masks, the table of copies and the table of bytes.
+std::vector<uint8_t> MakeYay0(uint32_t size, const std::vector<uint32_t>& masks, const std::vector<uint16_t>& copies,
+                              const std::string& bytes)
+{
+    const auto copies_at = static_cast<uint32_t>(16 + masks.size() * 4);
+    const auto bytes_at = static_cast<uint32_t>(copies_at + copies.size() * 2);
+    std::vector<uint8_t> file(bytes_at + bytes.size());
+    xsflib::StoreBe32(file.data(), 0x59617930); // "Yay0"
+    xsflib::StoreBe32(file.data() + 4, size);
+    xsflib::StoreBe32(file.data() + 8, copies_at);
+    xsflib::StoreBe32(file.data() + 12, bytes_at);
+    for (std::size_t i = 0; i < masks.size(); i++)
+    {
+        xsflib::StoreBe32(file.data() + 16 + i * 4, masks[i]);
+    }
+
+    for (std::size_t i = 0; i < copies.size(); i++)
+    {
+        xsflib::StoreBe16(file.data() + copies_at + i * 2, copies[i]);
+    }
+
+    std::copy(bytes.begin(), bytes.end(), file.begin() + bytes_at);
+    return file;
+}
+
+// The mask 1110 10 takes "abc", copies 6 bytes from 3 back, takes "d", then copies from 10 back. That copy's half gives
+// a length of 0, and the byte 2 after "d" gives 2 + 18 = 20 bytes. Both copies overlap the bytes that they write.
+void TestYay0()
+{
+    const std::vector<uint8_t> file = MakeYay0(30, {0xe8000000}, {0x4002, 0x0009}, std::string("abcd\x02", 5));
+    const std::vector<uint8_t> cut = MakeYay0(5, {0xe8000000}, {0x4002}, "abc");
+
+    std::vector<uint8_t> out, cut_out;
+    const std::string error = ErrorOf([&] { out = rip::UnpackYay0(file); });
+    const std::string cut_error = ErrorOf([&] { cut_out = rip::UnpackYay0(cut); });
+
+    const std::string expected = "abcabcabcdabcabcabcdabcabcabcd";
+    Check(error.empty() && out == std::vector<uint8_t>(expected.begin(), expected.end()), "Yay0's literals and copies");
+    Check(cut_error.empty() && cut_out == std::vector<uint8_t>{'a', 'b', 'c', 'a', 'b'},
+          "a copy stops at the unpacked size");
+}
+
+void TestDamagedYay0()
+{
+    std::vector<uint8_t> no_magic = MakeYay0(3, {0xe0000000}, {}, "abc");
+    no_magic[3] = '1';
+    Check(!ErrorOf([&no_magic] { rip::UnpackYay0(no_magic); }).empty(), "a file without \"Yay0\" is refused");
+
+    const std::vector<uint8_t> early = MakeYay0(4, {0}, {0x1000}, "");
+    Check(!ErrorOf([&early] { rip::UnpackYay0(early); }).empty(), "a copy from before the start is refused");
+
+    const std::vector<uint8_t> short_table = MakeYay0(4, {0xf0000000}, {}, "abc");
+    Check(!ErrorOf([&short_table] { rip::UnpackYay0(short_table); }).empty(),
+          "a table that ends before the unpacked size is refused");
+
+    const std::vector<uint8_t> too_big = MakeYay0(64u << 20 | 1, {0x80000000}, {}, "a");
+    Check(!ErrorOf([&too_big] { rip::UnpackYay0(too_big); }).empty(), "a size over 64 MiB is refused");
+}
+
 } // namespace
 
 int main()
@@ -143,6 +206,8 @@ int main()
     TestSections();
     TestDamaged();
     TestControllers();
+    TestYay0();
+    TestDamagedYay0();
 
     return xsflib::testing::Summary("musyx");
 }

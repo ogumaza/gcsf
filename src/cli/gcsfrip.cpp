@@ -32,6 +32,7 @@
 #include <regex>
 #include <span>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -107,13 +108,34 @@ struct GameLibrary
     std::vector<jaudio::WaveSystem> systems;
 };
 
+// A game's ID for messages, with \xNN for each byte outside printable ASCII. The NDDEMO disc's ID holds a NUL.
+std::string PrintableId(std::string_view id)
+{
+    std::string text;
+    for (const char c : id)
+    {
+        const auto byte = static_cast<unsigned char>(c);
+        if (byte >= 0x20 && byte < 0x7f)
+        {
+            text += c;
+            continue;
+        }
+
+        char escape[8];
+        std::snprintf(escape, sizeof(escape), "\\x%02x", static_cast<unsigned>(byte));
+        text += escape;
+    }
+
+    return text;
+}
+
 // Prints the game's sounds, one per line, with their IDs and whether each is music or a stream, then the sequences
 // that no sound plays. Only a game with a driver profile gets here: the profile names the archive that lists the
 // sounds.
 void PrintSounds(const disc::GameFiles& game, const std::vector<rip::Sound>& sounds,
                  const std::vector<rip::UnplayedSequence>& unplayed)
 {
-    std::printf("%s (%s), driver profile found\n", game.Title().c_str(), game.GameId().c_str());
+    std::printf("%s (%s), driver profile found\n", game.Title().c_str(), PrintableId(game.GameId()).c_str());
     for (std::size_t i = 0; i < sounds.size(); i++)
     {
         const char* kind = sounds[i].music ? "music" : sounds[i].stream ? "stream" : "";
@@ -228,11 +250,11 @@ const rip::GameProfile* OpenGame(const std::string& input, disc::GameFiles& game
         std::fprintf(stderr,
                      "error: %s (%s) has no driver profile. GCSF rips games in game mode. Game mode requires a "
                      "profile for the game's code. Supported:",
-                     game.Title().c_str(), game.GameId().c_str());
+                     game.Title().c_str(), PrintableId(game.GameId()).c_str());
         const char* separator = " ";
         for (const rip::GameProfile& known : rip::KnownProfiles())
         {
-            std::fprintf(stderr, "%s%s (%s)", separator, known.name, known.game_id);
+            std::fprintf(stderr, "%s%s (%s)", separator, known.name, PrintableId(known.game_id).c_str());
             separator = ", ";
         }
 

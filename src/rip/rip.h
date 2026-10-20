@@ -14,6 +14,7 @@
 #include <set>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -69,9 +70,15 @@ enum class Driver : uint8_t
     // driver/colosseum_bonus.c: the sound library of the Pokémon Colosseum Bonus Disc's download program, with the
     // effects' scripts and samples.
     kColosseumBonus,
+    // driver/musyx_upload.c: driver/musyx.c for a game whose sample file doesn't fit in main memory. MusyX reads each
+    // group's samples from the file through its upload callback. The rip's catalogue is the same as for kMusyX.
+    kMusyXUpload,
     // driver/musyx.c: MusyX's functions, not a game's layer over them. It loads the groups that a sound of the rip's
     // catalogue names (see GameProfile::musyx_files).
     kMusyX,
+    // driver/mario_party.c: Hudson's sound manager over MusyX, in Mario Party 4. It loads the base groups and the group
+    // set that a .minigcsf names.
+    kMarioParty,
 };
 
 // Where a game for driver/musyx.c keeps its MusyX files. The ripper gathers them into the catalogue of the game's
@@ -102,9 +109,19 @@ enum class MusyXFiles : uint8_t
     // Paper Mario: The Thousand-Year Door's files: one set of MusyX's files, sound/proj/pmario, and the table of the
     // game's sounds in its code (GameProfile::musyx_effects).
     kPaperMario,
+    // Pokémon Channel's files: one set of MusyX's files, en/pch/pchsound, and the table of the game's music in its
+    // code (GameProfile::musyx_songs). The game's sound viewer, pch/scripts/sndviewer.pkc, names the sounds.
+    kPokemonChannel,
     // Star Wars Rogue Squadron III: Rebel Strike's files: audio/data in the pack Rogue3/data.dat holds the banks of
     // groups. Rogue Leader's pack has the same layout. The rip takes the effects that the banks' projects list.
     kRebelStrike,
+    // Nintendo Puzzle Collection's modules: the menu and three games, each a module of the game's code that Yay0
+    // packs. A module holds its songs and MusyX's files, or a table of where another file holds them (see
+    // GatherPuzzleCollection).
+    kPuzzleCollection,
+    // The NDDEMO tech demo's files: a table of the songs' paths in the demo's code (GameProfile::musyx_songs), the
+    // songs' files, and one set of MusyX's files in audio/.
+    kNdDemo,
 };
 
 // A reverb of MusyX at `block` in the game's memory, and the settings that the game gives it. The reverb is a standard
@@ -117,6 +134,13 @@ struct MusyXReverb
     bool high = false;
     float crosstalk = 0;
 };
+
+// Where some of driver/musyx.c's parameters lie among the profile's words (GameProfile::params): the numbers of voices
+// and of studios that sndInit takes, and studio 0's aux effects. The aux effects take the callbacks of aux A and aux
+// B, then their blocks, then their preparations. The parameters start at DriverBlock::kProfileOffset. A sound's words
+// can change the aux effects before the driver sets them up (see MusyXFiles::kPuzzleCollection).
+inline constexpr uint32_t kMusyXVoices = 19, kMusyXStudios = 22;
+inline constexpr uint32_t kMusyXAuxCallbacks = 35, kMusyXAuxBlocks = 37, kMusyXAuxPreparations = 39;
 
 // What the length analysis reads of MusyX's voices to follow an effect. Each voice of MusyX has two parts. A
 // synthesizer voice runs the voice's macro. A DSP voice plays the voice's sample. The word at `synth` points at the
@@ -209,7 +233,7 @@ struct ScenePiece
 struct GameProfile
 {
     const char* name = nullptr;
-    const char* game_id = nullptr;  // "G4SE01"
+    std::string_view game_id = {};  // six bytes, such as "G4SE01". They may hold a NUL
     const char* dol_sha1 = nullptr; // the main.dol that the addresses belong to
     uint32_t main = 0;              // patched to branch to the driver
 
@@ -295,6 +319,17 @@ struct GameProfile
     // at the song's name. Such a game keeps every song in its sound files. The library holds `bank_files` whole.
     uint32_t named_songs = 0, named_song_count = 0, named_song_size = 0, named_song_name = 0;
 
+    // A game for driver/mario_party.c: its MusyX is under Hudson's sound manager. `bank_files` holds the sound
+    // manager's file of sound data. The library holds it whole. Of the stream file at `stream_file`, the library holds
+    // what the sound manager reads at start-up: the header and the tables, up to the streams' samples. The game's sound
+    // test lists the songs: `sound_test_count` entries of 16 bytes from offset `sound_test` in the file
+    // `sound_test_module`. That file is one of the game's modules. The songs' names are messages in the message file
+    // `messages` (see MsmSongs).
+    const char* stream_file = nullptr;
+    const char* sound_test_module = nullptr;
+    uint32_t sound_test = 0, sound_test_count = 0;
+    const char* messages = nullptr;
+
     // A game for driver/musyx.c: where it keeps its MusyX files, and the table of songs in its code (see MusyXFiles).
     // A table without an end marker holds `musyx_song_count` entries. A game whose main.dol is a loader for a second
     // DOL keeps that DOL at `embedded_dol`. `params` holds the driver's parameters from os_sleep_thread on. The
@@ -318,6 +353,17 @@ struct GameProfile
     uint32_t song_reverbs = 0;
     MusyXReverb other_reverb = {};
 
+    // The callback and the preparation of MusyX's standard reverb, for a game whose sounds can give aux A that reverb
+    // in place of the effect in `params`. `other_reverb` then holds the reverb's block and settings (see
+    // MusyXFiles::kPuzzleCollection).
+    std::array<uint32_t, 2> standard_reverb = {};
+
+    // The word in MusyX's state that holds the numbers of voices, for a game whose sounds limit them in other ways
+    // than sndInit does. The word holds four counts, a byte each: all the voices, those for music, those for effects,
+    // and the studios. sndInit sets all four. sndSetMaxVoices sets the two in the middle (see
+    // MusyXFiles::kPuzzleCollection).
+    uint32_t musyx_voice_limits = 0;
+
     // What the length analysis reads of MusyX: the heads of the two lists of the songs that play, at `song_lists`, and
     // how often each section of a song has looped (see MusyXSections in rip/musyx_catalogue.h). MusyX counts a
     // section's loops in a halfword. The 16 sections' counts are `section_loop_size` bytes apart from `section_loops`.
@@ -332,6 +378,9 @@ struct GameProfile
     // A game whose code names its effects in a table: `musyx_effect_count` rows from `musyx_effects` (see
     // MusyXFiles).
     uint32_t musyx_effects = 0, musyx_effect_count = 0;
+    // Pokémon Channel's sound viewer: the offsets in its script of the viewer's names and of the code that gives each
+    // name's effect (see MusyXFiles::kPokemonChannel).
+    uint32_t viewer_names = 0, viewer_effects = 0;
     // Rebel Strike maps part of its code and data through the CPU's page table. main.dol holds that part at
     // `packed_module`: two big-endian words, its packed size and its size, then the part, a DOL that zlib packs. The
     // rip unpacks it and places each of its sections `module_offset` bytes above the section's address. The profile's

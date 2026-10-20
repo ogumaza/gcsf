@@ -3,12 +3,13 @@
 GCSF is a PSF-family music rip format for Nintendo GameCube sequenced audio. It covers the music and sound effects
 that GameCube games play through JAudio, the sound library of Nintendo EAD's JSystem. GCSF reads both of JAudio's
 generations: JAudio1 and JAudio2. MusyX is Factor 5's sound library. GCSF also covers the songs that a game plays
-through it. GCSF rips the sound effects of four MusyX games too: Metroid Prime, Metroid Prime 2: Echoes, Paper Mario:
-The Thousand-Year Door and Star Wars Rogue Squadron III: Rebel Strike. Final Fantasy Crystal Chronicles plays its music
-and its sound effects through Square's Red driver. GCSF covers them too. Animal Crossing plays its music and its sound
-effects through a port of Nintendo's sound library for the Nintendo 64. GCSF covers those as well. On the Pokémon
-Colosseum Bonus Disc, HAL Laboratory's sound library plays the sequenced sound effects. GCSF rips those. GCSF is the
-GameCube counterpart of the DS formats 2SF and NCSF.
+through it. GCSF rips the sound effects of five MusyX games too: Metroid Prime, Metroid Prime 2: Echoes, Paper Mario:
+The Thousand-Year Door, Star Wars Rogue Squadron III: Rebel Strike and Pokémon Channel. Pokémon Channel plays its music
+as MusyX effects. GCSF rips that music too. Final Fantasy Crystal Chronicles plays its music and its sound effects
+through Square's Red driver. GCSF covers them too. Animal Crossing plays its music and its sound effects through a port
+of Nintendo's sound library for the Nintendo 64. GCSF covers those as well. On the Pokémon Colosseum Bonus Disc, HAL
+Laboratory's sound library plays the sequenced sound effects. GCSF rips those. GCSF is the GameCube counterpart of the
+DS formats 2SF and NCSF.
 
 A GCSF rip contains the game's code. The player runs that code on an emulated GameCube: the game's OS, its sound
 library and its DSP program. The game plays the sound itself. The mixing, filtering and resampling therefore match the
@@ -53,14 +54,28 @@ names a song after its file, for example `title_song`. Resident Evil Zero (USA) 
 songs of its part of the game. The first holds 87 and the second 137. 59 songs are on both discs. The songs include the
 music of 16 cutscenes and the ambiences of the game's areas. One song makes no sound. GCSF rips the others. A rip names
 a song as the game's code does, for example `bgm_00`. A rip's library takes the disc's number, for example
-`ResidentEvilZeroDisc1.gcsflib`. Many of the game's cutscenes stream their music. GCSF doesn't rip streams. GCSF also
+`ResidentEvilZeroDisc1.gcsflib`. Many of the game's cutscenes stream their music. GCSF doesn't rip streams. The
+NDDEMO tech demo is a GameCube disc that never went on sale. GCSF rips its nine songs. A rip names a song after its
+file, for example `coins`. GCSF also
 supports the music and the sound effects of Animal Crossing (USA). The game keeps no names for them. A rip names a piece
 after the game's number for it, for example `bgm046`. A piece that plays the hour is ripped once for each weather that
 changes it, for example `bgm001-snow`. The museum's piece is ripped once for each room, for example `bgm088-fish`. An
 effect takes the numbers of its bank and its place in the bank, for example `se2-017`. For the Pokémon Colosseum Bonus
 Disc (USA), GCSF rips the sound effects. They play in the disc's program that sends Jirachi to a Game Boy Advance. That
 program is a disc image inside the disc. A rip takes each effect's name from the program's list of names, for example
-`SFX_cancel`.
+`SFX_cancel`. Pokémon Channel (USA) plays each of its 38 pieces of music as a MusyX effect that plays a stereo
+recording. GCSF rips them as music. GCSF also rips the game's other sound effects. A rip names a sound as the game's
+sound viewer does, for example `SND_SUOU`. A sound that the viewer doesn't name is named after its set and its ID, for
+example `pchsound-1064`. The TV programmes' themes play as sound effects. A rip lists them with the effects. GCSF rips
+the 76 songs that the sound test of Mario Party 4 (USA, disc version 1) lists. A rip names a song as the sound test
+does, for example `Try Everything`. The sound test's 14 streams aren't ripped. Neither are the game's sound effects and
+voices.
+
+Nintendo Puzzle Collection (Japan) holds a menu and three games: Dr. Mario, Panel de Pon and Yoshi's Cookie. GCSF rips
+their 118 songs: 9 of the menu, 24 of Dr. Mario, 59 of Panel de Pon and 26 of Yoshi's Cookie. A song's name starts with
+`menu`, `dr_mario`, `panepon` or `ycookie`. Dr. Mario's and Panel de Pon's songs then take the games' names for them,
+for example `panepon-flower_01`. The menu's songs take their IDs, for example `menu-01`. Yoshi's Cookie's songs take
+the names of their files, for example `ycookie-sng05`. The games' sound effects aren't ripped.
 
 ## Tools
 
@@ -190,9 +205,10 @@ Princess, `driver_wind_waker_blob.h` for The Wind Waker, `driver_luigis_mansion_
 WarioWare, Inc.: Mega Party Game$!, `driver_pikmin2_blob.h` for Pikmin 2, `driver_pacman_vs_blob.h` for Pac-Man Vs.,
 `driver_collectors_edition_blob.h` for The Legend of Zelda: Collector's Edition, `driver_crystal_chronicles_blob.h` for
 Final Fantasy Crystal Chronicles, `driver_animal_crossing_blob.h` for Animal Crossing, `driver_colosseum_bonus_blob.h`
-for the Pokémon Colosseum Bonus Disc and `driver_musyx_blob.h` for Metroid Prime, Metroid Prime 2: Echoes, Paper Mario:
-The Thousand-Year Door, Tales of Symphonia, Star Fox Adventures, Rogue Leader, Rebel Strike, Pokémon Colosseum and
-Resident Evil Zero. Building GCSF itself requires no PowerPC toolchain.
+for the Pokémon Colosseum Bonus Disc, `driver_musyx_blob.h` for Metroid Prime, Metroid Prime 2: Echoes, Paper Mario: The
+Thousand-Year Door, Tales of Symphonia, Star Fox Adventures, Rogue Leader, Rebel Strike, Pokémon Colosseum, Resident
+Evil Zero, Nintendo Puzzle Collection and the NDDEMO tech demo, `driver_musyx_upload_blob.h` for Pokémon Channel, and
+`driver_mario_party_blob.h` for Mario Party 4. Building GCSF itself requires no PowerPC toolchain.
 
 ## Licence
 
