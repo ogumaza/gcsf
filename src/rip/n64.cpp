@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "ntdlib/disc/game.h"
 #include "ntdlib/dol.h"
 #include "ntdlib/jaudio/game_lengths.h"
 #include "ntdlib/jaudio/loop_finder.h"
@@ -26,6 +27,7 @@
 #include "gcsf/format.h"
 #include "gcsf/player.h"
 #include "rip/analysis.h"
+#include "rip/rip.h"
 #include "rip/sound_libraries.h"
 
 namespace gcsf::rip
@@ -547,10 +549,9 @@ std::optional<Timing> AnalyzeN64Sound(Player& player, const GameProfile& profile
     using ntdlib::jaudio::FramesToMs;
     using ntdlib::jaudio::LoopFinder;
     using ntdlib::jaudio::TrackEvent;
-    constexpr const ntdlib::jaudio::GameLengthRules& rules = kLengthRules;
     const auto ms = [](uint64_t frames)
     {
-        return FramesToMs(frames, rules.sample_rate);
+        return FramesToMs(frames, kLengthRules.sample_rate);
     };
 
     AnalysisMachine machine(player);
@@ -564,7 +565,7 @@ std::optional<Timing> AnalyzeN64Sound(Player& player, const GameProfile& profile
     };
 
     // Play until the sound ends, loops twice, holds, falls silent for good or reaches the limit.
-    std::vector<int16_t> block(rules.block_frames * 2);
+    std::vector<int16_t> block(kLengthRules.block_frames * 2);
     std::optional<LoopFinder> finder;
     std::optional<uint64_t> first_sound;
     uint64_t last_sound = 0;
@@ -573,10 +574,10 @@ std::optional<Timing> AnalyzeN64Sound(Player& player, const GameProfile& profile
     {
         if (!first_sound)
         {
-            return {rules.tail_ms, 0, true};
+            return {kLengthRules.tail_ms, 0, true};
         }
 
-        return {ms(last_sound + 1) + rules.tail_ms, 0, false};
+        return {ms(last_sound + 1) + kLengthRules.tail_ms, 0, false};
     };
 
     const auto changes = [](uint8_t code)
@@ -584,15 +585,15 @@ std::optional<Timing> AnalyzeN64Sound(Player& player, const GameProfile& profile
         return code != kN64Still;
     };
 
-    while (ms(frames) < rules.limit_ms)
+    while (ms(frames) < kLengthRules.limit_ms)
     {
         tracks.Events().clear();
-        if (machine.Render(block.data(), rules.block_frames) != rules.block_frames)
+        if (machine.Render(block.data(), kLengthRules.block_frames) != kLengthRules.block_frames)
         {
             return std::nullopt;
         }
 
-        for (std::size_t i = 0; i < rules.block_frames; i++)
+        for (std::size_t i = 0; i < kLengthRules.block_frames; i++)
         {
             if (xsflib::rip::Audible(std::span<const int16_t>(&block[2 * i], 2)))
             {
@@ -604,7 +605,7 @@ std::optional<Timing> AnalyzeN64Sound(Player& player, const GameProfile& profile
         const uint32_t handle = machine.Word(handle_address);
         if (handle && !finder)
         {
-            finder.emplace(tracks.Start(handle), rules.sample_rate, +changes);
+            finder.emplace(tracks.Start(handle), kLengthRules.sample_rate, +changes);
         }
 
         // The tracks' loops. Loops before the first sound don't count.
@@ -614,7 +615,7 @@ std::optional<Timing> AnalyzeN64Sound(Player& player, const GameProfile& profile
             const LoopFinder::Verdict verdict = finder ? finder->Take(event, sounded) : LoopFinder::Verdict::kNone;
             if (verdict == LoopFinder::Verdict::kLoops)
             {
-                return Timing{ms(event.frame), rules.loop_fade_ms, false};
+                return Timing{ms(event.frame), kLengthRules.loop_fade_ms, false};
             }
 
             if (verdict == LoopFinder::Verdict::kEnded)
@@ -623,7 +624,7 @@ std::optional<Timing> AnalyzeN64Sound(Player& player, const GameProfile& profile
             }
         }
 
-        frames += rules.block_frames;
+        frames += kLengthRules.block_frames;
         if (finder)
         {
             finder->TakeWaits(read_wait);
@@ -636,7 +637,7 @@ std::optional<Timing> AnalyzeN64Sound(Player& player, const GameProfile& profile
             released = frames;
         }
 
-        if (released && (ms(frames - std::max(*released, last_sound)) >= rules.tail_ms ||
+        if (released && (ms(frames - std::max(*released, last_sound)) >= kLengthRules.tail_ms ||
                          ms(frames - *released) >= ntdlib::jaudio::kStillMs))
         {
             return ended();
@@ -645,15 +646,15 @@ std::optional<Timing> AnalyzeN64Sound(Player& player, const GameProfile& profile
         // A sound that holds loops where it holds, if it still sounds.
         if (first_sound && finder && finder->Holds(frames))
         {
-            if (ms(frames - last_sound) <= rules.holding_ms)
+            if (ms(frames - last_sound) <= kLengthRules.holding_ms)
             {
-                return Timing{ms(frames), rules.loop_fade_ms, false};
+                return Timing{ms(frames), kLengthRules.loop_fade_ms, false};
             }
 
             return ended();
         }
 
-        if (first_sound && ms(frames - last_sound) >= rules.silence_ms)
+        if (first_sound && ms(frames - last_sound) >= kLengthRules.silence_ms)
         {
             return ended();
         }
@@ -664,7 +665,7 @@ std::optional<Timing> AnalyzeN64Sound(Player& player, const GameProfile& profile
         return ended();
     }
 
-    return Timing{rules.limit_ms, rules.loop_fade_ms, false};
+    return Timing{kLengthRules.limit_ms, kLengthRules.loop_fade_ms, false};
 }
 
 } // namespace

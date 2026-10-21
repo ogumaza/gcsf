@@ -12,11 +12,13 @@
 #include <string>
 #include <vector>
 
+#include "ntdlib/disc/game.h"
 #include "xsflib/binary.h"
 
 #include "gcsf/format.h"
 #include "gcsf/player.h"
 #include "rip/analysis.h"
+#include "rip/rip.h"
 #include "rip/sound_libraries.h"
 
 namespace gcsf::rip

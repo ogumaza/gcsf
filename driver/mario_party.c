@@ -17,11 +17,11 @@
  *   - the base groups that the game's boot module loads;
  *   - the group set that the game's sound test loads for the song;
  *   - the song, by its number in the sound manager's table. The game's play function starts it the same way.
- * The driver's thread then sleeps for good. The song plays from the audio and DSP interrupts. The sound manager runs its
- * fades and its streams from the audio interface's interrupt. The OS's idle loop runs while no thread can. A step that
- * fails stops the driver with its number in the status word: 1 for the driver's check of its parameter block, 2 for the
- * heap, 3 for msmSysInit, 4 for the base groups, 5 for the group set and 6 for the song. `driver_params.status` reports
- * the driver's progress to the player (see docs/gcsf.md).
+ * The driver's thread then sleeps for good. The song plays from the audio and DSP interrupts. The sound manager runs
+ * its fades and its streams from the audio interface's interrupt. The OS's idle loop runs while no thread can. A step
+ * that fails stops the driver with its number in the status word: 1 for the driver's check of its parameter block, 2
+ * for the heap, 3 for msmSysInit, 4 for the base groups, 5 for the group set and 6 for the song. `driver_params.status`
+ * reports the driver's progress to the player (see docs/gcsf.md).
  *
  * The driver hands out the OS's arena from the bottom up and never takes memory back. The sound manager reads a group's
  * samples into a buffer and moves them to ARAM. The game then frees the buffer. The driver keeps it.

@@ -37,14 +37,14 @@ class System;
 class Player : public xsflib::player::PlayerBase<Player, LoadedSet>
 {
 public:
-    // The rate players report, the audio interface's DMA rate rounded down: 32,028 Hz.
-    static constexpr int kSampleRate = kPlayerSampleRate;
-
     // A snapshot of the player between emulation steps, with the audio that the player has rendered but not returned
     // yet. Unchanged memory pages are shared with the snapshot taken before it. The snapshot points at this player's
     // emulation and can only be restored to this player before the next Start.
     struct SourceSnapshot;
     using Snapshot = xsflib::player::Snapshot<SourceSnapshot>;
+
+    // The rate players report, the audio interface's DMA rate rounded down: 32,028 Hz.
+    static constexpr int kSampleRate = kPlayerSampleRate;
 
     Player();
     ~Player();
@@ -91,10 +91,9 @@ private:
     bool StartSource();
     bool RunStep();
 
-    // The driver reports status 2 once the sound has finished.
     bool Finished() const
     {
-        return DriverStatus() == 2;
+        return DriverStatus() == xsflib::player::kDriverFinished;
     }
 
     std::vector<int16_t>& Output()

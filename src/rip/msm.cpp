@@ -11,11 +11,14 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "ntdlib/disc/game.h"
 #include "xsflib/binary.h"
 
 #include "gcsf/format.h"
+#include "rip/rip.h"
 #include "rip/sound_libraries.h"
 
 namespace gcsf::rip
@@ -54,7 +57,6 @@ char Glyph(uint8_t c)
     static constexpr Mark kMarks[] = {{0x3d, '-'}, {0x5c, '\''}, {0x7e, '&'}, {0x82, ','},
                                       {0x85, '.'}, {0xc2, '!'},  {0xc3, '?'}};
     const auto found = std::find_if(std::begin(kMarks), std::end(kMarks), [c](const Mark& m) { return m.code == c; });
-
     return found != std::end(kMarks) ? found->mark : '_';
 }
 

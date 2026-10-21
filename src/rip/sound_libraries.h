@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "ntdlib/disc/game.h"
 #include "ntdlib/dol.h"
 #include "ntdlib/jaudio/wave_system.h"
 

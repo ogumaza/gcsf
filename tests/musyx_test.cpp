@@ -58,6 +58,7 @@ std::vector<uint8_t> MakeSong(const std::vector<uint16_t>& last, const std::vect
 void TestWithoutSections()
 {
     const rip::MusyXSections looping = rip::SectionsOf(MakeSong({kNoTrack, kLoop, kEnd, kLoop}, {}));
+
     bool all_in_0 = true;
     for (const uint8_t section : looping.of_track)
     {
@@ -85,8 +86,8 @@ void TestDamaged()
     cut.resize(cut.size() - kEntry);
     Check(rip::SectionsOf(cut).looping == 1u << 1, "a track whose regions run past the end of the file doesn't loop");
 
-    const std::vector<uint8_t> header(0x10);
-    Check(rip::SectionsOf(header).looping == 0, "a file shorter than a header has no loops");
+    const std::vector<uint8_t> kShortFile(0x10);
+    Check(rip::SectionsOf(kShortFile).looping == 0, "a file shorter than a header has no loops");
 
     std::vector<uint8_t> no_table = MakeSong({kLoop}, {5});
     xsflib::StoreBe32(no_table.data() + 0x54, static_cast<uint32_t>(no_table.size()));
@@ -161,6 +162,7 @@ std::vector<uint8_t> MakeYay0(uint32_t size, const std::vector<uint32_t>& masks,
     }
 
     std::copy(bytes.begin(), bytes.end(), file.begin() + bytes_at);
+
     return file;
 }
 
@@ -175,8 +177,9 @@ void TestYay0()
     const std::string error = ErrorOf([&] { out = rip::UnpackYay0(file); });
     const std::string cut_error = ErrorOf([&] { cut_out = rip::UnpackYay0(cut); });
 
-    const std::string expected = "abcabcabcdabcabcabcdabcabcabcd";
-    Check(error.empty() && out == std::vector<uint8_t>(expected.begin(), expected.end()), "Yay0's literals and copies");
+    const std::string kExpected = "abcabcabcdabcabcabcdabcabcabcd";
+    Check(error.empty() && out == std::vector<uint8_t>(kExpected.begin(), kExpected.end()),
+          "Yay0's literals and copies");
     Check(cut_error.empty() && cut_out == std::vector<uint8_t>{'a', 'b', 'c', 'a', 'b'},
           "a copy stops at the unpacked size");
 }

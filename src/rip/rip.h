@@ -20,8 +20,10 @@
 
 #include "ntdlib/disc/containers.h"
 #include "ntdlib/disc/game.h"
+#include "ntdlib/disc/image.h"
 #include "ntdlib/jaudio/archive.h"
 #include "ntdlib/jaudio/game_lengths.h"
+#include "ntdlib/jaudio/wave_system.h"
 #include "xsflib/rip/length.h"
 
 #include "gcsf/format.h"
@@ -626,6 +628,8 @@ public:
                                                         std::size_t* group_count = nullptr) const;
 
 private:
+    struct Impl;
+
     // The waves that the sound plays. The sound plays with no wave group loaded. Each note still looks up its wave,
     // loaded or not. A lookup counts as a sound. The play ends where Analyze would end it. Returns nullopt when the
     // sound can't be played, and an empty list when it plays no wave.
@@ -635,8 +639,6 @@ private:
     // if it isn't null. For FindWaves, `lookups_sound` makes each lookup count as a sound.
     std::optional<Timing> Play(uint32_t id, const FileChunk* file, const std::vector<uint32_t>* waves,
                                std::set<jaudio::WaveUse>* found, bool lookups_sound) const;
-
-    struct Impl;
 
     std::unique_ptr<Impl> impl_;
 };

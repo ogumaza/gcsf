@@ -89,6 +89,7 @@ struct SetFormat
 {
     using ProcessDescriptor = gcsf::ProcessDescriptor;
     using ArchiveDescriptor = void; // GCSF has no archive mode
+
     static constexpr uint8_t kPsfVersion = kPsfVersionGcsf;
     static constexpr const char* kName = "GCSF";
     static constexpr xsflib::psf::DriverBlockLayout kDriverBlock{.address = DriverBlock::kAddress,

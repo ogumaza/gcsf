@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "ntdlib/jaudio/game_lengths.h"
+#include "ntdlib/ppc/cpu.h"
 #include "xsflib/bytes.h"
 #include "xsflib/rip/length.h"
 

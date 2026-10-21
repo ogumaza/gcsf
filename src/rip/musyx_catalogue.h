@@ -14,6 +14,8 @@
 #include <string>
 #include <vector>
 
+#include "ntdlib/disc/game.h"
+
 #include "rip/rip.h"
 
 namespace gcsf::rip

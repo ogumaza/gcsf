@@ -115,15 +115,15 @@ void TestDamagedLzss()
 std::vector<uint8_t> MakeArchive()
 {
     std::vector<uint8_t> archive(0x104);
-    const std::string magic = "FSYS", names = std::string("first_song") + '\0' + "second" + '\0';
-    std::copy(magic.begin(), magic.end(), archive.begin());
+    const std::string kMagic = "FSYS", kNames = std::string("first_song") + '\0' + "second" + '\0';
+    std::copy(kMagic.begin(), kMagic.end(), archive.begin());
     xsflib::StoreBe32(archive.data() + 0x04, 0x104);
     xsflib::StoreBe32(archive.data() + 0x0c, 2);
     xsflib::StoreBe32(archive.data() + 0x18, 0x40);
     xsflib::StoreBe32(archive.data() + 0x40, 0x60);
     xsflib::StoreBe32(archive.data() + 0x60, 0x80);
     xsflib::StoreBe32(archive.data() + 0x64, 0xa8);
-    std::copy(names.begin(), names.end(), archive.begin() + 0xd0);
+    std::copy(kNames.begin(), kNames.end(), archive.begin() + 0xd0);
 
     const std::vector<uint8_t> compressed = Lzss(9, kAbStream);
     std::copy(compressed.begin(), compressed.end(), archive.begin() + 0xe8);
@@ -134,8 +134,8 @@ std::vector<uint8_t> MakeArchive()
     xsflib::StoreBe32(archive.data() + 0x94, static_cast<uint32_t>(compressed.size()));
     xsflib::StoreBe32(archive.data() + 0xa4, 0xd0);
 
-    const std::string raw = "RAW!";
-    std::copy(raw.begin(), raw.end(), archive.begin() + 0x100);
+    const std::string kRaw = "RAW!";
+    std::copy(kRaw.begin(), kRaw.end(), archive.begin() + 0x100);
     xsflib::StoreBe32(archive.data() + 0xa8, 0x02ee0800);
     xsflib::StoreBe32(archive.data() + 0xac, 0x100);
     xsflib::StoreBe32(archive.data() + 0xb0, 4);

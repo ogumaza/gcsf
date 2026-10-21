@@ -14,7 +14,9 @@
 #include <utility>
 #include <vector>
 
+#include "ntdlib/disc/game.h"
 #include "ntdlib/dol.h"
+#include "ntdlib/ppc/cpu.h"
 #include "xsflib/ascii.h"
 #include "xsflib/binary.h"
 #include "xsflib/bytes.h"
@@ -25,6 +27,7 @@
 #include "gcsf/player.h"
 #include "rip/analysis.h"
 #include "rip/musyx_catalogue.h"
+#include "rip/rip.h"
 #include "rip/sound_libraries.h"
 
 namespace gcsf::rip
@@ -293,7 +296,6 @@ private:
 std::optional<CatalogueSound> LibrarySound(const LoadedSet& library, uint32_t id)
 {
     const std::vector<uint8_t>* catalogue = library.File(kMusyXCatalogue);
-
     return catalogue != nullptr ? ReadCatalogueSound(*catalogue, id) : std::nullopt;
 }
 
@@ -308,7 +310,6 @@ MusyXSections SoundSections(const LoadedSet& library, uint32_t id)
     }
 
     const std::vector<uint8_t>* file = library.File(MusyXPath(sound->song, ".sng"));
-
     return file != nullptr ? SectionsOf(*file) : MusyXSections{};
 }
 
@@ -316,7 +317,6 @@ MusyXSections SoundSections(const LoadedSet& library, uint32_t id)
 bool IsMusyXEffect(const LoadedSet& library, uint32_t id)
 {
     const std::optional<CatalogueSound> sound = LibrarySound(library, id);
-
     return sound && sound->kind == MusyXCatalogue::Kind::kEffect;
 }
 
@@ -351,7 +351,6 @@ public:
     xsflib::rip::VoicePlace Voice(std::size_t i) const override
     {
         const VoiceState& v = now_[i];
-
         return {.playing = v.state != 0, .loops = v.loop != 0, .position = v.position};
     }
 

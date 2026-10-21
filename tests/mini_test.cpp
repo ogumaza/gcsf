@@ -3,6 +3,7 @@
 // Unit tests for the .minigcsf's program (rip::BuildMini): the sound's ID, the wave list for a driver that names a
 // sound's waves, and a file that replaces one of the library's files.
 
+#include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -65,31 +66,31 @@ void TestSoundOnly()
 void TestWaves()
 {
     // The wave list goes after the sound's handle: its count, then its entries.
-    const std::vector<uint32_t> waves = {0x00010002, 0x00300000};
-    const Mini mini = Parse(rip::BuildMini(0x80000004, "game.gcsflib", {}, nullptr, &waves));
+    const std::vector<uint32_t> kWaves = {0x00010002, 0x00300000};
+    const Mini mini = Parse(rip::BuildMini(0x80000004, "game.gcsflib", {}, nullptr, &kWaves));
 
     XSFLIB_CHECK(mini.chunks.memory.size() == 2);
     XSFLIB_CHECK(mini.chunks.memory[1].address == DriverBlock::kAddress + 0x14);
     XSFLIB_CHECK(Words(mini.chunks.memory[1]) == std::vector<uint32_t>({2, 0x00010002, 0x00300000}));
 
     // An empty list still holds its count, 0.
-    const std::vector<uint32_t> none;
-    const Mini empty = Parse(rip::BuildMini(0x80000004, "game.gcsflib", {}, nullptr, &none));
+    const std::vector<uint32_t> kNone;
+    const Mini empty = Parse(rip::BuildMini(0x80000004, "game.gcsflib", {}, nullptr, &kNone));
 
     XSFLIB_CHECK(empty.chunks.memory.size() == 2 && Words(empty.chunks.memory[1]) == std::vector<uint32_t>({0}));
 
     // A mini names at most DriverBlock::kMaxWaves waves.
-    const std::vector<uint32_t> most(DriverBlock::kMaxWaves, 7);
+    const std::vector<uint32_t> kMost(DriverBlock::kMaxWaves, 7);
 
-    XSFLIB_CHECK(Words(Parse(rip::BuildMini(1, "game.gcsflib", {}, nullptr, &most)).chunks.memory[1]).size() ==
+    XSFLIB_CHECK(Words(Parse(rip::BuildMini(1, "game.gcsflib", {}, nullptr, &kMost)).chunks.memory[1]).size() ==
                  DriverBlock::kMaxWaves + 1);
 
-    const std::vector<uint32_t> too_many(DriverBlock::kMaxWaves + 1, 7);
+    const std::vector<uint32_t> kTooMany(DriverBlock::kMaxWaves + 1, 7);
     bool refused = false;
 
     try
     {
-        rip::BuildMini(1, "game.gcsflib", {}, nullptr, &too_many);
+        rip::BuildMini(1, "game.gcsflib", {}, nullptr, &kTooMany);
     }
     catch (const std::invalid_argument&)
     {
@@ -102,12 +103,12 @@ void TestWaves()
 void TestFile()
 {
     // A file goes after the sound and the waves, and keeps its path and bytes.
-    const FileChunk file = {"Audio/JaiInit.baa", {1, 2, 3}};
-    const std::vector<uint32_t> waves = {5};
-    const Mini mini = Parse(rip::BuildMini(9, "game.gcsflib", {}, &file, &waves));
+    const FileChunk kFile = {"Audio/JaiInit.baa", {1, 2, 3}};
+    const std::vector<uint32_t> kWaves = {5};
+    const Mini mini = Parse(rip::BuildMini(9, "game.gcsflib", {}, &kFile, &kWaves));
 
     XSFLIB_CHECK(mini.chunks.memory.size() == 2 && mini.chunks.files.size() == 1);
-    XSFLIB_CHECK(mini.chunks.files[0].path == file.path && mini.chunks.files[0].data == file.data);
+    XSFLIB_CHECK(mini.chunks.files[0].path == kFile.path && mini.chunks.files[0].data == kFile.data);
 }
 
 void TestNamesWaves()

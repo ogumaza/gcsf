@@ -130,15 +130,15 @@ std::string PrintableId(std::string_view id)
 }
 
 // Prints the game's sounds, one per line, with their IDs and whether each is music or a stream, then the sequences
-// that no sound plays. Only a game with a driver profile gets here: the profile names the archive that lists the
-// sounds.
+// that no sound plays. A stream that plays as music shows as a stream: a rip leaves it out. Only a game with a driver
+// profile gets here: the profile names the archive that lists the sounds.
 void PrintSounds(const disc::GameFiles& game, const std::vector<rip::Sound>& sounds,
                  const std::vector<rip::UnplayedSequence>& unplayed)
 {
     std::printf("%s (%s), driver profile found\n", game.Title().c_str(), PrintableId(game.GameId()).c_str());
     for (std::size_t i = 0; i < sounds.size(); i++)
     {
-        const char* kind = sounds[i].music ? "music" : sounds[i].stream ? "stream" : "";
+        const char* kind = sounds[i].stream ? "stream" : sounds[i].music ? "music" : "";
         std::printf("%04zu  %08X  %-6s  %s\n", i, static_cast<unsigned>(sounds[i].id), kind, sounds[i].label.c_str());
     }
 
@@ -361,8 +361,8 @@ std::optional<GameLibrary> BuildGameLibrary(const disc::GameFiles& game, const r
             return std::nullopt;
         }
 
-        const std::vector<std::string> none;
-        const std::optional<std::vector<uint8_t>> bare = rip::BuildLibrary(game, profile, common, &error, &none);
+        const std::vector<std::string> kNone;
+        const std::optional<std::vector<uint8_t>> bare = rip::BuildLibrary(game, profile, common, &error, &kNone);
         if (!bare)
         {
             std::fprintf(stderr, "error: %s\n", error.c_str());

@@ -10,6 +10,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <iterator>
 #include <map>
 #include <memory>
@@ -23,6 +24,7 @@
 #include <vector>
 
 #include "ntdlib/disc/compression.h"
+#include "ntdlib/disc/game.h"
 #include "ntdlib/disc/header.h"
 #include "ntdlib/dol.h"
 #include "ntdlib/flipper/wave_list.h"
@@ -271,6 +273,7 @@ disc::GameFiles ReadTgc(std::shared_ptr<const std::vector<uint8_t>> tgc, const s
         }
 
         data.assign(tgc->begin() + place->second.first, tgc->begin() + place->second.first + place->second.second);
+
         return true;
     };
 
@@ -319,7 +322,6 @@ bool HasStartUpArchive(const GameProfile& profile)
 bool NamesWaves(const GameProfile& profile)
 {
     const std::optional<DriverImage> image = ImageOf(profile.driver);
-
     return image && image->wave_list;
 }
 

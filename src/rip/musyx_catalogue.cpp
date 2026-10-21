@@ -20,13 +20,17 @@
 #include <vector>
 
 #include "ntdlib/disc/compression.h"
+#include "ntdlib/disc/game.h"
 #include "ntdlib/dol.h"
 #include "xsflib/ascii.h"
 #include "xsflib/binary.h"
 #include "xsflib/bytes.h"
 #include "xsflib/text.h"
+#include "xsflib/utf8.h"
 
+#include "gcsf/format.h"
 #include "rip/fsys.h"
+#include "rip/rip.h"
 #include "rip/sound_libraries.h"
 
 namespace gcsf::rip
@@ -72,12 +76,14 @@ std::vector<PakResource> ReadPak(std::span<const uint8_t> pak, const std::vector
     {
         const uint32_t value = xsflib::LoadBe32(Part(pak, at, 4, "a pack's table").data());
         at += 4;
+
         return value;
     };
     const auto four_cc = [&pak, &at]()
     {
         const std::span<const uint8_t> bytes = Part(pak, at, 4, "a pack's table");
         at += 4;
+
         return std::string(bytes.begin(), bytes.end());
     };
 
@@ -192,6 +198,7 @@ AudioGroupSet ReadAudioGroupSet(std::span<const uint8_t> agsc)
         const uint32_t size = xsflib::LoadBe32(Part(agsc, at, 4, "an audio group set").data());
         const std::span<const uint8_t> bytes = Part(agsc, at + 4, size, "an audio group set");
         at += 4 + size;
+
         return std::vector<uint8_t>(bytes.begin(), bytes.end());
     };
 
@@ -320,6 +327,7 @@ std::vector<MusyXCatalogue::Write> SoundWrites(const GameProfile& profile, const
 
     AddReverb(writes, aux_a);
     AddReverb(writes, profile.reverbs[1]);
+
     return writes;
 }
 
@@ -345,6 +353,7 @@ std::string EffectLabel(const std::string& set, uint16_t id)
 {
     char number[8];
     std::snprintf(number, sizeof(number), "%04u", static_cast<unsigned>(id));
+
     return set + "-" + number;
 }
 
@@ -738,32 +747,6 @@ MusyXCatalogue GatherStarFox(const disc::GameFiles& game, const GameProfile& pro
 std::string Utf16Be(std::span<const uint8_t> bytes)
 {
     std::string out;
-    const auto put = [&out](uint32_t c)
-    {
-        if (c < 0x80)
-        {
-            out += static_cast<char>(c);
-        }
-        else if (c < 0x800)
-        {
-            out += static_cast<char>(0xc0 | c >> 6);
-            out += static_cast<char>(0x80 | (c & 0x3f));
-        }
-        else if (c < 0x10000)
-        {
-            out += static_cast<char>(0xe0 | c >> 12);
-            out += static_cast<char>(0x80 | (c >> 6 & 0x3f));
-            out += static_cast<char>(0x80 | (c & 0x3f));
-        }
-        else
-        {
-            out += static_cast<char>(0xf0 | c >> 18);
-            out += static_cast<char>(0x80 | (c >> 12 & 0x3f));
-            out += static_cast<char>(0x80 | (c >> 6 & 0x3f));
-            out += static_cast<char>(0x80 | (c & 0x3f));
-        }
-    };
-
     for (std::size_t at = 0; at + 2 <= bytes.size(); at += 2)
     {
         const uint32_t c = xsflib::LoadBe16(bytes.data() + at);
@@ -776,12 +759,12 @@ std::string Utf16Be(std::span<const uint8_t> bytes)
         const uint32_t low = at + 4 <= bytes.size() ? xsflib::LoadBe16(bytes.data() + at + 2) : 0;
         if (high && low >= 0xdc00 && low < 0xe000)
         {
-            put(0x10000 + ((c - 0xd800) << 10) + (low - 0xdc00));
+            xsflib::AppendUtf8(out, 0x10000 + ((c - 0xd800) << 10) + (low - 0xdc00));
             at += 2;
         }
         else
         {
-            put(c >= 0xd800 && c < 0xe000 ? 0xfffd : c);
+            xsflib::AppendUtf8(out, c);
         }
     }
 
@@ -1551,10 +1534,10 @@ std::map<uint16_t, std::string> ViewerNames(std::span<const uint8_t> script, con
 }
 
 // Pokémon Channel's sounds (see MusyXFiles::kPokemonChannel). en/pch/pchsound.proj, .pool, .sdir and .samp hold
-// every MusyX group of the game. The game's code lists its music at `musyx_songs`, in `musyx_song_count` rows of 8 bytes: the
-// effect's ID, then the number of a sound whose group the game pushes first, a big-endian word each. Each piece of
-// music is an effect. The effect's layer starts two voices that play a stereo recording, panned hard left and right.
-// The game's music function (0x80015398) pushes the group that the project gives the effect. It then starts the
+// every MusyX group of the game. The game's code lists its music at `musyx_songs`, in `musyx_song_count` rows of 8
+// bytes: the effect's ID, then the number of a sound whose group the game pushes first, a big-endian word each. Each
+// piece of music is an effect. The effect's layer starts two voices that play a stereo recording, panned hard left and
+// right. The game's music function (0x80015398) pushes the group that the project gives the effect. It then starts the
 // effect. A rip lists the music first, in the order of the table. The project's other effects follow, in the order of
 // their IDs. Each sound pushes its group alone.
 //
@@ -2342,6 +2325,7 @@ MusyXCatalogue GatherPuzzleCollection(const disc::GameFiles& game, const GamePro
     AddPuzzleGame(catalogue, files, profile, kDrMario);
     AddPuzzleGame(catalogue, files, profile, kPanelDePon);
     AddYoshisCookie(catalogue, files, profile);
+
     return catalogue;
 }
 
@@ -2437,6 +2421,7 @@ std::vector<uint8_t> UnpackYay0(std::span<const uint8_t> file)
     {
         const uint8_t* bytes = Part(file, at, count, "a Yay0 file's table").data();
         at += count;
+
         return bytes;
     };
     std::size_t masks = kHeader;
@@ -2517,15 +2502,15 @@ std::vector<uint8_t> CatalogueFile(const MusyXCatalogue& catalogue)
         throw xsflib::FormatError("the catalogue of MusyX sounds has too many entries");
     }
 
-    const uint32_t sounds_at = kHeaderSize;
-    const uint32_t groups_at = sounds_at + static_cast<uint32_t>(catalogue.entries.size()) * kSoundSize;
+    constexpr uint32_t kSoundsAt = kHeaderSize;
+    const uint32_t groups_at = kSoundsAt + static_cast<uint32_t>(catalogue.entries.size()) * kSoundSize;
     const uint32_t writes_at = groups_at + static_cast<uint32_t>(groups) * kGroupSize;
     std::vector<uint8_t> file(writes_at + writes * kWriteSize);
     uint8_t* p = file.data();
     xsflib::StoreBe32(p + kHeaderMagic, kCatalogueMagic);
     xsflib::StoreBe32(p + kHeaderVersion, kCatalogueVersion);
     xsflib::StoreBe32(p + kHeaderSounds, static_cast<uint32_t>(catalogue.entries.size()));
-    xsflib::StoreBe32(p + kHeaderSoundsAt, sounds_at);
+    xsflib::StoreBe32(p + kHeaderSoundsAt, kSoundsAt);
     xsflib::StoreBe32(p + kHeaderGroups, static_cast<uint32_t>(groups));
     xsflib::StoreBe32(p + kHeaderGroupsAt, groups_at);
     xsflib::StoreBe32(p + kHeaderWrites, static_cast<uint32_t>(writes));
@@ -2535,7 +2520,7 @@ std::vector<uint8_t> CatalogueFile(const MusyXCatalogue& catalogue)
     for (std::size_t i = 0; i < catalogue.entries.size(); i++)
     {
         const MusyXCatalogue::Entry& entry = catalogue.entries[i];
-        uint8_t* sound = p + sounds_at + i * kSoundSize;
+        uint8_t* sound = p + kSoundsAt + i * kSoundSize;
         sound[kSoundKind] = static_cast<uint8_t>(entry.kind);
         sound[kSoundVolume] = entry.volume;
         sound[kSoundPan] = entry.pan;
@@ -2588,7 +2573,6 @@ std::optional<CatalogueSound> ReadCatalogueSound(std::span<const uint8_t> file, 
     }
 
     const uint8_t* sound = file.data() + at;
-
     return CatalogueSound{.kind = static_cast<MusyXCatalogue::Kind>(sound[kSoundKind]),
                           .song = xsflib::LoadBe16(sound + kSoundSong)};
 }

@@ -13,10 +13,10 @@
 #include <cstdint>
 
 #include "ntdlib/dsp/dsp.h"
+#include "ntdlib/flipper/audio_interface.h"
 #include "ntdlib/flipper/dsp_interface.h"
 #include "ntdlib/flipper/exi.h"
 #include "ntdlib/flipper/machine.h"
-#include "ntdlib/flipper/registers.h"
 #include "ntdlib/ppc/cpu.h"
 #include "ntdlib/types.h"
 
@@ -55,10 +55,6 @@ protected:
 class System final : public ntdlib::flipper::MachineBase<System>, private SystemRegisters
 {
 public:
-    // The CPU's clock, and the bus clock that times the hardware.
-    static constexpr uint32_t kCpuClock = 486'000'000;
-    static constexpr uint32_t kBusClock = 162'000'000;
-
     // The whole system's state between runs: memory, the CPU, the DSP and the devices. It can only be restored to the
     // system it came from.
     struct Snapshot
@@ -67,6 +63,10 @@ public:
         DiscInterface::Snapshot disc_interface;
         SystemRegisters registers;
     };
+
+    // The CPU's clock, and the bus clock that times the hardware.
+    static constexpr uint32_t kCpuClock = 486'000'000;
+    static constexpr uint32_t kBusClock = 162'000'000;
 
     explicit System(Disc& disc);
 

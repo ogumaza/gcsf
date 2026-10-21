@@ -15,6 +15,8 @@
 #include <utility>
 #include <vector>
 
+#include "ntdlib/disc/game.h"
+#include "ntdlib/ppc/cpu.h"
 #include "xsflib/ascii.h"
 #include "xsflib/binary.h"
 #include "xsflib/bytes.h"
@@ -23,6 +25,7 @@
 #include "gcsf/format.h"
 #include "gcsf/player.h"
 #include "rip/analysis.h"
+#include "rip/rip.h"
 #include "rip/sound_libraries.h"
 
 namespace gcsf::rip
@@ -98,6 +101,7 @@ std::string RedLabel(const std::string& path, const RedName& name)
 {
     std::string label = path.substr(path.rfind('/') + 1);
     label.resize(label.size() - name.extension.size());
+
     return label;
 }
 
@@ -164,6 +168,7 @@ std::map<uint32_t, std::string> RedBlocks(const disc::GameFiles& game, const Gam
 {
     std::map<uint32_t, std::string> blocks = RedFiles(game, profile.block_folder, kRedBlock);
     std::erase_if(blocks, [&profile](const auto& block) { return block.first >= profile.red_blocks; });
+
     return blocks;
 }
 
@@ -172,6 +177,7 @@ std::map<uint32_t, std::string> RedSeps(const disc::GameFiles& game, const GameP
 {
     std::map<uint32_t, std::string> seps = RedFiles(game, profile.effect_folder, kRedEffect);
     std::erase_if(seps, [](const auto& sep) { return sep.first < kRedFirstSep; });
+
     return seps;
 }
 

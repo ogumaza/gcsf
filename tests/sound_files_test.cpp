@@ -8,16 +8,17 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <ios>
 #include <optional>
-#include <random>
 #include <string>
-#include <system_error>
 #include <vector>
 
+#include "ntdlib/disc/game.h"
 #include "ntdlib/jaudio/rarc.h"
 #include "ntdlib/testing/jaudio_files.h"
 #include "xsflib/bytes.h"
 #include "xsflib/testing/check.h"
+#include "xsflib/testing/temp_folder.h"
 
 #include "rip/rip.h"
 
@@ -281,16 +282,13 @@ void TestSequenceTable(const fs::path& dir)
 
 int main()
 {
-    const fs::path dir =
-        fs::temp_directory_path() / ("gcsf_sound_files_test_" + std::to_string(std::random_device{}()));
+    const xsflib::testing::TempFolder temp("gcsf_sound_files_test");
+    const fs::path& dir = temp.Path();
     TestTitle(dir);
     TestExtractedDisc(dir);
     TestNoSequenceArchive(dir);
     TestErrors(dir);
     TestSequenceTable(dir);
-
-    std::error_code error;
-    fs::remove_all(dir, error);
 
     return xsflib::testing::Summary("sound_files");
 }

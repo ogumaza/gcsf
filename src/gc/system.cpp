@@ -7,6 +7,9 @@
 #include <optional>
 
 #include "ntdlib/ppc/cpu.h"
+#include "ntdlib/types.h"
+
+#include "gc/di.h"
 
 namespace gcsf::gc
 {

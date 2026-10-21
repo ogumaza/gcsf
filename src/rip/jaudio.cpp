@@ -21,6 +21,7 @@
 #include <utility>
 #include <vector>
 
+#include "ntdlib/disc/game.h"
 #include "ntdlib/dol.h"
 #include "ntdlib/jaudio/aaf.h"
 #include "ntdlib/jaudio/archive.h"
@@ -36,6 +37,7 @@
 #include "gcsf/format.h"
 #include "gcsf/player.h"
 #include "rip/analysis.h"
+#include "rip/rip.h"
 #include "rip/sound_libraries.h"
 
 namespace gcsf::rip
@@ -363,8 +365,11 @@ std::vector<jaudio::SoundEntry> ListSounds(const GameProfile& profile, const std
     std::vector<jaudio::SoundEntry> sounds = jaudio::ReadAafSounds(sound_archive);
     if (!profile.scene_pieces.empty())
     {
-        std::erase_if(sounds, [](const jaudio::SoundEntry& sound)
-                      { return sound.source == jaudio::SoundEntry::Source::kArchive; });
+        const auto plays_archive_file = [](const jaudio::SoundEntry& sound)
+        {
+            return sound.source == jaudio::SoundEntry::Source::kArchive;
+        };
+        std::erase_if(sounds, plays_archive_file);
     }
 
     for (jaudio::SoundEntry& sound : sounds)

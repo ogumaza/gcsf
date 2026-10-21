@@ -30,12 +30,6 @@ struct Traits
     using Player = gcsf::Player;
     using Set = gcsf::LoadedSet;
 
-    static std::optional<std::string> LoadSet(const std::string& path, const xsflib::psf::FileReader& reader, Set& out,
-                                              std::string_view separators)
-    {
-        return gcsf::LoadSet(path, reader, out, separators);
-    }
-
     static constexpr const char* kName = "GCSF";
     static constexpr const char* kDecoderName = "GCSF decoder";
     static constexpr std::array<const char*, 2> kExtensions = {"minigcsf", "gcsf"};
@@ -47,6 +41,7 @@ struct Traits
 
     // {A028B073-EC7A-4407-8A1E-E022D8D56419}
     static constexpr GUID kInputGuid = {0xa028b073, 0xec7a, 0x4407, {0x8a, 0x1e, 0xe0, 0x22, 0xd8, 0xd5, 0x64, 0x19}};
+
     // Advanced preferences entries, under Decoding > GCSF decoder.
     static constexpr GUID kBranchGuid = {0x61415291, 0x2158, 0x4027, {0xbd, 0x3e, 0x6e, 0x94, 0x3c, 0x0d, 0x94, 0xb9}};
     static constexpr GUID kLengthGuid = {0xbcce6ad2, 0xaddf, 0x4298, {0x97, 0x6f, 0xbb, 0xf2, 0x68, 0x6a, 0x1d, 0xf4}};
@@ -54,6 +49,12 @@ struct Traits
     static constexpr GUID kEndlessGuid = {0xc40506c6, 0xc1b5, 0x4fdb, {0x8a, 0x88, 0x50, 0x08, 0xb2, 0x75, 0x28, 0x12}};
     static constexpr GUID kRenderAheadGuid = {
         0xae2ef02a, 0xa4af, 0x4cbd, {0xa9, 0xb4, 0xc0, 0xd7, 0x87, 0x10, 0x05, 0x12}};
+
+    static std::optional<std::string> LoadSet(const std::string& path, const xsflib::psf::FileReader& reader, Set& out,
+                                              std::string_view separators)
+    {
+        return gcsf::LoadSet(path, reader, out, separators);
+    }
 };
 
 xsflib::foobar2000::Settings<Traits> g_settings;

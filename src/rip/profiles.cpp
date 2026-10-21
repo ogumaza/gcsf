@@ -10,6 +10,7 @@
 #include <string_view>
 #include <vector>
 
+#include "ntdlib/disc/game.h"
 #include "ntdlib/flipper/z2_params.h"
 #include "xsflib/sha1.h"
 
@@ -27,6 +28,9 @@ namespace
 // for none. Bit n of `muted_children` mutes child n. `track_mute` is JASTrack::mute.
 struct FourSwordsParams
 {
+    // The words in the order of the driver's parameter block.
+    std::vector<uint32_t> Words() const;
+
     uint32_t frame_retraces = 0;
     uint32_t max_heaps = 0, system_heap_size = 0, aram_audio_size = 0, aram_graph_size = 0, aram_priorities = 0,
              audio_heap_size = 0, disc_heap_size = 0, audio_object_size = 0;
@@ -37,9 +41,6 @@ struct FourSwordsParams
     uint32_t sound_manager_offset = 0, section_offset = 0, load_wave_bank = 0, section_data_offset = 0,
              wave_banks_offset = 0, wave_arc_state_offset = 0;
     uint32_t track_mute = 0, muted_sound = 0, muted_children = 0;
-
-    // The words in the order of the driver's parameter block.
-    std::vector<uint32_t> Words() const;
 };
 
 std::vector<uint32_t> FourSwordsParams::Words() const
@@ -375,6 +376,9 @@ const GameProfile kWindWakerUsa = {
 // nothing.
 struct MarioGolfParams
 {
+    // The words in the order of the driver's parameter block.
+    std::vector<uint32_t> Words() const;
+
     uint32_t arena_lo = 0, arena_hi = 0, heap1_size = 0, heap7_size = 0, heap0_size = 0, song_heap = 0;
     uint32_t os_get_arena_lo = 0, os_get_arena_hi = 0, os_set_arena_lo = 0, os_set_arena_hi = 0, os_init_alloc = 0,
              os_create_heap = 0, os_set_current_heap = 0, os_alloc_from_heap = 0, os_current_heap = 0,
@@ -382,9 +386,6 @@ struct MarioGolfParams
     uint32_t context_init = 0, context_object = 0, heaps_init = 0, create_heap = 0, select_heap = 0;
     std::array<uint32_t, 4> before_sound = {};
     uint32_t sound_init = 0, load_banks = 0, play_song = 0, play_jingle = 0;
-
-    // The words in the order of the driver's parameter block.
-    std::vector<uint32_t> Words() const;
 };
 
 std::vector<uint32_t> MarioGolfParams::Words() const
@@ -1495,6 +1496,9 @@ const GameProfile kColosseumBonusUsa = {
 // effects, A then B. A function that the game doesn't call is 0. driver/musyx.c's Params says what each field means.
 struct MusyXParams
 {
+    // The words in the order of the driver's parameter block.
+    std::vector<uint32_t> Words() const;
+
     uint32_t os_sleep_thread = 0, os_get_arena_lo = 0, os_get_arena_hi = 0;
     std::array<uint32_t, 4> startup = {};
     uint32_t dvd_open = 0, dvd_read_async_prio = 0, dvd_get_command_block_status = 0, dvd_close = 0;
@@ -1507,9 +1511,6 @@ struct MusyXParams
     uint32_t snd_set_aux_processing_callbacks = 0;
     std::array<uint32_t, 2> aux_callback = {}, aux_user = {}, aux_prepare = {}, aux_midi = {};
     uint32_t snd_volume = 0, snd_fx_ctrl = 0, snd_fx_ctrl14 = 0;
-
-    // The words in the order of the driver's parameter block.
-    std::vector<uint32_t> Words() const;
 };
 
 std::vector<uint32_t> MusyXParams::Words() const
@@ -2267,24 +2268,25 @@ const GameProfile kPaperMarioUsa = {
 // aramSyncTransferQueue, sndMasterVolume and the master volume. driver/musyx.c's Params says what each field means.
 struct MusyXUploadParams
 {
-    MusyXParams musyx;
-    uint32_t snd_set_upload_callback = 0, aram_sync = 0, snd_master_volume = 0, master_volume = 0;
-
     // The words in the order of the driver's parameter block.
     std::vector<uint32_t> Words() const;
+
+    MusyXParams musyx;
+    uint32_t snd_set_upload_callback = 0, aram_sync = 0, snd_master_volume = 0, master_volume = 0;
 };
 
 std::vector<uint32_t> MusyXUploadParams::Words() const
 {
     std::vector<uint32_t> words = musyx.Words();
     words.insert(words.end(), {snd_set_upload_callback, aram_sync, snd_master_volume, master_volume});
+
     return words;
 }
 
 // Pokémon Channel (USA). Its sound library is MusyX 2.0, the build of Metroid Prime's. The game plays its music as
-// MusyX effects (see MusyXFiles::kPokemonChannel). One sample file holds every sample of the game, more than main memory
-// holds. The game hands MusyX the samples a chunk at a time, through MusyX's upload callback. A rip does the same
-// through driver/musyx_upload.c.
+// MusyX effects (see MusyXFiles::kPokemonChannel). One sample file holds every sample of the game, more than main
+// memory holds. The game hands MusyX the samples a chunk at a time, through MusyX's upload callback. A rip does the
+// same through driver/musyx_upload.c.
 //
 // OSInit initialises the disc. The game's start-up initialises the ARAM with a stack of 2 entries at 0x8035054C (at
 // 0x80034A0C), its queue and the audio interface. The game's sound set-up (0x8001498C) sets MusyX's memory hooks and

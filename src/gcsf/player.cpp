@@ -14,8 +14,10 @@
 #include "ntdlib/flipper/file_disc.h"
 #include "ntdlib/flipper/game_source.h"
 #include "ntdlib/ppc/cpu.h"
+#include "xsflib/player/player.h"
 
 #include "gc/system.h"
+#include "gcsf/format.h"
 
 namespace gcsf
 {
@@ -50,7 +52,7 @@ uint32_t Player::DriverStatus() const
 {
     if (!system_)
     {
-        return 1;
+        return xsflib::player::kDriverPlaying;
     }
 
     return ntdlib::flipper::DriverStatus(system_->Memory(), set_.descriptor ? set_.descriptor->status_address : 0);

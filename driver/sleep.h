@@ -2,8 +2,8 @@
 
 /*
  * The end and the failure of a driver whose thread sleeps once the sound has started: mario_golf.c, warioware.c,
- * musyx.c, crystal_chronicles.c and mario_party.c. The sound then plays from the interrupts. A driver includes this file after
- * `driver_params`. Its Params hold `status` and `os_sleep_thread`.
+ * musyx.c, crystal_chronicles.c and mario_party.c. The sound then plays from the interrupts. A driver includes this
+ * file after `driver_params`. Its Params hold `status` and `os_sleep_thread`.
  */
 
 #ifndef GCSF_DRIVER_SLEEP_H
