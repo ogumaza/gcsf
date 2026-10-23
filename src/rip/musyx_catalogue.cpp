@@ -16,6 +16,7 @@
 #include <set>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -289,6 +290,32 @@ std::vector<std::string> StringTable(std::span<const uint8_t> table)
     {
         names.push_back(TerminatedText(table.subspan(at), "a string table's string doesn't end"));
         at += names.back().size() + 1;
+    }
+
+    return names;
+}
+
+// The names of a project's effects, by their IDs, from a header of C defines that MusyX's tools write. A line
+// "#define SFX<name> <ID>" names an effect, with the ID in decimal. The define's name, "SFX" and all, is the effect's
+// name. The lines of groups and songs start with other prefixes. Of two names for one ID, the first wins.
+std::map<uint16_t, std::string> HeaderEffectNames(std::span<const uint8_t> header)
+{
+    std::map<uint16_t, std::string> names;
+    const std::string text(header.begin(), header.end());
+    std::size_t line = 0;
+    while (line < text.size())
+    {
+        const std::size_t end = std::min(text.find('\n', line), text.size());
+        unsigned id = 0;
+        char name[64] = {};
+        const std::string row = text.substr(line, end - line);
+        if (std::sscanf(row.c_str(), "#define %63s %u", name, &id) == 2 && std::string_view(name).starts_with("SFX") &&
+            id <= 0xffff)
+        {
+            names.try_emplace(static_cast<uint16_t>(id), name);
+        }
+
+        line = end + 1;
     }
 
     return names;
@@ -1048,34 +1075,44 @@ const FsysFile& FsysFileNamed(const std::vector<FsysFile>& files, const std::str
     throw xsflib::FormatError(std::string(archive) + " has no file " + name);
 }
 
-// Pokémon Colosseum's songs (see MusyXFiles::kColosseum). The module common_rel in common.fsys holds the game's table
+// Pokémon Colosseum's sounds (see MusyXFiles::kColosseum). The module common_rel in common.fsys holds the game's table
 // of sounds at `musyx_songs`, in `musyx_song_count` entries of 12 bytes. An entry's first byte has bit 7 set for an
-// effect. A song's entry gives its group at +1, its reverb's preset at +2, its file's number at +3, and MusyX's song ID
-// in a big-endian half at +4. The table of files at `musyx_file_table` gives each file's FSYS ID in the first word of
-// 8 bytes. bgm_archive.fsys holds the songs under those IDs and names them. An ID of 0 means no file. The game plays a
-// song through sndSeqPlayEx with the song's group and ID, at volume 0x7F.
+// effect. An entry gives its group at +1, and MusyX's song ID or effect ID in a big-endian half at +4. A song's entry
+// gives its reverb's preset at +2 and its file's number at +3. The table of files at `musyx_file_table` gives each
+// file's FSYS ID in the first word of 8 bytes. bgm_archive.fsys holds the songs under those IDs and names them. An ID
+// of 0 means no file. The game plays a song through sndSeqPlayEx with the song's group and ID, at volume 0x7F.
 //
 // The presets at `musyx_reverb_presets` give the settings of aux A's high-quality reverb, 24 bytes each: six floats in
 // the order of MusyXReverb. A song's preset other than 0 sets them. With 0, the reverb keeps its settings. A rip then
 // takes preset 0's settings. The game's set-up writes those.
 //
-// The music has two groups: group 0 in the files of snd_music, and group 1 in those of snd_music_atmos. common.fsys
-// holds a group's project, pool and sample directory under the files' name with _proj, _pool and _sdir. The samples are
-// in sound/, with .samp.
+// The game's play function (0x80166AB8) starts an effect with sndFXStartEx at volume 0x7F, pan 0x40 and studio 0. It
+// then sets the effect's MIDI volume to 0x7F with sndFXCtrl. MusyX starts an effect's controllers at that value. The
+// catalogue sets no controller. A rip plays the effect with preset 0's reverb and the profile's `musyx_effect_writes`.
+// The effects follow the songs in the table's order. An effect is left out if its group's project limits its voices to
+// 0 (ProjectEffects). MusyX never starts such an effect. Nothing names the effects. An effect is named after its set
+// and its ID, such as "snd_se_battle-0201".
+//
+// The music has two groups: group 0 in the files of snd_music, and group 1 in those of snd_music_atmos. The effects
+// have five, one in each of the sets snd_se, snd_se_battle, snd_se_motion, snd_se_nakigoe and snd_se_nakigoe2.
+// common.fsys holds a group's project, pool and sample directory under the files' name with _proj, _pool and _sdir. The
+// samples are in sound/, with .samp.
 MusyXCatalogue GatherColosseum(const disc::GameFiles& game, const GameProfile& profile)
 {
-    constexpr uint8_t kMusicVolume = 0x7f;
+    constexpr uint8_t kMusicVolume = 0x7f, kEffectVolume = 0x7f, kEffectPan = 0x40;
     constexpr std::size_t kSound = 12, kFile = 8, kPreset = 24;
     constexpr uint8_t kEffect = 0x80;
-    constexpr const char* kSets[] = {"snd_music", "snd_music_atmos"};
+    constexpr const char* kSets[] = {"snd_music",     "snd_music_atmos", "snd_se",         "snd_se_battle",
+                                     "snd_se_motion", "snd_se_nakigoe",  "snd_se_nakigoe2"};
 
     const std::vector<FsysFile> common = ReadFsys(ReadGameFile(game, "common.fsys"));
     const std::vector<FsysFile> songs = ReadFsys(ReadGameFile(game, "bgm_archive.fsys"));
     const std::vector<uint8_t>& module = FsysFileNamed(common, "common_rel", "common.fsys").data;
 
-    // Each set's group: its project's first group.
+    // Each set's group: its project's first group. The effects that MusyX starts, by their groups and IDs.
     MusyXCatalogue catalogue;
     std::map<uint16_t, uint16_t> set_of_group;
+    std::set<std::pair<uint16_t, uint16_t>> playable;
     for (const char* stem : kSets)
     {
         const std::string name = stem;
@@ -1084,9 +1121,30 @@ MusyXCatalogue GatherColosseum(const disc::GameFiles& game, const GameProfile& p
                                     .sdir = FsysFileNamed(common, name + "_sdir", "common.fsys").data,
                                     .samples = ReadGameFile(game, "sound/" + name + ".samp")};
         const uint16_t group = FirstGroupId(set.project);
+        for (const ProjectEffect& effect : ProjectEffects(set.project))
+        {
+            playable.insert({effect.group, effect.id});
+        }
+
         set_of_group[group] = static_cast<uint16_t>(catalogue.sets.size());
         catalogue.sets.push_back(std::move(set));
     }
+
+    // Aux A's reverb with the settings of `preset`.
+    const auto preset_reverb = [&](uint8_t preset)
+    {
+        const std::span<const uint8_t> settings =
+            Part(module, profile.musyx_reverb_presets + preset * kPreset, kPreset, "a reverb's preset");
+        MusyXReverb reverb = profile.reverbs[0];
+        float* fields[] = {&reverb.coloration, &reverb.mix,       &reverb.time,
+                           &reverb.damping,    &reverb.pre_delay, &reverb.crosstalk};
+        for (std::size_t f = 0; f < std::size(fields); f++)
+        {
+            *fields[f] = std::bit_cast<float>(xsflib::LoadBe32(settings.data() + f * 4));
+        }
+
+        return reverb;
+    };
 
     const std::span<const uint8_t> sounds =
         Part(module, profile.musyx_songs, std::size_t{profile.musyx_song_count} * kSound, "common_rel's sound table");
@@ -1119,24 +1177,52 @@ MusyXCatalogue GatherColosseum(const disc::GameFiles& game, const GameProfile& p
             throw xsflib::FormatError("bgm_archive.fsys or common.fsys lacks sound " + std::to_string(i) + "'s files");
         }
 
-        const std::span<const uint8_t> settings =
-            Part(module, profile.musyx_reverb_presets + preset * kPreset, kPreset, "a reverb's preset");
-        MusyXReverb reverb = profile.reverbs[0];
-        float* fields[] = {&reverb.coloration, &reverb.mix,       &reverb.time,
-                           &reverb.damping,    &reverb.pre_delay, &reverb.crosstalk};
-        for (std::size_t f = 0; f < std::size(fields); f++)
-        {
-            *fields[f] = std::bit_cast<float>(xsflib::LoadBe32(settings.data() + f * 4));
-        }
-
         MusyXCatalogue::Entry entry;
         entry.label = song->name;
         entry.volume = kMusicVolume;
         entry.id = xsflib::LoadBe16(row + 4);
         entry.song_group = group;
         entry.groups = {{.id = group, .set = set->second}};
-        entry.writes = SoundWrites(profile, reverb);
+        entry.writes = SoundWrites(profile, preset_reverb(preset));
         AddSong(catalogue, std::move(entry), song->data);
+    }
+
+    const MusyXReverb effect_reverb = preset_reverb(0);
+    for (uint32_t i = 0; i < profile.musyx_song_count; i++)
+    {
+        const uint8_t* row = sounds.data() + i * kSound;
+        if ((row[0] & kEffect) == 0)
+        {
+            continue;
+        }
+
+        const uint8_t group = row[1];
+        const uint16_t id = xsflib::LoadBe16(row + 4);
+        const auto set = set_of_group.find(group);
+        if (set == set_of_group.end())
+        {
+            throw xsflib::FormatError("common.fsys lacks the group of sound " + std::to_string(i));
+        }
+
+        if (!playable.contains({group, id}))
+        {
+            continue;
+        }
+
+        MusyXCatalogue::Entry entry;
+        entry.kind = MusyXCatalogue::Kind::kEffect;
+        entry.volume = kEffectVolume;
+        entry.pan = kEffectPan;
+        entry.id = id;
+        entry.label = EffectLabel(kSets[set->second], entry.id);
+        entry.groups = {{.id = group, .set = set->second}};
+        entry.writes = SoundWrites(profile, effect_reverb);
+        for (const auto& [address, value] : profile.musyx_effect_writes)
+        {
+            entry.writes.push_back({address, value});
+        }
+
+        catalogue.entries.push_back(std::move(entry));
     }
 
     return catalogue;
@@ -1609,9 +1695,125 @@ MusyXCatalogue GatherPokemonChannel(const disc::GameFiles& game, const GameProfi
     return catalogue;
 }
 
+// A row of Paper Mario: The Thousand-Year Door's table of sounds (see GatherPaperMario): the sound's name, its kind and
+// ID, its volume, its pan, its send to the reverb and the bend of its pitch.
+struct PaperMarioRow
+{
+    std::string name;
+    uint32_t sound = 0;
+    uint8_t volume = 0, pan = 0, send = 0;
+    uint16_t bend = 0;
+};
+
+// The bits of a row's second word that give the sound's kind, and the kinds of Paper Mario's effects and songs.
+constexpr uint32_t kPaperMarioKind = 0xf0000000, kPaperMarioEffect = 0x20000000, kPaperMarioSong = 0x40000000;
+
+// The rows of Paper Mario's table of sounds that play sounds of `kind`: an effect's row by the effect's ID, a song's
+// row by the song's record (see AddPaperMarioSongs). Several rows can play one sound. The sound takes the first row
+// with a volume above 0, or the first row if none has one.
+std::map<uint32_t, PaperMarioRow> PaperMarioRows(const ntdlib::Dol& dol, const GameProfile& profile, uint32_t kind)
+{
+    constexpr std::size_t kRow = 20;
+    constexpr uint32_t kId = 0xffff, kRecord = 0xff;
+    std::map<uint32_t, PaperMarioRow> rows;
+    for (uint32_t i = 0; i < profile.musyx_effect_count; i++)
+    {
+        const std::span<const uint8_t> row =
+            Part(DolBytes(dol, profile.musyx_effects + i * static_cast<uint32_t>(kRow)), 0, kRow, "the sound table");
+        const uint32_t sound = xsflib::LoadBe32(row.data() + 4);
+        const uint32_t key = sound & (kind == kPaperMarioSong ? kRecord : kId);
+        const auto found = rows.find(key);
+        if ((sound & kPaperMarioKind) != kind || (found != rows.end() && (found->second.volume != 0 || row[0xc] == 0)))
+        {
+            continue;
+        }
+
+        std::string name;
+        if (const uint32_t at = xsflib::LoadBe32(row.data()); at != 0)
+        {
+            name = TextBeforeZero(DolBytes(dol, at));
+        }
+
+        rows[key] = {.name = std::move(name),
+                     .sound = sound,
+                     .volume = row[0xc],
+                     .pan = row[0xd],
+                     .send = row[0xf],
+                     .bend = xsflib::LoadBe16(row.data() + 0x12)};
+    }
+
+    return rows;
+}
+
+// Adds Paper Mario's songs to `catalogue`, in the order of sound/proj/pmario.slib. The game reads the file at start-up.
+// The file holds the songs, one record after another. A record starts with its size in a big-endian word, its 32 bytes
+// of header included. The song follows the header. A size of 0xFFFFFFFF ends the file.
+//
+// A song's row gives the song's group in bits 16 to 23 of its second word, MusyX's song ID in bits 8 to 15, and the
+// song's record in bits 0 to 7. The game plays the song with sndSeqPlayEx, the group, the ID and the record's song
+// (0x800E124C). It sets the song's volume to 0x7F and mutes tracks 32 to 63 through sndSeqMute. No song has a track
+// there. The game then sets the song's volume to the row's volume. The row's pan and send play no part. A rip names the
+// song as the row does.
+//
+// pmario.stbl names the records: 32 bytes for each, the song's name, ended by a byte 0, then the song's group at 0x1E
+// and its ID at 0x1F. A song that no row plays takes its name, its group and its ID from there. It plays at MusyX's
+// default volume. Each song pushes its group from the catalogue's first file set.
+void AddPaperMarioSongs(MusyXCatalogue& catalogue, const disc::GameFiles& game, const GameProfile& profile,
+                        const std::map<uint32_t, PaperMarioRow>& rows)
+{
+    constexpr uint32_t kEndOfSongs = 0xffffffff;
+    constexpr std::size_t kHeader = 32, kName = 32, kNameGroup = 0x1e, kNameId = 0x1f;
+    const std::vector<uint8_t> songs = ReadGameFile(game, "sound/proj/pmario.slib");
+    const std::vector<uint8_t> names = ReadGameFile(game, "sound/proj/pmario.stbl");
+
+    std::size_t at = 0;
+    for (uint32_t record = 0;; record++)
+    {
+        const uint32_t size = xsflib::LoadBe32(Part(songs, at, 4, "the song library").data());
+        if (size == kEndOfSongs)
+        {
+            break;
+        }
+
+        if (size < kHeader)
+        {
+            throw xsflib::FormatError("a record of the song library is shorter than its header");
+        }
+
+        const std::span<const uint8_t> song = Part(songs, at + kHeader, size - kHeader, "the song library");
+        at += size;
+
+        MusyXCatalogue::Entry entry;
+        if (const auto found = rows.find(record); found != rows.end())
+        {
+            const PaperMarioRow& row = found->second;
+            entry.label = row.name;
+            entry.id = static_cast<uint16_t>(row.sound >> 8 & 0xff);
+            entry.song_group = static_cast<uint16_t>(row.sound >> 16 & 0xff);
+            entry.volume = row.volume;
+        }
+        else
+        {
+            const std::span<const uint8_t> name = Part(names, record * kName, kName, "the song table");
+            entry.id = name[kNameId];
+            entry.song_group = name[kNameGroup];
+        }
+
+        if (entry.label.empty())
+        {
+            entry.label = TextBeforeZero(Part(names, record * kName, kNameGroup, "the song table"));
+        }
+
+        entry.groups = {{entry.song_group, 0}};
+        entry.writes = SoundWrites(profile, profile.reverbs[0]);
+        AddSong(catalogue, std::move(entry), {song.begin(), song.end()});
+    }
+}
+
 // Paper Mario: The Thousand-Year Door's sounds (see MusyXFiles::kPaperMario). sound/proj/pmario.proj, .pool, .sdir and
 // .samp hold every MusyX group of the game. The game pushes groups 0 to 11 at start-up and keeps them all. It streams
-// its music. A rip holds the effects of the project's effects groups, in the order of their IDs. Each pushes its group.
+// its music. A rip holds the effects of the project's effects groups, in the order of their IDs, then the songs (see
+// AddPaperMarioSongs). Each sound pushes its group.
 //
 // The game's code lists its sounds at `musyx_effects`, in `musyx_effect_count` rows of 20 bytes. A row starts with the
 // address of the sound's name. The word after it gives the sound's kind in its top bits and its ID in its low 16 bits.
@@ -1623,49 +1825,14 @@ MusyXCatalogue GatherPokemonChannel(const disc::GameFiles& game, const GameProfi
 // world. Their volumes and pans then follow the listener. A rip plays an effect as the row gives it, through the
 // catalogue's controllers.
 //
-// Several rows can play one effect. A rip takes the first row with a volume above 0, or the first row if none has one.
-// Its name labels the sound. An effect that no row plays is named after the set and its ID, such as "pmario-0051". It
-// plays at MusyX's defaults.
+// A rip names an effect as its row does (see PaperMarioRows). An effect that no row plays is named after the set and
+// its ID, such as "pmario-0051". It plays at MusyX's defaults.
 MusyXCatalogue GatherPaperMario(const disc::GameFiles& game, const GameProfile& profile)
 {
-    constexpr std::size_t kRow = 20;
-    constexpr uint32_t kKind = 0xf0000000, kEffect = 0x20000000;
     constexpr uint8_t kStartVolume = 0x7f, kVolume = 7, kReverbSend = 91, kPitchWheel = 0x80;
     constexpr uint16_t kNoBend = 0x2000;
-
     const ntdlib::Dol dol = ntdlib::Dol::ParseMain(game.dol);
-
-    struct Row
-    {
-        std::string name;
-        uint8_t volume = 0, pan = 0, send = 0;
-        uint16_t bend = 0;
-    };
-    std::map<uint16_t, Row> rows;
-    for (uint32_t i = 0; i < profile.musyx_effect_count; i++)
-    {
-        const std::span<const uint8_t> row =
-            Part(DolBytes(dol, profile.musyx_effects + i * static_cast<uint32_t>(kRow)), 0, kRow, "the sound table");
-        const uint32_t sound = xsflib::LoadBe32(row.data() + 4);
-        const uint16_t id = static_cast<uint16_t>(sound);
-        const auto found = rows.find(id);
-        if ((sound & kKind) != kEffect || (found != rows.end() && (found->second.volume != 0 || row[0xc] == 0)))
-        {
-            continue;
-        }
-
-        std::string name;
-        if (const uint32_t at = xsflib::LoadBe32(row.data()); at != 0)
-        {
-            name = TextBeforeZero(DolBytes(dol, at));
-        }
-
-        rows[id] = {.name = std::move(name),
-                    .volume = row[0xc],
-                    .pan = row[0xd],
-                    .send = row[0xf],
-                    .bend = xsflib::LoadBe16(row.data() + 0x12)};
-    }
+    const std::map<uint32_t, PaperMarioRow> rows = PaperMarioRows(dol, profile, kPaperMarioEffect);
 
     MusyXCatalogue catalogue;
     catalogue.sets.push_back({.project = ReadGameFile(game, "sound/proj/pmario.proj"),
@@ -1684,7 +1851,7 @@ MusyXCatalogue GatherPaperMario(const disc::GameFiles& game, const GameProfile& 
         entry.writes = SoundWrites(profile, profile.reverbs[0]);
         if (const auto found = rows.find(effect.id); found != rows.end())
         {
-            const Row& row = found->second;
+            const PaperMarioRow& row = found->second;
             if (!row.name.empty())
             {
                 entry.label = row.name;
@@ -1700,6 +1867,8 @@ MusyXCatalogue GatherPaperMario(const disc::GameFiles& game, const GameProfile& 
 
         catalogue.entries.push_back(std::move(entry));
     }
+
+    AddPaperMarioSongs(catalogue, game, profile, PaperMarioRows(dol, profile, kPaperMarioSong));
 
     return catalogue;
 }
@@ -2329,11 +2498,15 @@ MusyXCatalogue GatherPuzzleCollection(const disc::GameFiles& game, const GamePro
     return catalogue;
 }
 
-// The NDDEMO tech demo's songs (see MusyXFiles::kNdDemo). The demo's code holds the addresses of the songs' paths at
+// The NDDEMO tech demo's sounds (see MusyXFiles::kNdDemo). The demo's code holds the addresses of the songs' paths at
 // `musyx_songs`: `musyx_song_count` words, in the order of the songs' IDs. A song takes its file's name. One set of
 // MusyX's files, audio/nddemo, holds the demo's two groups: group 0 for the songs and group 1 for the effects. The demo
 // pushes both at start-up, in that order, and keeps them. It plays a song through sndSeqPlayEx with group 0 and the
-// song's ID, then sets the song's volume to 0x7F with sndSeqVolume. The rip leaves the four effects out.
+// song's ID, then sets the song's volume to 0x7F with sndSeqVolume.
+//
+// The effects follow the songs, in the order of the effects group's table. The demo starts each of its four effects
+// through sndFXStartEx with the effect's ID, the volume and the pan that the group's table gives it, and studio 0. The
+// disc's header audio/nddemo.h names the effects (HeaderEffectNames).
 MusyXCatalogue GatherNdDemo(const disc::GameFiles& game, const GameProfile& profile)
 {
     constexpr uint8_t kSongVolume = 0x7f;
@@ -2359,6 +2532,19 @@ MusyXCatalogue GatherNdDemo(const disc::GameFiles& game, const GameProfile& prof
         entry.groups = {{kSongGroup, 0}, {kEffectsGroup, 0}};
         entry.writes = SoundWrites(profile, profile.reverbs[0]);
         AddSong(catalogue, std::move(entry), ReadGameFile(game, path));
+    }
+
+    const std::map<uint16_t, std::string> names = HeaderEffectNames(ReadGameFile(game, "audio/nddemo.h"));
+    for (const ProjectEffect& effect : ProjectEffects(catalogue.sets[0].project))
+    {
+        MusyXCatalogue::Entry entry;
+        const auto name = names.find(effect.id);
+        entry.label = name != names.end() ? name->second : EffectLabel("nddemo", effect.id);
+        entry.kind = MusyXCatalogue::Kind::kEffect;
+        entry.id = effect.id;
+        entry.groups = {{kSongGroup, 0}, {kEffectsGroup, 0}};
+        entry.writes = SoundWrites(profile, profile.reverbs[0]);
+        catalogue.entries.push_back(std::move(entry));
     }
 
     return catalogue;
@@ -2575,6 +2761,36 @@ std::optional<CatalogueSound> ReadCatalogueSound(std::span<const uint8_t> file, 
     const uint8_t* sound = file.data() + at;
     return CatalogueSound{.kind = static_cast<MusyXCatalogue::Kind>(sound[kSoundKind]),
                           .song = xsflib::LoadBe16(sound + kSoundSong)};
+}
+
+MusyXFilesInUse FilesInUse(const MusyXCatalogue& catalogue, std::span<const uint32_t> sounds)
+{
+    MusyXFilesInUse use{.sets = std::vector<bool>(catalogue.sets.size()),
+                        .songs = std::vector<bool>(catalogue.songs.size())};
+    for (const uint32_t number : sounds)
+    {
+        if (number >= catalogue.entries.size())
+        {
+            continue;
+        }
+
+        const MusyXCatalogue::Entry& entry = catalogue.entries[number];
+        for (const MusyXCatalogue::Group& group : entry.groups)
+        {
+            if (group.set < use.sets.size())
+            {
+                use.sets[group.set] = true;
+            }
+        }
+
+        // An entry without a song holds kNoSong. That number lies past the last song.
+        if (entry.song < use.songs.size())
+        {
+            use.songs[entry.song] = true;
+        }
+    }
+
+    return use;
 }
 
 std::string MusyXPath(uint32_t number, const char* extension)

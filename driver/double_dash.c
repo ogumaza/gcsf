@@ -14,9 +14,11 @@
  *   4. the audio object's first step;
  *   5. the start-up archive, loaded the way the game's loader task loads it, and the audio object's set-up with it.
  *      The set-up copies what it keeps. The archive's buffer is then freed;
- *   6. every wave bank of the sound library's section loaded into ARAM. The game keeps them all loaded. Its voices
- *      come from other start-up archives. The driver doesn't load those;
- *   7. the sound: the sound manager starts it by its JAudio sound ID.
+ *   6. every wave bank of the sound library's section loaded into ARAM. The game keeps them all loaded;
+ *   7. for a voice, the start-up archive of the first one's "baac" block that holds its bank, loaded the way the game
+ *      loads it. The game loads one of those archives at a time. The archive's wave bank loads into ARAM as the game's
+ *      loader reads the archive. The sound's ID gives the archive's place in the block, plus 1, in bits 28 to 31;
+ *   8. the sound: the sound manager starts it by its JAudio sound ID, without those bits.
  * Then the audio object's frame process runs once a frame, forever. A level sound, such as an engine's, lasts a frame
  * unless the game starts it again. The game starts it again each frame for as long as the sound should play. The
  * driver does the same until the sound ends. A step that fails stops the driver with its number in the status word
@@ -79,7 +81,12 @@ struct Params {
     u32 wave_arc_state_offset; /* a wave archive's state (2 once it is in ARAM), and its disc entry after it */
     u32 sound_info_offset;    /* the game's sound information in the audio object. It reads the sound table. */
     u32 is_level_sound;       /* bool (sound information*, JAISoundID*): whether the sound is a level sound */
+    u32 load_voices;          /* bool (audio object*, u32 archive): loads an archive of the baac block */
 };
+
+/* The bits of a sound ID that give the archive of the baac block that the sound loads, plus 1. */
+#define ARCHIVE_SHIFT 28u
+#define SOUND_MASK 0x0fffffffu
 
 __attribute__((section(".params"), used)) volatile struct Params driver_params = {
     .magic = PARAMS_MAGIC,
@@ -152,11 +159,24 @@ __attribute__((noreturn)) void driver_main(void) {
         wait_frame();
     }
 
+    /* A voice's archive. Its wave bank joins the section's table of wave banks. */
+    const u32 archive = p->sound_id >> ARCHIVE_SHIFT;
+    if (archive) {
+        if (!(((fn2)p->load_voices)(audio, archive - 1) & 0xff))
+            fail(7);
+        for (u32 frames = 0; !waves_loaded(section); frames++) {
+            if (frames > SETUP_FRAMES)
+                fail(7);
+            ((fn1)p->audio_frame)(audio);
+            wait_frame();
+        }
+    }
+
     /* The sound. The sound manager's vtable gives startSound(JAISoundID*, JAISoundHandle*, const TVec3*) at 0xc. */
     const u32 manager = word(audio + p->sound_manager_offset);
-    const u32 id = p->sound_id;
+    const u32 id = p->sound_id & SOUND_MASK;
     if (!manager || !(((fn4)virtual_function(manager, 0xc))(manager, (u32)&id, (u32)&p->sound, 0) & 0xff))
-        fail(7);
+        fail(8);
     const u32 info = word(audio + p->sound_info_offset);
     const int level = info && (((fn2)p->is_level_sound)(info, (u32)&id) & 0xff);
     p->status = STATUS_PLAYING;

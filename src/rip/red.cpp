@@ -220,28 +220,41 @@ std::vector<Sound> RedSounds(const disc::GameFiles& game, const GameProfile& pro
     return sounds;
 }
 
-std::optional<std::string> AddRedFiles(ProgramBuilder& program, const disc::GameFiles& game, const GameProfile& profile)
+std::optional<std::string> AddRedFiles(ProgramBuilder& program, const disc::GameFiles& game, const GameProfile& profile,
+                                       const std::vector<uint32_t>* sounds)
 {
     constexpr std::size_t kBankOffset = 6;
     constexpr std::size_t kSepBankOffset = 0x11;
     const std::map<uint32_t, std::string> banks = RedFiles(game, profile.wave_folder, kRedBank);
     std::set<uint32_t> named;
+    std::set<uint32_t> loaded;
 
-    // Reads the file at `path` into `bytes` and adds it to the library. Returns the error, or nothing.
-    const auto add = [&](const std::string& path, std::vector<uint8_t>& bytes) -> std::optional<std::string>
+    // Whether the rip plays sound `id`. Without `sounds`, it plays every sound. Any effect loads the blocks and their
+    // banks (driver/crystal_chronicles.c).
+    const auto plays = [sounds](uint32_t id)
+    {
+        return !sounds || std::find(sounds->begin(), sounds->end(), id) != sounds->end();
+    };
+    const bool any_effect =
+        !sounds || std::any_of(sounds->begin(), sounds->end(), [](uint32_t id) { return id >= kRedEffectId; });
+
+    // Reads the file at `path` into `bytes` and adds it to the library. A file that the rip doesn't `read` keeps its
+    // size, but holds zeros. Returns the error, or nothing.
+    const auto add = [&](const std::string& path, std::vector<uint8_t>& bytes, bool read) -> std::optional<std::string>
     {
         if (!game.read_file || !game.read_file(path, bytes))
         {
             return "can't read " + path;
         }
 
-        program.AddFile(path, bytes);
+        program.AddFile(path, read ? bytes : std::vector<uint8_t>(bytes.size(), 0));
 
         return std::nullopt;
     };
 
-    // Notes that the file at `path` names wave bank `bank`. Returns the error if the disc lacks the bank, or nothing.
-    const auto name = [&](const std::string& path, uint32_t bank) -> std::optional<std::string>
+    // Notes that the file at `path` names wave bank `bank`, and that the rip loads the bank if it reads the file.
+    // Returns the error if the disc lacks the bank, or nothing.
+    const auto name = [&](const std::string& path, uint32_t bank, bool read) -> std::optional<std::string>
     {
         if (!banks.contains(bank))
         {
@@ -249,6 +262,10 @@ std::optional<std::string> AddRedFiles(ProgramBuilder& program, const disc::Game
         }
 
         named.insert(bank);
+        if (read)
+        {
+            loaded.insert(bank);
+        }
 
         return std::nullopt;
     };
@@ -256,7 +273,8 @@ std::optional<std::string> AddRedFiles(ProgramBuilder& program, const disc::Game
     for (const auto& [number, path] : RedFiles(game, profile.music_folder, kRedPiece))
     {
         std::vector<uint8_t> bytes;
-        if (const std::optional<std::string> error = add(path, bytes))
+        const bool read = plays(number);
+        if (const std::optional<std::string> error = add(path, bytes, read))
         {
             return error;
         }
@@ -266,7 +284,7 @@ std::optional<std::string> AddRedFiles(ProgramBuilder& program, const disc::Game
             return path + " isn't a piece of music";
         }
 
-        if (const std::optional<std::string> error = name(path, xsflib::LoadBe16(bytes.data() + kBankOffset)))
+        if (const std::optional<std::string> error = name(path, xsflib::LoadBe16(bytes.data() + kBankOffset), read))
         {
             return error;
         }
@@ -277,7 +295,7 @@ std::optional<std::string> AddRedFiles(ProgramBuilder& program, const disc::Game
         for (const auto& [number, path] : RedBlocks(game, profile))
         {
             std::vector<uint8_t> bytes;
-            if (const std::optional<std::string> error = add(path, bytes))
+            if (const std::optional<std::string> error = add(path, bytes, any_effect))
             {
                 return error;
             }
@@ -290,7 +308,7 @@ std::optional<std::string> AddRedFiles(ProgramBuilder& program, const disc::Game
 
             for (const RedBlockEffect& effect : *effects)
             {
-                if (const std::optional<std::string> error = name(path, effect.bank))
+                if (const std::optional<std::string> error = name(path, effect.bank, any_effect))
                 {
                     return error;
                 }
@@ -300,7 +318,8 @@ std::optional<std::string> AddRedFiles(ProgramBuilder& program, const disc::Game
         for (const auto& [number, path] : RedSeps(game, profile))
         {
             std::vector<uint8_t> bytes;
-            if (const std::optional<std::string> error = add(path, bytes))
+            const bool read = plays(kRedEffectId + number);
+            if (const std::optional<std::string> error = add(path, bytes, read))
             {
                 return error;
             }
@@ -310,20 +329,23 @@ std::optional<std::string> AddRedFiles(ProgramBuilder& program, const disc::Game
                 return path + " isn't an effect";
             }
 
-            if (const std::optional<std::string> error = name(path, RedInfoBank(bytes, kSepBankOffset)))
+            if (const std::optional<std::string> error = name(path, RedInfoBank(bytes, kSepBankOffset), read))
             {
                 return error;
             }
         }
     }
 
-    std::vector<std::string> bank_paths;
     for (const uint32_t bank : named)
     {
-        bank_paths.push_back(banks.at(bank));
+        std::vector<uint8_t> bytes;
+        if (const std::optional<std::string> error = add(banks.at(bank), bytes, loaded.contains(bank)))
+        {
+            return error;
+        }
     }
 
-    return AddDiscFiles(program, game, bank_paths);
+    return std::nullopt;
 }
 
 namespace

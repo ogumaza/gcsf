@@ -2,7 +2,8 @@
 
 // Tests of how a MusyX song's tracks loop (rip::SectionsOf), with made-up SNG files: songs without sections, songs in
 // sections, and damaged songs. Then a test of the catalogue's file (rip::CatalogueFile) with an effect's controllers,
-// and tests of rip::UnpackYay0 with made-up files.
+// and tests of rip::UnpackYay0 with made-up files. The last test checks the file sets and the songs that some sounds of
+// a made-up catalogue use (rip::FilesInUse).
 
 #include <algorithm>
 #include <cstddef>
@@ -201,6 +202,39 @@ void TestDamagedYay0()
     Check(!ErrorOf([&too_big] { rip::UnpackYay0(too_big); }).empty(), "a size over 64 MiB is refused");
 }
 
+// A catalogue of four file sets and three songs. Sound 0 plays song 2 and has groups in sets 0 and 3. Sound 1 is an
+// effect. Its group is in set 1. Sound 2 plays song 0 and has a group in set 2. Sounds 0 and 1 and a number past the
+// last sound use sets 0, 1 and 3 and song 2.
+void TestFilesInUse()
+{
+    rip::MusyXCatalogue catalogue;
+    catalogue.sets.resize(4);
+    catalogue.songs.resize(3);
+
+    rip::MusyXCatalogue::Entry song;
+    song.song = 2;
+    song.groups = {{1, 0}, {2, 3}};
+    catalogue.entries.push_back(song);
+
+    rip::MusyXCatalogue::Entry effect;
+    effect.kind = rip::MusyXCatalogue::Kind::kEffect;
+    effect.groups = {{5, 1}};
+    catalogue.entries.push_back(effect);
+
+    rip::MusyXCatalogue::Entry other;
+    other.song = 0;
+    other.groups = {{6, 2}};
+    catalogue.entries.push_back(other);
+
+    const std::vector<uint32_t> sounds = {0, 1, 7};
+    const rip::MusyXFilesInUse use = rip::FilesInUse(catalogue, sounds);
+    Check(use.sets == std::vector<bool>{true, true, false, true}, "the sounds use the sets of their groups");
+    Check(use.songs == std::vector<bool>{false, false, true}, "the sounds use their songs' files");
+
+    const rip::MusyXFilesInUse none = rip::FilesInUse(catalogue, {});
+    Check(none.sets == std::vector<bool>(4) && none.songs == std::vector<bool>(3), "no sounds use no files");
+}
+
 } // namespace
 
 int main()
@@ -211,6 +245,7 @@ int main()
     TestControllers();
     TestYay0();
     TestDamagedYay0();
+    TestFilesInUse();
 
     return xsflib::testing::Summary("musyx");
 }

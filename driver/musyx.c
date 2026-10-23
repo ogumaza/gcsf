@@ -14,7 +14,8 @@
  *   3. the header of the rip's catalogue of sounds (see docs/gcsf.md, "MusyX catalogue");
  *   4. the sound's description in the catalogue;
  *   5. the sound's groups, words and controllers in the catalogue. Then the words that the catalogue gives the sound,
- *      such as the settings of the game's reverbs, and the aux effects of studio 0;
+ *      such as the settings of the game's reverbs, sndVolume and sndMasterVolume for some sounds, and the aux effects
+ *      of studio 0;
  *   6. the sound's groups: each group's project, pool, sample directory and samples, read from the rip's files, then
  *      pushed with sndPushGroup. Groups in a row from one set of files share the files. MusyX moves the samples to
  *      ARAM;
@@ -34,10 +35,10 @@
  * driver/musyx_upload.c builds this file with MUSYX_UPLOAD defined. That driver is for a game whose sample file doesn't
  * fit in main memory. It pushes each group without samples in memory. MusyX then asks for the group's samples through
  * its upload callback (sndSetSampleDataUploadCallback, from MusyX 1.5.2 on), a chunk at a time. The driver reads each
- * chunk from the set's sample file. That driver also sets MusyX's master volume after the output mode. Its parameter
- * block holds four more words. Its step 50 fails when the sample file doesn't open. A read of a chunk that doesn't
- * start fails as step 52, and one that fails as step 53. The code that only that driver runs stays under
- * MUSYX_UPLOAD. driver/musyx.c's blob, and with it every other game's rips, then stays as it was.
+ * chunk from the set's sample file. That driver's parameter block holds two more words. Its step 50 fails when the
+ * sample file doesn't open. A read of a chunk that doesn't start fails as step 52, and one that fails as step 53. The
+ * code that only that driver runs stays under MUSYX_UPLOAD. driver/musyx.c's blob, and with it every other game's
+ * rips, then stays as it was.
  *
  * Build with `driver/build.py musyx` and `driver/build.py musyx_upload` (clang). The results are committed as
  * src/rip/driver_musyx_blob.h and src/rip/driver_musyx_upload_blob.h. Building GCSF itself requires no PowerPC
@@ -140,15 +141,21 @@ struct Params {
      * 0 for a game whose catalogue sets no controllers */
     u32 snd_fx_ctrl;
     u32 snd_fx_ctrl14;
+    /* A volume for every group after the sound's words: 0 for none. The driver then calls sndVolume(group_volume, 0,
+     * 0xff). A sound's words set it for that sound alone. Two of Nintendo Puzzle Collection's modules set their groups
+     * to 110 after the call of 127. */
+    u32 group_volume;
+    /* void sndMasterVolume(u8 volume, u16 time, u8 music, u8 fx): 0 for no call. The driver calls it after the sound's
+     * words and group_volume's call, with master_volume and a time of 0. master_music and master_fx say whether the
+     * call sets the master volume of the music and that of the effects. With neither, the driver makes no call. A
+     * sound's words can set the three values for that sound alone. */
+    u32 snd_master_volume;
+    u32 master_volume, master_music, master_fx;
 #ifdef MUSYX_UPLOAD
     /* void sndSetSampleDataUploadCallback(void* (*callback)(u32 offset, u32 bytes), u32 chunk) */
     u32 snd_set_upload_callback;
     /* void aramSyncTransferQueue(void): waits until MusyX's queue of copies to ARAM is empty */
     u32 aram_sync;
-    /* void sndMasterVolume(u8 volume, u16 time, u8 music, u8 fx): 0 for no call. The driver sets the volume of the
-     * music and the effects at once. */
-    u32 snd_master_volume;
-    u32 master_volume;
 #endif
 };
 
@@ -292,10 +299,6 @@ __attribute__((noreturn)) void driver_main(void) {
             ((fn0)p->after_init[i])();
     if (p->snd_output_mode)
         ((fn1)p->snd_output_mode)(p->output_mode);
-#ifdef MUSYX_UPLOAD
-    if (p->snd_master_volume)
-        ((fn4)p->snd_master_volume)(p->master_volume, 0, 1, 1);
-#endif
     if (p->snd_volume)
         ((fn3)p->snd_volume)(127, 0, 0xff);
 
@@ -321,11 +324,15 @@ __attribute__((noreturn)) void driver_main(void) {
     if (control_count && (kind != KIND_EFFECT || !p->snd_fx_ctrl || !p->snd_fx_ctrl14))
         fail(5);
 
-    /* The sound's words, then the aux effects. */
+    /* The sound's words, its volumes, then the aux effects. */
     for (u32 w = 0; w < write_count; w++) {
         const u8* write = catalogue + writes_at + (first_write + w) * WRITE_SIZE;
         *(volatile u32*)be32(write) = be32(write + 4);
     }
+    if (p->snd_volume && p->group_volume)
+        ((fn3)p->snd_volume)(p->group_volume, 0, 0xff);
+    if (p->snd_master_volume && (p->master_music || p->master_fx))
+        ((fn4)p->snd_master_volume)(p->master_volume, 0, p->master_music, p->master_fx);
     if (p->snd_set_aux_processing_callbacks) {
         /* Tales of Symphonia ignores what the preparation returns. */
         for (u32 a = 0; a < 2; a++)

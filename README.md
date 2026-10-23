@@ -1,15 +1,15 @@
 # gcsf
 
-GCSF is a PSF-family music rip format for Nintendo GameCube sequenced audio. It covers the music and sound effects
-that GameCube games play through JAudio, the sound library of Nintendo EAD's JSystem. GCSF reads both of JAudio's
+GCSF is a PSF-family music rip format for Nintendo GameCube sequenced audio. It covers the music and sound effects that
+GameCube games play through JAudio, the sound library of Nintendo EAD's JSystem. GCSF reads both of JAudio's
 generations: JAudio1 and JAudio2. MusyX is Factor 5's sound library. GCSF also covers the songs that a game plays
-through it. GCSF rips the sound effects of five MusyX games too: Metroid Prime, Metroid Prime 2: Echoes, Paper Mario:
-The Thousand-Year Door, Star Wars Rogue Squadron III: Rebel Strike and Pokémon Channel. Pokémon Channel plays its music
-as MusyX effects. GCSF rips that music too. Final Fantasy Crystal Chronicles plays its music and its sound effects
-through Square's Red driver. GCSF covers them too. Animal Crossing plays its music and its sound effects through a port
-of Nintendo's sound library for the Nintendo 64. GCSF covers those as well. On the Pokémon Colosseum Bonus Disc, HAL
-Laboratory's sound library plays the sequenced sound effects. GCSF rips those. GCSF is the GameCube counterpart of the
-DS formats 2SF and NCSF.
+through it. GCSF rips the sound effects of nine MusyX games too: Metroid Prime, Metroid Prime 2: Echoes, Paper Mario:
+The Thousand-Year Door, Star Wars Rogue Squadron III: Rebel Strike, Pokémon Channel, WarioWare, Inc.: Mega Party Game$!,
+Pokémon Colosseum, Mario Party 4 and the NDDEMO tech demo. Pokémon Channel plays its music as MusyX effects. GCSF rips
+that music too. Final Fantasy Crystal Chronicles plays its music and its sound effects through Square's Red driver. GCSF
+covers them too. Animal Crossing plays its music and its sound effects through a port of Nintendo's sound library for
+the Nintendo 64. GCSF covers those as well. On the Pokémon Colosseum Bonus Disc, HAL Laboratory's sound library plays
+the sequenced sound effects. GCSF rips those. GCSF is the GameCube counterpart of the DS formats 2SF and NCSF.
 
 A GCSF rip contains the game's code. The player runs that code on an emulated GameCube: the game's OS, its sound
 library and its DSP program. The game plays the sound itself. The mixing, filtering and resampling therefore match the
@@ -30,7 +30,8 @@ category and index, for example `se4-0123`, and a piece of music after its file.
 its sounds' names. A rip of it takes its names from that table, for example `MSD_BGM_DOLPIC`. Pikmin's code lists its
 pieces of music by their files' names. A rip of Pikmin names a piece after its file, for example `select`. The game
 plays the music of its cutscenes as parts of one piece. A rip names a part after the piece and the part's number, for
-example `demobgm-5`. The rip leaves out the game's sound effects and the game's streamed music. Pikmin 2's pieces of
+example `demobgm-5`. The rip includes the sound effects of the game's catalogue. An effect takes its name from the
+catalogue, for example `SE_FLOG_JUMP`. The rip leaves out the game's streamed music. Pikmin 2's pieces of
 music are named after their files too. The game keeps a table of its effects' names. A rip of an effect takes its name
 from that table, for example `PSSE_SY_MENU_CURSOR`. A rip of Final Fantasy Crystal Chronicles names a piece or an effect
 after its file, for example `music100` or `se010001`. An effect in one of the game's blocks of effects takes the block's
@@ -39,24 +40,29 @@ disc version 2) streams most of its music. GCSF rips its four sequenced songs. A
 the game's pack, for example `Main_Plaza`. GCSF rips the game's sound effects too. A rip names an effect after its audio
 group set and its ID, for example `Scarab-0721`. Metroid Prime 2: Echoes (USA) streams all of its music. GCSF rips its
 sound effects. A rip names an effect as the game's table of names does, for example `SFXfnt_x_titlemusic_lp_00L_looped`.
-Paper Mario: The Thousand-Year Door (USA) streams its music too. GCSF rips its sound effects. A rip names an effect as
-the game's table of sounds does, for example `SFX_PRESS_START1`. An effect that the table doesn't list is named after
-its set and its ID, for example `pmario-0051`. GCSF also rips the 111 songs that the code of Tales of Symphonia (USA)
+Paper Mario: The Thousand-Year Door (USA) streams its music too. GCSF rips its sound effects and the 143 songs that the
+game plays as sounds. A rip names a sound as the game's table of sounds does, for example `SFX_PRESS_START1` or
+`SFX_SE2_EVT_STARSTONE_GET1`. An effect that the table doesn't list is named after its set and its ID, for example
+`pmario-0051`. A song that the table doesn't list takes its name from the game's list of songs, for example `SE1_TEST`.
+GCSF also rips the 111 songs that the code of Tales of Symphonia (USA)
 lists. Both of its discs hold them. A rip names a song after its file, for example `bgm_t000`. The code of Star Fox
 Adventures (USA, disc version 1) lists 99 songs. GCSF rips them all. A rip names a song as that list does, for example
 `starfox_map`. Star Wars Rogue Squadron II: Rogue Leader (USA) holds 124 songs. Sixty of them play only streams. Eight
 more play a stream along with their notes. A rip leaves out all 68. GCSF rips the other 56. A rip names a song as the
 game's music hall does, for example `Dogfight_Action`. A song that the hall doesn't list is named after its group and
-ID, for example `Song_0x45-0x0A`. GCSF rips the sound effects of Star Wars Rogue Squadron III: Rebel Strike (USA). A rip
-names an effect after its ID, for example `RebelStrike-0048`. Pokémon Colosseum (USA) lists 78 songs in its table of
-sounds. GCSF rips 77 of them. The other, `null_bgm_song`, holds no notes. The game plays it to silence its music. A rip
-names a song after its file, for example `title_song`. Resident Evil Zero (USA) comes on two discs. Each disc holds the
-songs of its part of the game. The first holds 87 and the second 137. 59 songs are on both discs. The songs include the
-music of 16 cutscenes and the ambiences of the game's areas. One song makes no sound. GCSF rips the others. A rip names
-a song as the game's code does, for example `bgm_00`. A rip's library takes the disc's number, for example
-`ResidentEvilZeroDisc1.gcsflib`. Many of the game's cutscenes stream their music. GCSF doesn't rip streams. The
-NDDEMO tech demo is a GameCube disc that never went on sale. GCSF rips its nine songs. A rip names a song after its
-file, for example `coins`. GCSF also
+ID, for example `Song_0x45-0x0A`. GCSF rips the sound effects of Star Wars Rogue Squadron III: Rebel Strike (USA). The
+game streams all of its music. Its rips therefore hold only its sound effects. A rip names an effect after its ID, for
+example `RebelStrike-0048`. Pokémon Colosseum (USA) lists 78 songs in its table of sounds. GCSF rips 77 of them. The
+other, `null_bgm_song`, holds no notes. The game plays it to silence its music. A rip names a song after its file, for
+example `title_song`. GCSF rips the game's sound effects too. A rip names an effect after its set and its ID, for
+example `snd_se_battle-0202`.
+Resident Evil Zero (USA) comes on two discs. Each disc holds the songs of its part of the game.
+The first holds 87 and the second 137. 59 songs are on both discs. The songs include the music of 16 cutscenes and the
+ambiences of the game's areas. One song makes no sound. GCSF rips the others. A rip names a song as the game's code
+does, for example `bgm_00`. A rip's library takes the disc's number, for example `ResidentEvilZeroDisc1.gcsflib`. Many
+of the game's cutscenes stream their music. GCSF doesn't rip streams. The NDDEMO tech demo is a GameCube disc that never
+went on sale. GCSF rips its nine songs and its four sound effects. A rip names a song after its file, for example
+`coins`. An effect takes the name that the disc's header gives it, for example `SFXcoin_oneshot`. GCSF also
 supports the music and the sound effects of Animal Crossing (USA). The game keeps no names for them. A rip names a piece
 after the game's number for it, for example `bgm046`. A piece that plays the hour is ripped once for each weather that
 changes it, for example `bgm001-snow`. The museum's piece is ripped once for each room, for example `bgm088-fish`. An
@@ -68,8 +74,11 @@ recording. GCSF rips them as music. GCSF also rips the game's other sound effect
 sound viewer does, for example `SND_SUOU`. A sound that the viewer doesn't name is named after its set and its ID, for
 example `pchsound-1064`. The TV programmes' themes play as sound effects. A rip lists them with the effects. GCSF rips
 the 76 songs that the sound test of Mario Party 4 (USA, disc version 1) lists. A rip names a song as the sound test
-does, for example `Try Everything`. The sound test's 14 streams aren't ripped. Neither are the game's sound effects and
-voices.
+does, for example `Try Everything`. The sound test's 14 streams aren't ripped. GCSF rips the game's sound effects and
+voices too. A rip names an effect after its number in the game's table of effects, for example `se-0042`. The Option
+Room names some of the voices. A rip adds such a name, for example `se-0054 Toad Happy`. WarioWare, Inc.: Mega Party
+Game$! plays most of its sound effects as MusyX songs. GCSF rips them and the game's other effects. A rip names an
+effect after the game's number for it, for example `se-0013`.
 
 Nintendo Puzzle Collection (Japan) holds a menu and three games: Dr. Mario, Panel de Pon and Yoshi's Cookie. GCSF rips
 their 118 songs: 9 of the menu, 24 of Dr. Mario, 59 of Panel de Pon and 26 of Yoshi's Cookie. A song's name starts with
@@ -81,7 +90,7 @@ the names of their files, for example `ycookie-sng05`. The games' sound effects 
 
 | Tool | Description |
 |---|---|
-| `gcsfrip [options] <input>...` | Rips each input into a `.gcsflib` and a `.minigcsf` per sound. The output goes in a folder next to the input. The folder has the input's name with `_gcsf` added. An input is a GameCube disc image or an extracted disc. An extracted disc is a folder with `sys/main.dol` and `files/`, either directly or in a `DATA` folder. Dolphin extracts discs in these layouts. `--list` lists a game's sounds. `--only` and `--bgm` choose what to rip. Sounds that make no sound are listed and skipped. Streams are left out. The sequence archive can hold music that no sound of the game plays. Each such sequence gets a `.minigcsf` too, named after its file. `--sound-files` takes the sound files from another release of the game (see below). `--help` shows the rest. |
+| `gcsfrip [options] <input>...` | Rips each input into a `.gcsflib` and a `.minigcsf` per sound. The output goes in a folder next to the input. The folder has the input's name with `_gcsf` added. A `.gcsflib` that differs from one of the same name in the folder gets the next free name, such as `<name>_2.gcsflib`. The rips already in the folder then still play. To replace earlier rips, rip into an empty folder. An input is a GameCube disc image or an extracted disc. An extracted disc is a folder with `sys/main.dol` and `files/`, either directly or in a `DATA` folder. Dolphin extracts discs in these layouts. `--list` lists a game's sounds. `--only` and `--bgm` choose what to rip. Sounds that make no sound are listed and skipped. Streams are left out. The sequence archive can hold music that no sound of the game plays. Each such sequence gets a `.minigcsf` too, named after its file. `--sound-files` takes the sound files from another release of the game (see below). `--help` shows the rest. |
 | `gcsfplay [options] <file>...` | Renders each `.minigcsf` to a WAV file next to it at 32,028 Hz. The length and fade come from the file's tags. `-o FILE` writes FILE instead. Its extension selects WAV or FLAC. `--length` and `--fade` override the tags. `--info` shows a file's tags and libraries. `--help` shows the rest. |
 | `plugins/foobar2000` | foobar2000 input component: `foo_input_gcsf.component` for macOS and `foo_input_gcsf.dll` for Windows. Both are built with the foobar2000 SDK (see its [README](plugins/foobar2000/README.md)). |
 | `plugins/xmplay` | XMPlay input plugin: `xmp-gcsf.dll`, a 32-bit DLL for XMPlay on Windows, built with clang-cl and the XMPlay plugin SDK (see its [README](plugins/xmplay/README.md)). |

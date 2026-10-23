@@ -95,6 +95,7 @@ struct Job
     uint32_t sound_id;
     std::string label;
     std::optional<rip::Timing> timing;
+    std::string stop; // the emulation's error, for a sound that stops the machine before it makes a sound
     std::string file_name;
     std::optional<FileChunk> archive;
     std::vector<uint32_t> waves; // the waves that the driver loads, for a profile whose driver NamesWaves
@@ -341,7 +342,8 @@ std::vector<Job> PickJobs(const std::vector<rip::Sound>& sounds, std::vector<rip
 
 // Builds the library. A game that loads its wave groups as its scenes require them (rip::FindsWaves) first gets the
 // start-up archive's wave systems. Each job then gets its wave groups, found with a library that holds no wave archive.
-// Returns nothing after an error message.
+// A library that depends on its sounds (see rip::BuildLibrary) holds only the data that the jobs' sounds read. Returns
+// nothing after an error message.
 std::optional<GameLibrary> BuildGameLibrary(const disc::GameFiles& game, const rip::GameProfile& profile,
                                             const Options& o, const Tags& common,
                                             const std::vector<uint8_t>& sound_archive, std::vector<Job>& jobs)
@@ -380,8 +382,14 @@ std::optional<GameLibrary> BuildGameLibrary(const disc::GameFiles& game, const r
         wave_archives = JobArchives(library.systems, jobs);
     }
 
+    std::vector<uint32_t> sounds;
+    for (const Job& job : jobs)
+    {
+        sounds.push_back(job.sound_id);
+    }
+
     std::optional<std::vector<uint8_t>> bytes =
-        rip::BuildLibrary(game, profile, common, &error, wave_archives ? &*wave_archives : nullptr);
+        rip::BuildLibrary(game, profile, common, &error, wave_archives ? &*wave_archives : nullptr, &sounds);
     if (!bytes)
     {
         std::fprintf(stderr, "error: %s\n", error.c_str());
@@ -407,7 +415,7 @@ std::size_t MeasureJobs(std::vector<Job>& jobs, const GameLibrary& library, cons
     {
         std::vector<jaudio::WaveUse> played;
         job.timing = analyzer.Analyze(job.sound_id, job.archive ? &*job.archive : nullptr,
-                                      names_waves ? &job.waves : nullptr, finds_waves ? &played : nullptr);
+                                      names_waves ? &job.waves : nullptr, finds_waves ? &played : nullptr, &job.stop);
         if (const std::size_t outside = jaudio::MissingWaves(library.systems, job.waves, played))
         {
             std::fprintf(stderr, "warning: %s looked up %zu waves outside its wave groups\n", job.label.c_str(),
@@ -428,7 +436,16 @@ std::size_t MeasureJobs(std::vector<Job>& jobs, const GameLibrary& library, cons
             return false;
         }
 
-        std::fprintf(stderr, "skipped %s: it makes no sound\n", job.label.c_str());
+        if (job.stop.empty())
+        {
+            std::fprintf(stderr, "skipped %s: it makes no sound\n", job.label.c_str());
+        }
+        else
+        {
+            std::fprintf(stderr, "skipped %s: the game's code stops before it makes a sound (%s)\n", job.label.c_str(),
+                         job.stop.c_str());
+        }
+
         silent++;
 
         return true;
@@ -438,8 +455,8 @@ std::size_t MeasureJobs(std::vector<Job>& jobs, const GameLibrary& library, cons
     return silent;
 }
 
-// Writes the library, then one .minigcsf per job, into the output folder. `silent` sounds were left out. Returns 0, or
-// an exit code on an error.
+// Writes the library, then one .minigcsf per job, into the output folder. An earlier rip's library there stays (see
+// xsflib::rip::FileNames::LibraryIn). `silent` sounds were left out. Returns 0, or an exit code on an error.
 int WriteRip(const std::string& input, const Options& o, xsflib::cli::FileNameRegistries& registries,
              const disc::GameFiles& game, const rip::GameProfile& profile, const std::vector<uint8_t>& library,
              const std::vector<Job>& jobs, const Tags& common, std::size_t silent)
@@ -456,7 +473,7 @@ int WriteRip(const std::string& input, const Options& o, xsflib::cli::FileNameRe
         library_base += "Disc" + std::to_string(game.boot[6] + 1);
     }
 
-    const std::string lib_name = names.Library(library_base);
+    const std::string lib_name = names.LibraryIn(out_dir, library_base, library);
     if (!xsflib::rip::WriteFile(out_dir / xsflib::PathFromUtf8(lib_name), library))
     {
         std::fprintf(stderr, "error: can't write %s\n", xsflib::Utf8(out_dir / xsflib::PathFromUtf8(lib_name)).c_str());
@@ -537,7 +554,7 @@ int RipInput(const std::string& input, const Options& o, xsflib::cli::FileNameRe
 
     const std::string game_name = o.game_name.empty() ? profile->name : o.game_name;
     const Tags common = xsflib::cli::RipTags(o, game_name, "gcsf", "game");
-    const std::optional<GameLibrary> library = BuildGameLibrary(game, *profile, o, common, listed->sound_archive, jobs);
+    std::optional<GameLibrary> library = BuildGameLibrary(game, *profile, o, common, listed->sound_archive, jobs);
     if (!library)
     {
         return 1;
@@ -548,6 +565,17 @@ int RipInput(const std::string& input, const Options& o, xsflib::cli::FileNameRe
     {
         std::fprintf(stderr, "error: none of the selected sounds makes a sound\n");
         return 1;
+    }
+
+    // A library with zeros in place of what its sounds don't read (rip::TrimsLibrary) is built again without the
+    // sounds that make no sound.
+    if (silent && rip::TrimsLibrary(*profile))
+    {
+        library = BuildGameLibrary(game, *profile, o, common, listed->sound_archive, jobs);
+        if (!library)
+        {
+            return 1;
+        }
     }
 
     return WriteRip(input, o, registries, game, *profile, library->bytes, jobs, common, silent);

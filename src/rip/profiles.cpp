@@ -373,7 +373,7 @@ const GameProfile kWindWakerUsa = {
 // The parameters of Mario Golf's driver (driver/mario_golf.c's Params from arena_lo on): the OS's arena, the sizes of
 // Camelot's heaps and the heap for a song, and the addresses of the OS's functions and variables and of the game's
 // functions. The driver calls the functions of `before_sound` before the game's sound set-up. An entry of 0 calls
-// nothing.
+// nothing. After the set-up, the driver waits `set_up_retraces` video retraces.
 struct MarioGolfParams
 {
     // The words in the order of the driver's parameter block.
@@ -382,10 +382,10 @@ struct MarioGolfParams
     uint32_t arena_lo = 0, arena_hi = 0, heap1_size = 0, heap7_size = 0, heap0_size = 0, song_heap = 0;
     uint32_t os_get_arena_lo = 0, os_get_arena_hi = 0, os_set_arena_lo = 0, os_set_arena_hi = 0, os_init_alloc = 0,
              os_create_heap = 0, os_set_current_heap = 0, os_alloc_from_heap = 0, os_current_heap = 0,
-             os_sleep_thread = 0, vi_init = 0, ar_init = 0, aram_blocks = 0, arq_init = 0;
+             os_sleep_thread = 0, vi_init = 0, vi_wait_for_retrace = 0, ar_init = 0, aram_blocks = 0, arq_init = 0;
     uint32_t context_init = 0, context_object = 0, heaps_init = 0, create_heap = 0, select_heap = 0;
     std::array<uint32_t, 4> before_sound = {};
-    uint32_t sound_init = 0, load_banks = 0, play_song = 0, play_jingle = 0;
+    uint32_t sound_init = 0, set_up_retraces = 0, load_banks = 0, play_song = 0, play_jingle = 0;
 };
 
 std::vector<uint32_t> MarioGolfParams::Words() const
@@ -407,6 +407,7 @@ std::vector<uint32_t> MarioGolfParams::Words() const
             os_current_heap,
             os_sleep_thread,
             vi_init,
+            vi_wait_for_retrace,
             ar_init,
             aram_blocks,
             arq_init,
@@ -420,6 +421,7 @@ std::vector<uint32_t> MarioGolfParams::Words() const
             before_sound[2],
             before_sound[3],
             sound_init,
+            set_up_retraces,
             load_banks,
             play_song,
             play_jingle};
@@ -460,6 +462,7 @@ const GameProfile kMarioGolfUsa = {
             .os_current_heap = 0x802d7b10, // __OSCurrHeap
             .os_sleep_thread = 0x8003aa58,
             .vi_init = 0x80055a5c,
+            .vi_wait_for_retrace = 0x80055f0c,
             .ar_init = 0x8002ea00,
             .aram_blocks = 0x802d7e4c,
             .arq_init = 0x8003095c,
@@ -526,6 +529,7 @@ const GameProfile kMarioPowerTennisUsa = {
             .os_current_heap = 0x80309758, // __OSCurrHeap
             .os_sleep_thread = 0x80062bd0,
             .vi_init = 0x8007e884,
+            .vi_wait_for_retrace = 0x8007ed34,
             .ar_init = 0x80055a2c,
             .aram_blocks = 0x80309960,
             .arq_init = 0x80057988,
@@ -536,6 +540,9 @@ const GameProfile kMarioPowerTennisUsa = {
             .select_heap = 0x80029314,
             .before_sound = {0x80008d20}, // the file loader's set-up
             .sound_init = 0x8001dff0,
+            // The set-up calls sndMasterVolume(101, 200, 1, 0) and sndMasterVolume(101, 200, 0, 1) (0x8001A8D4): a
+            // fade of 200 ms. The game plays no music before it has ended. 13 retraces take 217 ms.
+            .set_up_retraces = 13,
             .load_banks = 0x8001a214,
             .play_song = 0x80019fc4,
             .play_jingle = 0x8001afd8,
@@ -554,10 +561,16 @@ const GameProfile kMarioPowerTennisUsa = {
 };
 
 // WarioWare, Inc.: Mega Party Game$! (USA). Its sound library is MusyX, under a layer of Intelligent Systems' code. The
-// parameters follow driver/warioware.c's Params from os_sleep_thread. Every sound of the game is a MusyX song in
-// sound_data.bin. The effects are songs too. The game's sound test names 231 songs. Its table's entries are 0x20 bytes:
-// the song's ID, its volume and two more bytes, then a name for each of six languages. This release has only the
-// English names (the second).
+// parameters follow driver/warioware.c's Params from os_sleep_thread. The game's music is MusyX songs in
+// sound_data.bin. The game's sound test names 231 songs. Its table's entries are 0x20 bytes: the song's ID, its volume
+// and two more bytes, then a name for each of six languages. This release has only the English names (the second).
+//
+// The game's play function (0x800348B8) takes a mode and a number. A number below 1606 plays a song, at the volume of
+// its entry in the sound test's table or in the table of songs that play as effects (0x801B4918). A number from 1606
+// on plays MusyX's effect of the number less 1606 through sndFXStartEx, at the volume of its entry in the table of
+// effects (0x801B6640), with the entry's reverb and chorus sends (MIDI controllers 91 and 93). The mode only decides
+// which of the function's slots a sound may take from another. Each rip plays one sound, in the mode of the music. The
+// length analysis follows an effect through MusyX's voices.
 const GameProfile kWarioWareUsa = {
     .name = "WarioWare, Inc.: Mega Party Game$!",
     .game_id = "GZWE01",
@@ -592,10 +605,22 @@ const GameProfile kWarioWareUsa = {
     .named_song_count = 231,
     .named_song_size = 0x20,
     .named_song_name = 0xc,
+    .effect_songs = 0x801b4918,
+    .effect_song_count = 933,
+    .play_effects = 0x801b6640,
+    .play_effect_count = 145,
     .track_slots = 0x8034d09c,
     .track_slot_size = 0x18,
     .track_slot_count = 64,
     .song_lists = {0x80375a34, 0x80375a30},
+    .musyx_voices = {.count = 64,
+                     .synth = 0x80375a68,
+                     .synth_size = 0x458,
+                     .dsp = 0x80375b50,
+                     .dsp_size = 0xf8,
+                     .state_offset = 0xf0,
+                     .loop_handler = 0x800d0854},
+    .musyx_effect_bit = 0x80000000,
 };
 
 // Luigi's Mansion (USA). Its sound library is an early JAudio1. The start-up archive is an AAF. The sequences are one
@@ -778,6 +803,27 @@ const GameProfile kPikminUsa = {
     // part 5's tracks without a wave group. No cutscene plays them.
     .parted_piece = 13,
     .parts = {{1, 13, 7}, {2, 14, 0}, {5, 13, 3}, {6, 13, 4}, {7, 13, 5}, {8, 13, 6}, {9, 13, 1}, {10, 13, 8}},
+    // The game's catalogue of effects, soundTable, and the first action of each type of event, EVENT_OFFSET. The game's
+    // code plays four more effects of the system: 25 as the demo of a found ship part ends (0x8001a748), and 30, 31
+    // and 36 in that demo (Jac_StartPartsFindDemo, 0x8001b120). The game's set-up of scene 0 plays one of four voices
+    // of the player by the time (0x80019c58). Voice 0x800c is the one it plays in 123 cases of 128. The game passes
+    // 0x1800c. Jac_PlayOrimaSe reads only the low 16 bits.
+    .effect_table = 0x802b33d4,
+    .effect_count = 331,
+    .event_offsets = 0x80225a68,
+    .other_effects = {JacEffectId(JacEffect::kSystem, 25), JacEffectId(JacEffect::kSystem, 30),
+                      JacEffectId(JacEffect::kSystem, 31), JacEffectId(JacEffect::kSystem, 36),
+                      JacEffectId(JacEffect::kPlayer, 0x800c)},
+    // Effect 0 of the system stops the effects. The effects sequence plays nothing for 15. 18 plays part 8 of demobgm,
+    // which the ripper lists as music. 32 plays a stream.
+    .left_out_effects = {JacEffectId(JacEffect::kSystem, 0), JacEffectId(JacEffect::kSystem, 15),
+                         JacEffectId(JacEffect::kSystem, 18), JacEffectId(JacEffect::kSystem, 32)},
+    // Jac_CreateEvent starts the ship's idling (action 4) as it creates an event of type 7, the ship's.
+    .sounding_event = 7,
+    .quiet_event = 1,
+    // The game's set-up of its first scene of play (scene 1) loads groups 1 to 3 of wave system 0, the effects', and
+    // group 0 of systems 14, 15 and 2 (Jac_SceneSetup, 0x80019be0).
+    .effect_groups = {0 << 16 | 1, 0 << 16 | 2, 0 << 16 | 3, 14 << 16 | 0, 15 << 16 | 0, 2 << 16 | 0},
     .params =
         {
             1,          // frame_retraces: the driver only polls. The sound library's threads play the music.
@@ -813,6 +859,17 @@ const GameProfile kPikminUsa = {
             0x30000,    // part_track: the name that demobgm's root track takes. Jac_StartDemo writes to that track.
             0x80010660, // get_track_handle: Jam_GetTrackHandle
             0x80010380, // write_port: Jam_WritePortAppDirect
+            0x8000c720, // load_wave_scene: WaveScene_Load
+            0x803dce00, // scene: current_scene
+            0x803e7980, // menu: container. Jac_PlaySystemSe plays effect 7, which closes the menu, only while it's set
+            0x80016ba0, // play_system_effect: Jac_PlaySystemSe
+            0x800183a0, // play_player_effect: Jac_PlayOrimaSe
+            0x800179a0, // create_event: Jac_CreateEvent
+            0x80017b20, // play_event_action: Jac_PlayEventAction
+            0x80017860, // update_camera: Jac_UpdateCamera
+            0x10009,    // system_track: the name of the effects sequence's track for the system's effects
+            0x1000a,    // player_track: the name of its track for the player's effects
+            0x20000,    // events_track: the name of the events' root track. Its children play the events
         },
     .watch =
         {
@@ -913,8 +970,9 @@ const GameProfile kJungleBeatUsa = {
 // Mario Kart: Double Dash!! (USA). Its sound library is the earliest known build of JAudio2, under the game's audio
 // object. The start-up archive's sound table has the first layouts. The archive holds the music's sequences as blocks.
 // The game has no sequence archive. Its three wave banks hold 6.5 MiB of waves. The game keeps them loaded. Its voices
-// come from three more start-up archives inside the first one. The game loads one of them at a time. The driver loads
-// none. The parameters follow driver/double_dash.c's Params from frame_retraces.
+// come from three more start-up archives in the first one's "baac" block. The game loads one of them at a time
+// (0x801148fc): the title's and the character select's (0), the races' (1) or the awards' (2). The driver loads the
+// one whose bank a voice plays. The parameters follow driver/double_dash.c's Params from frame_retraces.
 const GameProfile kDoubleDashUsa = {
     .name = "Mario Kart: Double Dash!!",
     .game_id = "GM4E01",
@@ -924,6 +982,7 @@ const GameProfile kDoubleDashUsa = {
     .sound_archive = "AudioRes/GCKart.baa",
     .wave_folder = "AudioRes/Waves/",
     .first_layouts = true,
+    .baac_archives = true,
     .params =
         {
             1,                    // frame_retraces: the game runs at 60 frames a second
@@ -964,6 +1023,7 @@ const GameProfile kDoubleDashUsa = {
             0x4c,                 // wave_arc_state_offset
             0xc,                  // sound_info_offset
             0x8011fde8,           // is_level_sound: an effect whose entry's first byte isn't 0
+            0x801148fc,           // load_voices: the audio object's load of an archive of the baac block
         },
     .watch =
         {
@@ -1510,7 +1570,8 @@ struct MusyXParams
     uint32_t snd_push_group = 0, snd_seq_play = 0, seq_play_form = 0, snd_seq_volume = 0, snd_fx_start_ex = 0;
     uint32_t snd_set_aux_processing_callbacks = 0;
     std::array<uint32_t, 2> aux_callback = {}, aux_user = {}, aux_prepare = {}, aux_midi = {};
-    uint32_t snd_volume = 0, snd_fx_ctrl = 0, snd_fx_ctrl14 = 0;
+    uint32_t snd_volume = 0, snd_fx_ctrl = 0, snd_fx_ctrl14 = 0, group_volume = 0;
+    uint32_t snd_master_volume = 0, master_volume = 0, master_music = 0, master_fx = 0;
 };
 
 std::vector<uint32_t> MusyXParams::Words() const
@@ -1560,7 +1621,12 @@ std::vector<uint32_t> MusyXParams::Words() const
             aux_midi[1],
             snd_volume,
             snd_fx_ctrl,
-            snd_fx_ctrl14};
+            snd_fx_ctrl14,
+            group_volume,
+            snd_master_volume,
+            master_volume,
+            master_music,
+            master_fx};
 }
 
 // The places of some of the parameters among the words (kMusyXAuxCallbacks). Words() lists the fields in their order.
@@ -1887,10 +1953,12 @@ const GameProfile kRogueLeaderUsa = {
 // aux A's high-quality reverb, prepares the reverb and gives it to studio 0's aux A. The output is in stereo unless the
 // console is set to mono. The game's module common_rel holds its table of sounds (see MusyXFiles::kColosseum). The
 // game's play function (0x80166AB8) sets a song's reverb preset, then plays the song at volume 0x7F. No call in the
-// game's code gives a song another volume.
+// game's code gives a song another volume. The set-up calls sndVolume(100, 0, SND_FX_VOLGROUPS) (0x80167008). That
+// call sets fader 31 of MusyX's faders (0x80434E64, 0x30 bytes each) to 100/127. MusyX puts every effect in that
+// volume group. An effect's rip writes the fader's volume and its target.
 //
 // The length analysis reads the first of MusyX's song instances, at 0x804285D0. Its 16 sections start 0x14E8 bytes into
-// it, 0x38 bytes apart, and each holds its count of loops at +0x34.
+// it, 0x38 bytes apart, and each holds its count of loops at +0x34. For an effect, it reads MusyX's voices.
 const GameProfile kColosseumUsa = {
     .name = "Pokémon Colosseum",
     .game_id = "GC6E01",
@@ -1928,7 +1996,7 @@ const GameProfile kColosseumUsa = {
             .snd_seq_play = 0x8015a368, // sndSeqPlayEx
             .seq_play_form = 1,         // sndSeqPlayEx takes a studio
             .snd_seq_volume = 0x8014d6d8,
-            .snd_fx_start_ex = 0, // no effects yet
+            .snd_fx_start_ex = 0x8014d7fc,
             .snd_set_aux_processing_callbacks = 0x8014daa8,
             .aux_callback = {0x8016442c, 0}, // sndAuxCallbackReverbHI for aux A, and nothing for aux B
             .aux_user = {0x80452500, 0},     // aux A's reverb
@@ -1940,14 +2008,23 @@ const GameProfile kColosseumUsa = {
     .musyx_files = MusyXFiles::kColosseum,
     .musyx_songs = 0x141654,
     .musyx_song_count = 1236,
+    // The effects' fader at 100/127 in floats: its volume, then its target.
+    .musyx_effect_writes = {{0x80435434, 0x3f499326}, {0x80435438, 0x3f499326}},
     .musyx_file_table = 0x1133d8,
     .musyx_file_count = 79,
     .musyx_reverb_presets = 0x145044,
-    // The settings come from each song's preset.
+    // The settings come from each sound's preset.
     .reverbs = {{{.block = 0x80452500, .high = true}}},
     .song_lists = {0x8047af14, 0x8047af10},
     .section_loops = 0x80429aec,
     .section_loop_size = 0x38,
+    .musyx_voices = {.count = 64,
+                     .synth = 0x8047af48,
+                     .synth_size = 0x404,
+                     .dsp = 0x8047b024,
+                     .dsp_size = 0xf4,
+                     .state_offset = 0xec,
+                     .loop_handler = 0x801529a4},
 };
 
 // Resident Evil Zero (USA). Both discs hold the same code. Each disc holds the songs of its part of the game, and the
@@ -2184,7 +2261,7 @@ const GameProfile kMetroidPrime2Usa = {
 };
 
 // Paper Mario: The Thousand-Year Door (USA). Its sound library is MusyX 2.0, the build of Metroid Prime 2's. It
-// streams its music.
+// streams its music. Its jingles and some of its effects are MusyX songs (see MusyXFiles::kPaperMario).
 //
 // The game has no DVDReadAsyncPrio. The driver reads through DVDReadPrio (0x802A03C0) instead. That one waits for the
 // read and takes the priority where DVDReadAsyncPrio takes the callback. The driver passes 0 there.
@@ -2194,6 +2271,9 @@ const GameProfile kMetroidPrime2Usa = {
 // flag that encodes the default studio for Dolby Pro Logic II, and 0xBFC000 bytes of ARAM. It gives studio 0's aux A
 // MusyX's high-quality reverb of 3 s and aux B MusyX's chorus. It calls sndVolume(127, 0, 0xFF) and sets the output
 // to stereo. A rip writes the chorus's settings: a delay of 10 ms, no variation and a period of 500 ms.
+//
+// The length analysis reads the first of MusyX's song instances, at 0x803EBDC0. The instance's 16 sections start
+// 0x1508 bytes in, 0x38 bytes apart. Each section holds a count of loops at +0x34.
 const GameProfile kPaperMarioUsa = {
     .name = "Paper Mario: The Thousand-Year Door",
     .game_id = "G8ME01",
@@ -2253,6 +2333,9 @@ const GameProfile kPaperMarioUsa = {
                   .pre_delay = 0.1f,
                   .high = true,
                   .crosstalk = 0.0f}}},
+    .song_lists = {0x8041ee5c, 0x8041ee58},
+    .section_loops = 0x803ed2fc,
+    .section_loop_size = 0x38,
     .musyx_voices = {.count = 64,
                      .synth = 0x8041ee90,
                      .synth_size = 0x458,
@@ -2264,21 +2347,21 @@ const GameProfile kPaperMarioUsa = {
     .musyx_effect_count = 4242,
 };
 
-// The parameters of driver/musyx_upload.c: driver/musyx.c's (MusyXParams), then sndSetSampleDataUploadCallback,
-// aramSyncTransferQueue, sndMasterVolume and the master volume. driver/musyx.c's Params says what each field means.
+// The parameters of driver/musyx_upload.c: driver/musyx.c's (MusyXParams), then sndSetSampleDataUploadCallback and
+// aramSyncTransferQueue. driver/musyx.c's Params says what each field means.
 struct MusyXUploadParams
 {
     // The words in the order of the driver's parameter block.
     std::vector<uint32_t> Words() const;
 
     MusyXParams musyx;
-    uint32_t snd_set_upload_callback = 0, aram_sync = 0, snd_master_volume = 0, master_volume = 0;
+    uint32_t snd_set_upload_callback = 0, aram_sync = 0;
 };
 
 std::vector<uint32_t> MusyXUploadParams::Words() const
 {
     std::vector<uint32_t> words = musyx.Words();
-    words.insert(words.end(), {snd_set_upload_callback, aram_sync, snd_master_volume, master_volume});
+    words.insert(words.end(), {snd_set_upload_callback, aram_sync});
 
     return words;
 }
@@ -2293,8 +2376,8 @@ std::vector<uint32_t> MusyXUploadParams::Words() const
 // calls sndInit: 64 voices, none for music, 64 for effects, one studio, the flag that encodes the default studio for
 // Dolby Pro Logic II, and 0xFFC000 bytes of ARAM. The output is in stereo unless the console is set to mono. The
 // set-up then calls sndMasterVolume(100, 100, 1, 1) and sndVolume(127, 100, 0xFF). A rip makes both calls with a time
-// of 0. The game gives studio 0 no aux effects. Its loader of groups (0x80015228) sets the upload callback, with chunks
-// of 0x20000 bytes, before it pushes a group.
+// of 0, sndVolume first. The game gives studio 0 no aux effects. Its loader of groups (0x80015228) sets the upload
+// callback, with chunks of 0x20000 bytes, before it pushes a group.
 const GameProfile kPokemonChannelUsa = {
     .name = "Pokémon Channel",
     .game_id = "GPAE01",
@@ -2338,11 +2421,13 @@ const GameProfile kPokemonChannelUsa = {
                     .snd_volume = 0x80119bfc,
                     .snd_fx_ctrl = 0x80119a38,
                     .snd_fx_ctrl14 = 0x80119a98,
+                    .snd_master_volume = 0x80119c5c,
+                    .master_volume = 100,
+                    .master_music = 1,
+                    .master_fx = 1,
                 },
             .snd_set_upload_callback = 0x80126328,
             .aram_sync = 0x8012f090,
-            .snd_master_volume = 0x80119c5c,
-            .master_volume = 100,
         }
             .Words(),
     .library_name = "PokémonChannel",
@@ -2457,6 +2542,13 @@ const GameProfile kRebelStrikeUsa = {
 // sound test lists 76 songs and 14 streams. The sound manager's table holds two songs more. Song 0 is a dummy. Song 42
 // is song 41 in another group. The length analysis reads MusyX's lists of the songs that play, and the loop counts of
 // the sequencer's first song.
+//
+// The sound manager's table holds 2,308 effects. 236 of its entries are empty: they give the effect number 0xFFFF. The
+// Option Room's list of character voices follows the sound test in the module. It names 93 of the effects. The game
+// plays an effect with msmSePlay. It loads an effect's group with a scene's group set, or alone through its function at
+// 0x800336D4. That function calls msmSysLoadGroup. A rip loads the effect's group alone if it isn't a base group. The
+// rip plays the effect without parameters: with no position, at the volume, the pan and the reverb and chorus sends of
+// the effect's entry. The length analysis follows an effect through MusyX's voices.
 const GameProfile kMarioParty4Usa = {
     .name = "Mario Party 4",
     .game_id = "GMPE01",
@@ -2481,6 +2573,7 @@ const GameProfile kMarioParty4Usa = {
             0x80116fbc, // msm_sys_load_group: msmSysLoadGroup
             0x80116818, // msm_sys_load_group_set: msmSysLoadGroupSet
             0x801185e4, // msm_mus_play: msmMusPlay
+            0x80119a94, // msm_se_play: msmSePlay
         },
     .bank_files = {"sound/mpgcsnd.msm"},
     .library_name = "MarioParty4",
@@ -2488,10 +2581,20 @@ const GameProfile kMarioParty4Usa = {
     .sound_test_module = "dll/option.rel",
     .sound_test = 0xac58,
     .sound_test_count = 140,
+    .sound_test_voices = 0xb518,
+    .sound_test_voice_count = 123,
     .messages = "mess/board_e.dat",
     .song_lists = {0x801d47a4, 0x801d47a0}, // seqActiveRoot and seqPausedRoot
     .section_loops = 0x801ae214,            // in seqInstance
     .section_loop_size = 0x38,
+    .musyx_voices = {.count = 50,
+                     .synth = 0x801d47d8, // synthVoice
+                     .synth_size = 0x404,
+                     .dsp = 0x801d48b4, // dspVoice
+                     .dsp_size = 0xf4,
+                     .state_offset = 0xec,
+                     .loop_handler = 0x80100208}, // mcmdLoop
+    .musyx_effect_bit = 0x8000,
 };
 
 // The NDDEMO tech demo. Its disc ID is 00\0E01: a game code of two zeros and a NUL, then E, and the maker code 01. Its
@@ -2512,7 +2615,8 @@ const GameProfile kMarioParty4Usa = {
 // take the driver's long names.
 //
 // The length analysis reads the first of MusyX's song instances, at 0x80082A58. Its 16 sections start 0x14E4 bytes
-// into it, 0x2C bytes apart, and each holds its count of loops at +0x26.
+// into it, 0x2C bytes apart, and each holds its count of loops at +0x26. The early MusyX's voices differ in size from
+// those of MusyX 2.0. A synthesizer voice takes 0x408 bytes, and a DSP voice 0xF0 with its state at +0xE8.
 const GameProfile kNdDemoDisc = {
     .name = "NDDEMO",
     .game_id = std::string_view("00\0E01", 6),
@@ -2546,6 +2650,7 @@ const GameProfile kNdDemoDisc = {
             .snd_seq_play = 0x800505d8, // sndSeqPlayEx
             .seq_play_form = 1,         // sndSeqPlayEx takes a studio
             .snd_seq_volume = 0x80047cec,
+            .snd_fx_start_ex = 0x80047dd4,
             .snd_set_aux_processing_callbacks = 0x80047f8c,
             .aux_callback = {0x8005911c, 0x8005a19c}, // sndAuxCallbackReverbHI and sndAuxCallbackChorus
             .aux_user = {0x8006d1f0, 0x8006d3d0},     // aux A's reverb and aux B's chorus
@@ -2571,6 +2676,13 @@ const GameProfile kNdDemoDisc = {
     .song_lists = {0x800a91ac, 0x800a91a8},
     .section_loops = 0x80083f62,
     .section_loop_size = 0x2c,
+    .musyx_voices = {.count = 48,
+                     .synth = 0x800a91d8,
+                     .synth_size = 0x408,
+                     .dsp = 0x800a92b4,
+                     .dsp_size = 0xf0,
+                     .state_offset = 0xe8,
+                     .loop_handler = 0x8004aadc},
 };
 
 const std::vector<GameProfile> kProfiles = {kFourSwordsUsa,

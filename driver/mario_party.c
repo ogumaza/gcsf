@@ -15,13 +15,14 @@
  *     slots;
  *   - the output mode that the game's audio set-up picks on a console set to stereo: MusyX's surround mode;
  *   - the base groups that the game's boot module loads;
- *   - the group set that the game's sound test loads for the song;
- *   - the song, by its number in the sound manager's table. The game's play function starts it the same way.
- * The driver's thread then sleeps for good. The song plays from the audio and DSP interrupts. The sound manager runs
- * its fades and its streams from the audio interface's interrupt. The OS's idle loop runs while no thread can. A step
- * that fails stops the driver with its number in the status word: 1 for the driver's check of its parameter block, 2
- * for the heap, 3 for msmSysInit, 4 for the base groups, 5 for the group set and 6 for the song. `driver_params.status`
- * reports the driver's progress to the player (see docs/gcsf.md).
+ *   - the group set that the game's sound test loads for the song, or for an effect the group that holds it;
+ *   - the song, by its number in the sound manager's table. The game's play function starts it the same way. An
+ *     effect plays through msmSePlay, by its number in the sound manager's table of effects, without parameters.
+ * The driver's thread then sleeps for good. The sound plays from the audio and DSP interrupts. The sound manager runs
+ * its fades, its effects and its streams from the audio interface's interrupt. The OS's idle loop runs while no thread
+ * can. A step that fails stops the driver with its number in the status word: 1 for the driver's check of its
+ * parameter block, 2 for the heap, 3 for msmSysInit, 4 for the base groups, 5 for the group set or the group, 6 for the
+ * song and 7 for the effect. `driver_params.status` reports the driver's progress to the player (see docs/gcsf.md).
  *
  * The driver hands out the OS's arena from the bottom up and never takes memory back. The sound manager reads a group's
  * samples into a buffer and moves them to ARAM. The game then frees the buffer. The driver keeps it.
@@ -32,14 +33,18 @@
 
 #include "driver.h"
 
-/* A sound ID's group set of 0xffff loads no group set. */
+/* A sound ID's group set of 0xffff loads no group set. With bit 15 set, the low 15 bits give a group to load alone. */
 #define NO_GROUP_SET 0xffffu
+#define ONE_GROUP 0x8000u
+
+/* A sound ID's number with bit 15 set gives an effect in its low 15 bits. */
+#define EFFECT 0x8000u
 
 struct Params {
     u32 magic;
     u32 version;
     u32 status;   /* written by the driver */
-    u32 sound_id; /* the song: the group set in the top 16 bits, the song's number in the low 16 bits */
+    u32 sound_id; /* the sound: the group set in the top 16 bits, the number in the low 16 bits (see EFFECT) */
     u32 sound;    /* unused: the sound manager keeps the song's state itself */
     /* the OS and the disc */
     u32 os_sleep_thread; /* void OSSleepThread(OSThreadQueue*) */
@@ -59,6 +64,7 @@ struct Params {
     u32 msm_sys_load_group;     /* s32 msmSysLoadGroup(s32 group, void* buffer, BOOL): group 0 loads the base groups */
     u32 msm_sys_load_group_set; /* s32 msmSysLoadGroupSet(s32 set, void* buffer) */
     u32 msm_mus_play;           /* s32 msmMusPlay(s32 song, MSM_MUSPARAM*): the song's channel, or below 0 */
+    u32 msm_se_play;            /* s32 msmSePlay(s32 effect, MSM_SEPARAM*): the effect's number, or below 0 */
 };
 
 __attribute__((section(".params"), used)) volatile struct Params driver_params = {
@@ -114,20 +120,29 @@ __attribute__((noreturn)) void driver_main(void) {
         fail(3);
     ((fn1)p->msm_sys_set_output_mode)(p->output_mode);
 
-    /* The base groups, then the song's group set. */
+    /* The base groups, then the sound's group set or group. */
     const u32 base = heap_alloc(((fn1)p->msm_sys_get_samp_size)(0));
     if (!base || (s32)((fn3)p->msm_sys_load_group)(0, base, 0) < 0)
         fail(4);
     const u32 set = p->sound_id >> 16;
     if (set != NO_GROUP_SET) {
         const u32 samples = heap_alloc(((fn1)p->msm_sys_get_samp_size)(1));
-        if (!samples || (s32)((fn2)p->msm_sys_load_group_set)(set, samples) < 0)
+        if (!samples)
+            fail(5);
+        const s32 loaded = (set & ONE_GROUP) ? (s32)((fn3)p->msm_sys_load_group)(set & ~ONE_GROUP, samples, 0)
+                                             : (s32)((fn2)p->msm_sys_load_group_set)(set, samples);
+        if (loaded < 0)
             fail(5);
     }
 
-    /* The song. */
-    if ((s32)((fn2)p->msm_mus_play)(p->sound_id & 0xffff, 0) < 0)
+    /* The song or the effect. */
+    const u32 number = p->sound_id & 0xffff;
+    if (number & EFFECT) {
+        if ((s32)((fn2)p->msm_se_play)(number & ~EFFECT, 0) < 0)
+            fail(7);
+    } else if ((s32)((fn2)p->msm_mus_play)(number, 0) < 0) {
         fail(6);
+    }
     p->status = STATUS_PLAYING;
 
     sleep_forever();

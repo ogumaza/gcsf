@@ -11,7 +11,8 @@
  *   - the OS's arena, below the driver, and the OS heap in it;
  *   - the ARAM and its queue;
  *   - Camelot's heaps 1 and 7 (MusyX allocates from heap 7), as the game's system set-up makes them;
- *   - the game's sound set-up: MusyX, its output mode and volumes;
+ *   - the game's sound set-up: MusyX, its output mode and volumes. Mario Power Tennis's set-up fades MusyX's masters
+ *     over 200 ms. The game plays no music before the fade has ended. The driver waits `set_up_retraces` retraces;
  *   - Camelot's heap 0, then the game's sound banks: two MusyX groups from the disc;
  *   - the song, by its number in the game's song table, or the jingle, by its number in the jingle table.
  * The driver's thread then sleeps for good, and the song plays from the audio and DSP interrupts. The OS's idle loop
@@ -54,6 +55,7 @@ struct Params {
     u32 os_current_heap;     /* the variable that holds the current heap */
     u32 os_sleep_thread;     /* void OSSleepThread(OSThreadQueue*) */
     u32 vi_init;             /* void VIInit(void) */
+    u32 vi_wait_for_retrace; /* void VIWaitForRetrace(void) */
     u32 ar_init;             /* u32 ARInit(u32* stack, u32 count) */
     u32 aram_blocks;         /* the ARAM allocator's block list (ARInit's stack) */
     u32 arq_init;            /* void ARQInit(void) */
@@ -65,6 +67,7 @@ struct Params {
     u32 select_heap;     /* selects Camelot's heap `index`, and returns the heap it replaces */
     u32 before_sound[4]; /* the file loader's set-up, and what the system set-up calls before the sound set-up */
     u32 sound_init;      /* the game's sound set-up */
+    u32 set_up_retraces; /* the retraces that the driver waits after the sound set-up */
     u32 load_banks;      /* the game's sound banks: two MusyX groups */
     u32 play_song;       /* playSong(number) */
     u32 play_jingle;     /* playJingle(number) */
@@ -121,6 +124,8 @@ __attribute__((noreturn)) void driver_main(void) {
         if (p->before_sound[i])
             ((fn0)p->before_sound[i])();
     ((fn0)p->sound_init)();
+    for (u32 i = 0; i < p->set_up_retraces; i++)
+        ((fn0)p->vi_wait_for_retrace)();
     make_heap(0, p->heap0_size);
 
     /* The banks, then the song or the jingle. */

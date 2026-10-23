@@ -116,6 +116,17 @@ struct CatalogueSound
 // Sound `number` of a catalogue's file (CatalogueFile), or nothing if the file has no such sound.
 std::optional<CatalogueSound> ReadCatalogueSound(std::span<const uint8_t> file, uint32_t number);
 
+// The file sets and the songs of a catalogue that some sounds use, by their numbers in `sets` and `songs`.
+struct MusyXFilesInUse
+{
+    std::vector<bool> sets;
+    std::vector<bool> songs;
+};
+
+// The file sets and the songs that the sounds numbered in `sounds` use: the sets of their groups and their songs'
+// files. The driver reads no other set or song for them. A number outside the catalogue uses none.
+MusyXFilesInUse FilesInUse(const MusyXCatalogue& catalogue, std::span<const uint32_t> sounds);
+
 // The path of a file set's file or a song's file in the library: "MusyX/", the number, and the extension (".proj",
 // ".pool", ".sdir", ".samp" or ".sng").
 std::string MusyXPath(uint32_t number, const char* extension);

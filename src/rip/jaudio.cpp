@@ -5,6 +5,7 @@
 // library's sound files, and the length analysis through ntdlib's AnalyzeGameSound.
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -447,7 +448,6 @@ Sound SoundOf(const jaudio::SoundEntry& entry)
 std::vector<Sound> JacPieces(const disc::GameFiles& game, const GameProfile& profile)
 {
     constexpr std::size_t kHeader = 0x20, kEntry = 0x20, kNameSize = 14, kSize = 0x1c;
-    constexpr uint32_t kFirstPiece = 2;
     const ntdlib::Dol dol = ntdlib::Dol::ParseMain(game.dol);
     const std::span<const uint8_t> index = DolBytes(dol, profile.sequence_index);
     if (index.size() < kHeader || !std::equal(index.begin(), index.begin() + 4, "BARC"))
@@ -473,7 +473,7 @@ std::vector<Sound> JacPieces(const disc::GameFiles& game, const GameProfile& pro
         return jaudio::kAafSequence | group << 24 | system << 16 | part << 8 | piece;
     };
     std::vector<Sound> pieces;
-    for (uint32_t number = kFirstPiece; number < count; number++)
+    for (uint32_t number = kJacFirstPiece; number < count; number++)
     {
         const uint8_t* entry = index.data() + kHeader + number * kEntry;
         if (xsflib::LoadBe32(entry + kSize) == 0)
@@ -497,6 +497,97 @@ std::vector<Sound> JacPieces(const disc::GameFiles& game, const GameProfile& pro
     }
 
     return pieces;
+}
+
+std::vector<Sound> JacEffects(const disc::GameFiles& game, const GameProfile& profile)
+{
+    if (!profile.effect_table)
+    {
+        return {};
+    }
+
+    constexpr std::size_t kRow = 20, kEventTypes = 8, kAction = 6;
+    constexpr int32_t kSystem = -2, kPlayer = -1;
+    const ntdlib::Dol dol = ntdlib::Dol::ParseMain(game.dol);
+    const std::span<const uint8_t> rows = DolBytes(dol, profile.effect_table);
+    const std::span<const uint8_t> offsets = DolBytes(dol, profile.event_offsets);
+    if (rows.size() < profile.effect_count * kRow || offsets.size() < kEventTypes * 4)
+    {
+        throw xsflib::FormatError("main.dol's catalogue of effects runs past its section");
+    }
+
+    // An event type's first entry in the table of actions, and the effect that an entry plays.
+    const std::span<const uint8_t> actions = offsets.subspan(kEventTypes * 4);
+    const auto first_entry = [&offsets](uint32_t type)
+    {
+        return xsflib::LoadBe32(offsets.data() + 4 * type);
+    };
+    const auto effect_of = [&actions](uint32_t entry)
+    {
+        if (actions.size() / kAction <= entry)
+        {
+            throw xsflib::FormatError("main.dol's table of actions runs past its section");
+        }
+
+        return xsflib::LoadBe16(actions.data() + entry * kAction + 4);
+    };
+
+    std::vector<Sound> effects;
+    std::set<uint32_t> ids;
+    const auto add = [&](uint32_t id, std::string label)
+    {
+        const auto& left_out = profile.left_out_effects;
+        if (std::find(left_out.begin(), left_out.end(), id) == left_out.end() && ids.insert(id).second)
+        {
+            effects.push_back({id, std::move(label), false});
+        }
+    };
+
+    // Actions of events of different types can play the same effect. The first row that plays an effect names it.
+    std::set<uint32_t> event_effects;
+    for (uint32_t i = 0; i < profile.effect_count; i++)
+    {
+        const uint8_t* row = rows.data() + i * kRow;
+        const uint32_t number = xsflib::LoadBe32(row + 4);
+        std::string name =
+            TerminatedText(DolBytes(dol, xsflib::LoadBe32(row + 8)), "main.dol's name of an effect has no end");
+        const auto kind = static_cast<int32_t>(xsflib::LoadBe32(row + 16));
+        if (kind == kSystem || kind == kPlayer)
+        {
+            add(JacEffectId(kind == kSystem ? JacEffect::kSystem : JacEffect::kPlayer, number), std::move(name));
+            continue;
+        }
+
+        if (kind < 1 || kind >= static_cast<int32_t>(kEventTypes))
+        {
+            throw xsflib::FormatError("main.dol's catalogue of effects has a row of unknown kind");
+        }
+
+        // An event of the sounding type starts another effect as the game creates it. The rip plays the effects of
+        // that type on an event of the quiet type, by the same entry in the table of actions.
+        auto type = static_cast<uint32_t>(kind);
+        const uint32_t entry = first_entry(type) + number;
+        if (!event_effects.insert(effect_of(entry)).second)
+        {
+            continue;
+        }
+
+        if (type == profile.sounding_event)
+        {
+            type = profile.quiet_event;
+        }
+
+        add(JacEffectId(JacEffect::kEvent, type << 12 | (entry - first_entry(type))), std::move(name));
+    }
+
+    for (const uint32_t id : profile.other_effects)
+    {
+        char label[16];
+        std::snprintf(label, sizeof(label), "%08X", static_cast<unsigned>(id));
+        add(id, label);
+    }
+
+    return effects;
 }
 
 std::vector<UnplayedSequence> UnplayedSequences(const GameProfile& profile, const std::vector<uint8_t>& sound_archive,
@@ -578,6 +669,408 @@ std::vector<UnplayedSequence> UnplayedSequences(const GameProfile& profile, cons
     return unplayed;
 }
 
+namespace
+{
+
+// The arguments of a JAudio2 sequence command: their count, and their types, two bits each from the lowest. Type 0 is
+// a byte, 1 is 16 bits, 2 is 24 bits, and 3 is a register's number as a byte.
+struct SequenceCommand
+{
+    bool known = false;
+    uint8_t count = 0;
+    uint16_t types = 0;
+};
+
+// JAudio2's sequence commands from 0xA0, as ntdlib's sequence export reads them.
+constexpr std::array<SequenceCommand, 96> MakeSequenceCommands()
+{
+    std::array<SequenceCommand, 96> c{};
+    const auto set = [&c](int command, uint8_t count, uint16_t types)
+    {
+        c[static_cast<std::size_t>(command - 0xa0)] = {true, count, types};
+    };
+
+    set(0xb1, 3, 0x0000); // note on
+    set(0xb2, 1, 0x0000); // note off
+    set(0xb3, 4, 0x0040); // note
+    set(0xb4, 1, 0x0000); // the latest key
+    set(0xb8, 2, 0x0000); // a parameter, a byte
+    set(0xb9, 2, 0x0004); // a parameter, 16 bits
+    set(0xba, 3, 0x0010); // a parameter, a byte and a time
+    set(0xbb, 3, 0x0014); // a parameter, 16 bits and a time
+    set(0xc1, 2, 0x0008); // open a track
+    set(0xc2, 1, 0x0000); // close a track
+    set(0xc3, 1, 0x0002); // call
+    set(0xc4, 2, 0x0008); // call if
+    set(0xc5, 0, 0x0000); // return
+    set(0xc6, 1, 0x0000); // return if
+    set(0xc7, 1, 0x0002); // jump
+    set(0xc8, 2, 0x0008); // jump if
+    set(0xc9, 2, 0x000b); // jump through a table
+    set(0xca, 2, 0x000b); // call through a table
+    set(0xcb, 1, 0x0001); // loop start
+    set(0xcc, 0, 0x0000); // loop end
+    set(0xd0, 2, 0x0000); // read a port
+    set(0xd1, 2, 0x000c); // write a port
+    set(0xd2, 1, 0x0000); // check a port's import
+    set(0xd3, 1, 0x0000); // check a port's export
+    set(0xd4, 2, 0x000c); // write the parent's port
+    set(0xd5, 2, 0x000c); // write a child's port
+    set(0xd6, 2, 0x0000); // read the parent's port
+    set(0xd7, 2, 0x0000); // read a child's port
+    set(0xd8, 2, 0x0004); // load a register
+    set(0xd9, 3, 0x0030); // register arithmetic with a register
+    set(0xda, 3, 0x0010); // register arithmetic with a value
+    set(0xdb, 2, 0x0000); // negate a register
+    set(0xdc, 4, 0x00e0); // load a register from a table
+    set(0xe0, 1, 0x0001); // tempo
+    set(0xe1, 1, 0x0001); // bank and program
+    set(0xe2, 1, 0x0000); // bank
+    set(0xe3, 1, 0x0000); // program
+    set(0xe7, 2, 0x0004); // an oscillator's scale
+    set(0xe8, 2, 0x0008); // an oscillator's table
+    set(0xe9, 5, 0x0155); // a simple ADSR
+    set(0xea, 2, 0x0004); // bus connection
+    set(0xeb, 1, 0x0000); // IIR cutoff
+    set(0xec, 4, 0x0055); // IIR coefficients
+    set(0xed, 1, 0x0002); // FIR coefficients
+    set(0xf0, 0, 0x0000); // wait, a MIDI value
+    set(0xf1, 1, 0x0000); // wait, a byte
+    set(0xf3, 1, 0x0002); // interrupt table
+    set(0xf4, 1, 0x0001); // enable interrupts
+    set(0xf5, 1, 0x0001); // disable interrupts
+    set(0xf6, 0, 0x0000); // return from an interrupt
+    set(0xf7, 0, 0x0000); // clear the interrupt
+    set(0xf8, 2, 0x0004); // interrupt timer
+    set(0xf9, 1, 0x0001); // synchronise with the game
+    set(0xfd, 0, 0x0000); // print
+    set(0xfe, 0, 0x0000); // nothing
+    set(0xff, 0, 0x0000); // finish
+    return c;
+}
+
+constexpr std::array<SequenceCommand, 96> kSequenceCommands = MakeSequenceCommands();
+
+// The argument types that a register prefix (0x90 to 0x97) gives a command. The top bits of `mask`, one for each of
+// the first `count` arguments, mark those that come from registers.
+uint16_t RegisterTypes(uint8_t mask, int count)
+{
+    uint16_t types = 0;
+    for (int i = 0; i < count; i++)
+    {
+        if (mask & (0x80 >> i))
+        {
+            types = static_cast<uint16_t>(types | 3u << (2 * i));
+        }
+    }
+
+    return types;
+}
+
+// Skips a MIDI value: bytes with the top bit set, then one without it.
+std::size_t SkipMidiValue(const xsflib::Reader& r, std::size_t at)
+{
+    while (r.U8(at) & 0x80)
+    {
+        at++;
+    }
+
+    return at + 1;
+}
+
+// The banks that a JAudio2 sequence selects with commands 0xE1 and 0xE2, along every path from `start` in `data`
+// through the tracks that it opens, its calls and its jumps. Returns nothing if a path meets a command that isn't
+// known, a target or a bank that comes from a register, a jump or a call through a table, or the data's end.
+std::optional<std::set<uint32_t>> SequenceBanks(std::span<const uint8_t> data, uint32_t start)
+{
+    const xsflib::Reader r(data, true);
+    std::set<uint32_t> banks;
+    std::set<std::size_t> seen;
+    std::vector<std::size_t> paths = {start};
+    try
+    {
+        while (!paths.empty())
+        {
+            std::size_t at = paths.back();
+            paths.pop_back();
+            bool ends = false;
+            while (!ends && seen.insert(at).second)
+            {
+                const uint8_t b = r.U8(at++);
+                if (b < 0x80)
+                {
+                    // A note: its flags, its velocity, and a gate note's length.
+                    const uint8_t flags = r.U8(at);
+                    at = (flags & 7) == 0 ? SkipMidiValue(r, at + 2) : at + 2;
+                    continue;
+                }
+
+                if ((b & 0xf0) == 0x80)
+                {
+                    continue; // a note's end
+                }
+
+                uint8_t command = b;
+                uint16_t from_registers = 0;
+                if ((b & 0xf0) == 0x90)
+                {
+                    from_registers = RegisterTypes(r.U8(at), (b & 7) + 1);
+                    command = r.U8(at + 1);
+                    at += 2;
+                }
+
+                if (command == 0xf0)
+                {
+                    at = SkipMidiValue(r, at);
+                    continue;
+                }
+
+                if (command < 0xa0 || !kSequenceCommands[command - 0xa0].known || command == 0xc9 || command == 0xca)
+                {
+                    return std::nullopt;
+                }
+
+                // The arguments. One that comes from a register has no value here.
+                const SequenceCommand& info = kSequenceCommands[command - 0xa0];
+                std::array<std::optional<uint32_t>, 8> a;
+                uint16_t types = info.types | from_registers;
+                for (std::size_t i = 0; i < info.count; i++, types = static_cast<uint16_t>(types >> 2))
+                {
+                    switch (types & 3)
+                    {
+                    case 0:
+                        a[i] = r.U8(at);
+                        at += 1;
+                        break;
+                    case 1:
+                        a[i] = r.U16(at);
+                        at += 2;
+                        break;
+                    case 2:
+                        a[i] = uint32_t{r.U16(at)} << 8 | r.U8(at + 2);
+                        at += 3;
+                        break;
+                    default:
+                        at += 1;
+                        break;
+                    }
+                }
+
+                const bool selects = command == 0xe1 || command == 0xe2;
+                const bool goes =
+                    command == 0xc1 || command == 0xc3 || command == 0xc4 || command == 0xc7 || command == 0xc8;
+                const std::optional<uint32_t> value = command == 0xc3 || command == 0xc7 || selects ? a[0] : a[1];
+                if ((selects || goes) && !value)
+                {
+                    return std::nullopt;
+                }
+
+                if (command == 0xe1)
+                {
+                    banks.insert(*value >> 8);
+                }
+                else if (command == 0xe2)
+                {
+                    banks.insert(*value);
+                }
+                else if (goes)
+                {
+                    paths.push_back(*value);
+                }
+
+                // A jump, a return and the sequence's end end the path.
+                ends = command == 0xc7 || command == 0xc5 || command == 0xff;
+            }
+        }
+    }
+    catch (const xsflib::FormatError&)
+    {
+        return std::nullopt;
+    }
+
+    return banks;
+}
+
+// Walks the command list of a JAudio2 start-up archive, from "AA_<" to ">_AA", and calls visit(tag, at) for each
+// command, with `at` the offset of its first argument. The commands' sizes are those that ntdlib's readers skip.
+// Throws xsflib::FormatError if the list is damaged or has a command that isn't known.
+void VisitCommands(const xsflib::Reader& r, const std::function<void(std::string_view, std::size_t)>& visit)
+{
+    if (!r.Magic(0, "AA_<"))
+    {
+        throw xsflib::FormatError("it isn't a BAA archive");
+    }
+
+    for (std::size_t at = 4;;)
+    {
+        const std::span<const uint8_t> bytes = r.Sub(at, 4);
+        const std::string_view tag(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        at += 4;
+        if (tag == ">_AA")
+        {
+            return;
+        }
+
+        std::size_t size = 0;
+        if (tag == "ws  " || tag == "bms ")
+        {
+            size = 12;
+        }
+        else if (tag == "bnk " || tag == "bst " || tag == "bstn" || tag == "bsc " || tag == "bl_<" || tag == "vbnk" ||
+                 tag == "baac")
+        {
+            size = 8;
+        }
+        else if (tag == "bmsa" || tag == "dsqb" || tag == "bsft" || tag == "sect" || tag == "bfca")
+        {
+            size = 4;
+        }
+        else if (tag != ">_bl")
+        {
+            throw xsflib::FormatError("the BAA archive has a command that isn't known");
+        }
+
+        visit(tag, at);
+        at += size;
+    }
+}
+
+// The block that the command whose arguments start at `at` gives by its start and its end.
+std::span<const uint8_t> BlockAt(const xsflib::Reader& r, std::size_t at)
+{
+    const uint32_t start = r.U32(at), end = r.U32(at + 4);
+    if (end < start)
+    {
+        throw xsflib::FormatError("the BAA archive is damaged");
+    }
+
+    return r.Sub(start, end - start);
+}
+
+// The start-up archives in the "baac" block of start-up archive `baa`, in the block's order. The block holds the
+// archives' count, each one's offset in the block, then the archives. Throws xsflib::FormatError if the archive is
+// damaged.
+std::vector<std::span<const uint8_t>> BaacArchives(std::span<const uint8_t> baa)
+{
+    const xsflib::Reader r(baa, true);
+    std::span<const uint8_t> block;
+    const auto find_block = [&r, &block](std::string_view tag, std::size_t at)
+    {
+        if (tag == "baac")
+        {
+            block = BlockAt(r, at);
+        }
+    };
+    VisitCommands(r, find_block);
+
+    std::vector<std::span<const uint8_t>> archives;
+    if (block.empty())
+    {
+        return archives;
+    }
+
+    const xsflib::Reader b(block, true);
+    const uint32_t count = b.U32(0);
+    if (count > b.Size() / 4)
+    {
+        throw xsflib::FormatError("the BAA archive's baac block is damaged");
+    }
+
+    for (uint32_t i = 0; i < count; i++)
+    {
+        const uint32_t start = b.U32(4 + 4 * i);
+        const uint32_t end = i + 1 < count ? b.U32(8 + 4 * i) : static_cast<uint32_t>(b.Size());
+        if (end < start)
+        {
+            throw xsflib::FormatError("the BAA archive's baac block is damaged");
+        }
+
+        archives.push_back(b.Sub(start, end - start));
+    }
+
+    return archives;
+}
+
+// The archive of the "baac" block that each of `sounds` plays a bank of: its place in the block plus 1, or 0 for none.
+// A sound of the sequence collection plays the banks that its sequence selects (SequenceBanks). A bank's header holds
+// its number after its tag and its size. Throws xsflib::FormatError if the archive is damaged.
+std::vector<uint32_t> BaacArchivesOf(std::span<const uint8_t> baa, const std::vector<jaudio::SoundEntry>& sounds)
+{
+    // Each archive's banks.
+    std::vector<std::set<uint32_t>> banks;
+    for (const std::span<const uint8_t> archive : BaacArchives(baa))
+    {
+        const xsflib::Reader a(archive, true);
+        std::set<uint32_t>& numbers = banks.emplace_back();
+        const auto read_bank = [&a, &numbers](std::string_view tag, std::size_t at)
+        {
+            if (tag == "bnk ")
+            {
+                numbers.insert(a.U32(a.U32(at + 4) + 8));
+            }
+        };
+        VisitCommands(a, read_bank);
+    }
+
+    // The sequence collection: "SC", the categories' count, then each category's table of sequence offsets.
+    const xsflib::Reader r(baa, true);
+    std::span<const uint8_t> collection;
+    const auto find_collection = [&r, &collection](std::string_view tag, std::size_t at)
+    {
+        if (tag == "bsc ")
+        {
+            collection = BlockAt(r, at);
+        }
+    };
+    VisitCommands(r, find_collection);
+
+    std::vector<uint32_t> archives(sounds.size(), 0);
+    if (banks.empty() || collection.empty())
+    {
+        return archives;
+    }
+
+    const xsflib::Reader sc(collection, true);
+    if (sc.U8(0) != 'S' || sc.U8(1) != 'C')
+    {
+        throw xsflib::FormatError("the BAA archive's sequence collection is damaged");
+    }
+
+    for (std::size_t s = 0; s < sounds.size(); s++)
+    {
+        const jaudio::SoundEntry& sound = sounds[s];
+        if (sound.source != jaudio::SoundEntry::Source::kCollection || sound.stream || sound.group >= sc.U16(2))
+        {
+            continue;
+        }
+
+        const uint32_t table = sc.U32(8 + 4 * std::size_t{sound.group});
+        if (sound.resource >= sc.U32(table))
+        {
+            continue;
+        }
+
+        const std::optional<std::set<uint32_t>> selected =
+            SequenceBanks(collection, sc.U32(table + 4 + 4 * std::size_t{sound.resource}));
+        for (std::size_t i = 0; selected && i < banks.size(); i++)
+        {
+            const auto in_archive = [&banks, i](uint32_t bank)
+            {
+                return banks[i].contains(bank);
+            };
+            if (std::any_of(selected->begin(), selected->end(), in_archive))
+            {
+                archives[s] = static_cast<uint32_t>(i + 1);
+                break;
+            }
+        }
+    }
+
+    return archives;
+}
+
+} // namespace
+
 std::optional<std::string> ListJAudioSounds(const disc::GameFiles& game, const GameProfile& profile, GameSounds& listed)
 {
     if (!game.read_file(profile.sound_archive, listed.sound_archive))
@@ -629,15 +1122,33 @@ std::optional<std::string> ListJAudioSounds(const disc::GameFiles& game, const G
         listed.warnings.push_back(std::string("can't read ") + profile.sequence_archive);
     }
 
-    for (const jaudio::SoundEntry& entry : entries)
+    // The archive of the "baac" block that each sound loads, in bits 28 to 31 of its ID.
+    std::vector<uint32_t> archives(entries.size(), 0);
+    if (profile.baac_archives)
     {
-        listed.sounds.push_back(SoundOf(entry));
+        try
+        {
+            archives = BaacArchivesOf(listed.sound_archive, entries);
+        }
+        catch (const xsflib::FormatError& e)
+        {
+            listed.warnings.push_back(std::string(profile.sound_archive) + ": " + e.what() +
+                                      "; no sound loads an archive of its baac block");
+        }
+    }
+
+    for (std::size_t i = 0; i < entries.size(); i++)
+    {
+        Sound sound = SoundOf(entries[i]);
+        sound.id |= archives[i] << kBaacArchiveShift;
+        listed.sounds.push_back(std::move(sound));
     }
 
     return std::nullopt;
 }
 
-std::optional<std::string> AddJacFiles(ProgramBuilder& program, const disc::GameFiles& game, const GameProfile& profile)
+std::optional<std::string> AddJacFiles(ProgramBuilder& program, const disc::GameFiles& game, const GameProfile& profile,
+                                       const std::vector<uint32_t>* sounds)
 {
     std::vector<uint8_t> banks;
     if (!game.read_file || !game.read_file(profile.sound_archive, banks))
@@ -645,7 +1156,27 @@ std::optional<std::string> AddJacFiles(ProgramBuilder& program, const disc::Game
         return std::string("can't read ") + profile.sound_archive;
     }
 
+    // Whether the rip loads group `group` of wave system `system`. At start-up, the sound library loads the effects'
+    // first group, group 0 of system 0. The driver loads the group that a piece's ID gives, and the profile's groups
+    // for an effect (driver/pikmin.c). Without `sounds`, the rip loads every group.
+    const auto loads = [sounds, &profile](uint32_t system, uint32_t group)
+    {
+        const uint32_t entry = system << 16 | group;
+        const auto gives = [&profile, system, group, entry](uint32_t id)
+        {
+            if (IsJacEffect(id))
+            {
+                const std::vector<uint32_t>& groups = profile.effect_groups;
+                return std::find(groups.begin(), groups.end(), entry) != groups.end();
+            }
+
+            return (id >> 16 & 0xff) == system && (id >> 24 & 0x7f) == group;
+        };
+        return !sounds || entry == 0 || std::any_of(sounds->begin(), sounds->end(), gives);
+    };
+
     std::vector<std::string> paths = {profile.sequence_archive};
+    std::set<std::string> loaded = {profile.sequence_archive};
     try
     {
         const xsflib::Reader r(banks, true);
@@ -660,12 +1191,23 @@ std::optional<std::string> AddJacFiles(ProgramBuilder& program, const disc::Game
                 continue;
             }
 
-            for (const jaudio::WaveGroup& group : jaudio::ReadWaveSystem(r.Sub(offset, size), number).groups)
+            const std::vector<jaudio::WaveGroup> groups = jaudio::ReadWaveSystem(r.Sub(offset, size), number).groups;
+            for (std::size_t g = 0; g < groups.size(); g++)
             {
-                const std::string path = profile.wave_folder + group.archive;
-                if (!group.archive.empty() && std::find(paths.begin(), paths.end(), path) == paths.end())
+                if (groups[g].archive.empty())
+                {
+                    continue;
+                }
+
+                const std::string path = profile.wave_folder + groups[g].archive;
+                if (std::find(paths.begin(), paths.end(), path) == paths.end())
                 {
                     paths.push_back(path);
+                }
+
+                if (loads(number, static_cast<uint32_t>(g)))
+                {
+                    loaded.insert(path);
                 }
             }
         }
@@ -677,11 +1219,24 @@ std::optional<std::string> AddJacFiles(ProgramBuilder& program, const disc::Game
 
     program.AddFile(profile.sound_archive, banks);
 
-    return AddDiscFiles(program, game, paths);
+    // An archive that the rip never loads keeps its size, but holds zeros.
+    for (const std::string& path : paths)
+    {
+        std::vector<uint8_t> bytes;
+        if (!game.read_file || !game.read_file(path, bytes))
+        {
+            return "can't read " + path;
+        }
+
+        program.AddFile(path, loaded.contains(path) ? bytes : std::vector<uint8_t>(bytes.size(), 0));
+    }
+
+    return std::nullopt;
 }
 
 std::optional<std::string> AddJAudioFiles(ProgramBuilder& program, const disc::GameFiles& game,
-                                          const GameProfile& profile, const std::vector<std::string>* wave_archives)
+                                          const GameProfile& profile, const std::vector<std::string>* wave_archives,
+                                          const std::vector<uint32_t>* sounds)
 {
     std::vector<uint8_t> sound_archive;
     if (!game.read_file || !game.read_file(profile.sound_archive, sound_archive))
@@ -727,6 +1282,33 @@ std::optional<std::string> AddJAudioFiles(ProgramBuilder& program, const disc::G
             std::vector<uint8_t> decoded;
             names = jaudio1 ? jaudio::AafWaveArchiveNames(sound_archive)
                             : jaudio::WaveArchiveNames(jaudio::DecodeIfYaz0(sound_archive, decoded), kBaaOptions);
+        }
+
+        // The wave archives of the "baac" block's archives that the sounds load.
+        if (profile.baac_archives)
+        {
+            std::vector<uint8_t> decoded;
+            const std::vector<std::span<const uint8_t>> archives =
+                BaacArchives(jaudio::DecodeIfYaz0(sound_archive, decoded));
+            for (std::size_t i = 0; i < archives.size(); i++)
+            {
+                const auto loads = [i](uint32_t id)
+                {
+                    return id >> kBaacArchiveShift == i + 1;
+                };
+                if (sounds && std::none_of(sounds->begin(), sounds->end(), loads))
+                {
+                    continue;
+                }
+
+                for (const std::string& name : jaudio::WaveArchiveNames(archives[i], kBaaOptions))
+                {
+                    if (std::find(names.begin(), names.end(), name) == names.end())
+                    {
+                        names.push_back(name);
+                    }
+                }
+            }
         }
 
         for (const std::string& name : names)

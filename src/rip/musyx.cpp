@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <utility>
@@ -115,6 +116,59 @@ std::vector<Sound> NamedSongs(const ntdlib::Dol& dol, const GameProfile& profile
     return songs;
 }
 
+// The effects that a game's play function starts by number (GameProfile::effect_songs), after the `songs` that its
+// code names: the songs that the game plays as effects, then MusyX's effects. Each is named after its number, such as
+// "se-0013". A song's ID is as in NamedSongs. An effect's ID is the profile's `musyx_effect_bit` and the number. A
+// number that a sound takes already, or a song's number that an effect takes, isn't listed again. Throws
+// xsflib::FormatError if a table lies outside the game's code.
+std::vector<Sound> PlayedEffects(const ntdlib::Dol& dol, const GameProfile& profile, const std::vector<Sound>& songs)
+{
+    constexpr uint32_t kSongEntry = 8, kEffectEntry = 6;
+    const auto entry = [&dol](uint32_t address, uint32_t size)
+    {
+        const std::span<const uint8_t> bytes = DolBytes(dol, address);
+        if (bytes.size() < size)
+        {
+            throw xsflib::FormatError("main.dol's table of effects ends early");
+        }
+
+        return bytes;
+    };
+
+    std::set<uint32_t> listed;
+    for (const Sound& song : songs)
+    {
+        listed.insert(song.id & 0xffff);
+    }
+
+    std::vector<uint32_t> effects;
+    for (uint32_t i = 0; i < profile.play_effect_count; i++)
+    {
+        effects.push_back(xsflib::LoadBe16(entry(profile.play_effects + i * kEffectEntry, kEffectEntry).data()));
+    }
+
+    std::vector<Sound> sounds;
+    for (uint32_t i = 0; i < profile.effect_song_count; i++)
+    {
+        const std::span<const uint8_t> bytes = entry(profile.effect_songs + i * kSongEntry, kSongEntry);
+        const uint32_t number = xsflib::LoadBe16(bytes.data() + 2);
+        if (std::find(effects.begin(), effects.end(), number) == effects.end() && listed.insert(number).second)
+        {
+            sounds.push_back({uint32_t{bytes[0]} << 24 | number, "se-" + ZeroPadded(number, 4), false});
+        }
+    }
+
+    for (const uint32_t number : effects)
+    {
+        if (listed.insert(number).second)
+        {
+            sounds.push_back({profile.musyx_effect_bit | number, "se-" + ZeroPadded(number, 4), false});
+        }
+    }
+
+    return sounds;
+}
+
 } // namespace
 
 std::vector<Sound> MusyXSongs(const disc::GameFiles& game, const GameProfile& profile)
@@ -122,7 +176,10 @@ std::vector<Sound> MusyXSongs(const disc::GameFiles& game, const GameProfile& pr
     const ntdlib::Dol dol = ntdlib::Dol::ParseMain(game.dol);
     if (profile.named_songs)
     {
-        return NamedSongs(dol, profile);
+        std::vector<Sound> sounds = NamedSongs(dol, profile);
+        std::vector<Sound> effects = PlayedEffects(dol, profile, sounds);
+        sounds.insert(sounds.end(), effects.begin(), effects.end());
+        return sounds;
     }
 
     std::vector<Sound> songs;
@@ -158,25 +215,35 @@ std::vector<Sound> CatalogueSounds(const disc::GameFiles& game, const GameProfil
 }
 
 std::optional<std::string> AddMusyXCatalogue(ProgramBuilder& program, const disc::GameFiles& game,
-                                             const GameProfile& profile)
+                                             const GameProfile& profile, const std::vector<uint32_t>* sounds)
 {
     try
     {
         const MusyXCatalogue catalogue = GatherMusyX(game, profile);
         program.AddFile(kMusyXCatalogue, CatalogueFile(catalogue));
+
+        // A file that none of `sounds` uses keeps its size, but holds zeros.
+        const std::optional<MusyXFilesInUse> use =
+            sounds ? std::optional<MusyXFilesInUse>(FilesInUse(catalogue, *sounds)) : std::nullopt;
+        const auto add = [&program](uint32_t number, const char* extension, const std::vector<uint8_t>& data, bool used)
+        {
+            program.AddFile(MusyXPath(number, extension), used ? data : std::vector<uint8_t>(data.size(), 0));
+        };
+
         for (std::size_t i = 0; i < catalogue.sets.size(); i++)
         {
             const MusyXCatalogue::FileSet& set = catalogue.sets[i];
             const uint32_t number = static_cast<uint32_t>(i);
-            program.AddFile(MusyXPath(number, ".proj"), set.project);
-            program.AddFile(MusyXPath(number, ".pool"), set.pool);
-            program.AddFile(MusyXPath(number, ".sdir"), set.sdir);
-            program.AddFile(MusyXPath(number, ".samp"), set.samples);
+            const bool used = !use || use->sets[i];
+            add(number, ".proj", set.project, used);
+            add(number, ".pool", set.pool, used);
+            add(number, ".sdir", set.sdir, used);
+            add(number, ".samp", set.samples, used);
         }
 
         for (std::size_t i = 0; i < catalogue.songs.size(); i++)
         {
-            program.AddFile(MusyXPath(static_cast<uint32_t>(i), ".sng"), catalogue.songs[i]);
+            add(static_cast<uint32_t>(i), ".sng", catalogue.songs[i], !use || use->songs[i]);
         }
     }
     catch (const xsflib::FormatError& e)
@@ -513,7 +580,7 @@ private:
 std::optional<Timing> MeasureMusyXSound(Player& player, const GameProfile& profile, const LoadedSet& library,
                                         uint32_t id)
 {
-    if (IsMusyXEffect(library, id))
+    if (IsMusyXEffect(library, id) || (id & profile.musyx_effect_bit) != 0)
     {
         if (profile.musyx_voices.count == 0)
         {
