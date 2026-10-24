@@ -64,12 +64,26 @@ constexpr uint32_t kN64BankEffects = 128;
 constexpr uint32_t kN64Museum = 88;
 constexpr const char* kN64MuseumRooms[] = {"lobby", "paintings", "fish", "insects", "fossils"};
 
-// The game's numbers that its start of a piece of music (Sou_BgmStart) doesn't play as a piece: 0 stops the music, and
-// 83 to 87 play the effects of the start-up screen. Numbers 112 to 121 are the second parts of Kapp'n's songs. The
-// first part's script starts its second part. The game's driver plays a second part as a piece.
-bool N64PlaysPiece(uint32_t number)
+// The sound ID of the game's piece `number` in the weather `weather` and the museum's room `room`, with the islander
+// on Doubutsu no Mori e+'s island or not. The fields follow driver/animal_crossing.c's layouts.
+uint32_t N64PieceId(const GameProfile& profile, uint32_t number, uint32_t weather, uint32_t room, bool islander)
 {
-    return number != 0 && !(number >= 83 && number <= 87);
+    if (profile.n64_wide_numbers)
+    {
+        return number | weather << 16 | room << 20 | uint32_t{islander} << 23;
+    }
+
+    return number | weather << 8 | room << 16;
+}
+
+// Whether the game's start of a piece of music (Sou_BgmStart) plays its number `number` as a piece. Number 0 stops the
+// music. Animal Crossing and Doubutsu no Mori e+ play 83 to 87 as effects of the start-up screen
+// (GameProfile::n64_effect_numbers). Doubutsu no Mori+ plays them as pieces. Numbers 112 to 121 are the second parts of
+// Kapp'n's songs. The first part's script starts its second part. The game's driver plays a second part as a piece.
+bool N64PlaysPiece(const GameProfile& profile, uint32_t number)
+{
+    const auto [first_effect, last_effect] = profile.n64_effect_numbers;
+    return number != 0 && !(first_effect != 0 && number >= first_effect && number <= last_effect);
 }
 
 // A sequence of the game's table of sequences (GameProfile::sequence_table): its number, and its offset and size in the
@@ -114,42 +128,50 @@ N64TableSequence N64Sequence(const ntdlib::Dol& dol, const GameProfile& profile,
 
 // A game's pieces of music with the Nintendo 64's sound library, by the game's numbers for them (see N64Sounds). A
 // piece that plays the hour is listed once for each of kN64Weathers. The museum's piece is listed once for each of its
-// rooms. Another number is listed if the game plays it as a piece (N64PlaysPiece) and no lower such number plays the
-// same sequence. A piece's label is "bgm" and its number in three digits. For a piece of the hour or of the museum, a
-// hyphen and the weather's or the room's name follow. Throws xsflib::FormatError if a table lies outside the game's
-// code.
+// rooms. Doubutsu no Mori e+'s island piece is listed with the islander and without. Another number is listed if the
+// game plays it as a piece (N64PlaysPiece) and no lower such number plays the same sequence. A piece's label is "bgm"
+// and its number in three digits. For a piece of the hour, of the museum or of the island, a hyphen and the weather's,
+// the room's or the islander's name follow. Throws xsflib::FormatError if a table lies outside the game's code.
 std::vector<Sound> N64Pieces(const ntdlib::Dol& dol, const GameProfile& profile)
 {
-    constexpr uint32_t kPieces = 256;
+    const uint32_t entry_size = profile.n64_wide_numbers ? 2 : 1;
     const std::span<const uint8_t> table = DolBytes(dol, profile.music_table);
-    if (table.size() < kPieces)
+    if (table.size() < uint64_t{profile.n64_pieces} * entry_size)
     {
         throw xsflib::FormatError("main.dol's table of music ends early");
     }
 
     std::vector<Sound> sounds;
     std::set<uint32_t> sequences;
-    for (uint32_t number = 0; number < kPieces; number++)
+    for (uint32_t number = 0; number < profile.n64_pieces; number++)
     {
-        const uint32_t sequence = N64Sequence(dol, profile, table[number]).number;
+        const uint32_t entry = profile.n64_wide_numbers ? xsflib::LoadBe16(table.data() + 2 * number) : table[number];
+        const uint32_t sequence = N64Sequence(dol, profile, entry).number;
         std::string label = "bgm" + ZeroPadded(number, 3);
         if (number >= kN64FirstHour && number <= kN64LastHour)
         {
             for (const N64Weather& weather : kN64Weathers)
             {
-                sounds.push_back({uint32_t{weather.number} << 8 | number, label + "-" + weather.name, true});
+                sounds.push_back(
+                    {N64PieceId(profile, number, weather.number, 0, false), label + "-" + weather.name, true});
             }
         }
         else if (number == kN64Museum)
         {
             for (uint32_t room = 1; room <= std::size(kN64MuseumRooms); room++)
             {
-                sounds.push_back({room << 16 | number, label + "-" + kN64MuseumRooms[room - 1], true});
+                sounds.push_back(
+                    {N64PieceId(profile, number, 0, room, false), label + "-" + kN64MuseumRooms[room - 1], true});
             }
         }
-        else if (N64PlaysPiece(number) && sequences.insert(sequence).second)
+        else if (number != 0 && number == profile.n64_island_piece)
         {
-            sounds.push_back({number, std::move(label), true});
+            sounds.push_back({N64PieceId(profile, number, 0, 0, true), label + "-islander", true});
+            sounds.push_back({N64PieceId(profile, number, 0, 0, false), label + "-no-islander", true});
+        }
+        else if (N64PlaysPiece(profile, number) && sequences.insert(sequence).second)
+        {
+            sounds.push_back({N64PieceId(profile, number, 0, 0, false), std::move(label), true});
         }
     }
 
@@ -263,17 +285,15 @@ enum class N64Script : uint8_t
     kLayer,
 };
 
-// Where Animal Crossing's build of the Nintendo 64's sound library keeps what the length analysis reads. A script's
-// state holds its program counter at +0, the depth of its calls and loops at +0x18, and its value at +0x19. A sequence
-// player holds its script's state at +0x78, its sequence's data at +0x18 and the ticks left to wait at +0x10. A channel
-// holds its script's state at +0x64, its player at +0x50 and the ticks left to wait at +0x22. A layer holds its
-// script's state at +0x64, its channel at +0x60 and the ticks left to wait at +0x1a.
+// Where the Nintendo 64's sound library keeps what the length analysis reads. The builds in Animal Crossing, Doubutsu
+// no Mori+ and Doubutsu no Mori e+ keep it in the same places, apart from a sequence player's fields
+// (GameProfile::n64_player_fields). A script's state holds its program counter at +0, the depth of its calls and loops
+// at +0x18, and its value at +0x19. A channel holds its script's state at +0x64, its player at +0x50 and the ticks left
+// to wait at +0x22. A layer holds its script's state at +0x64, its channel at +0x60 and the ticks left to wait at
+// +0x1a.
 constexpr uint32_t kN64Pc = 0x00;
 constexpr uint32_t kN64Depth = 0x18;
 constexpr uint32_t kN64Value = 0x19;
-constexpr uint32_t kN64PlayerScript = 0x78;
-constexpr uint32_t kN64PlayerData = 0x18;
-constexpr uint32_t kN64PlayerWait = 0x10;
 constexpr uint32_t kN64ChannelScript = 0x64;
 constexpr uint32_t kN64ChannelPlayer = 0x50;
 constexpr uint32_t kN64ChannelWait = 0x22;
@@ -363,8 +383,8 @@ public:
     uint32_t Start(uint32_t handle)
     {
         root_ = handle;
-        const uint32_t track = root_ + (effect_ ? kN64ChannelScript : kN64PlayerScript);
-        data_ = machine_.Word((effect_ ? machine_.Word(root_ + kN64ChannelPlayer) : root_) + kN64PlayerData);
+        const uint32_t track = root_ + (effect_ ? kN64ChannelScript : player_script_);
+        data_ = machine_.Word((effect_ ? machine_.Word(root_ + kN64ChannelPlayer) : root_) + player_data_);
         scripts_.emplace(track, effect_ ? N64Script::kChannel : N64Script::kPlayer);
 
         return track;
@@ -406,7 +426,7 @@ public:
         switch (it->second)
         {
         case N64Script::kPlayer:
-            return {static_cast<int32_t>(machine_.Word(track - kN64PlayerScript + kN64PlayerWait) >> 16), false};
+            return {static_cast<int32_t>(machine_.Word(track - player_script_ + player_wait_) >> 16), false};
         case N64Script::kChannel:
             return {static_cast<int32_t>(machine_.Word(track - kN64ChannelScript + kN64ChannelWait) >> 16), false};
         case N64Script::kLayer:
@@ -451,7 +471,7 @@ private:
             return channel != 0 && channel == root_;
         }
 
-        const uint32_t owner = channel ? machine_.Word(channel + kN64ChannelPlayer) : state - kN64PlayerScript;
+        const uint32_t owner = channel ? machine_.Word(channel + kN64ChannelPlayer) : state - player_script_;
         return owner == root_;
     }
 
@@ -531,6 +551,9 @@ private:
 
     AnalysisMachine& machine_;
     const GameProfile& profile_;
+    const uint32_t player_script_ = profile_.n64_player_fields[0]; // a sequence player's script's state
+    const uint32_t player_data_ = profile_.n64_player_fields[1];   // its sequence's data
+    const uint32_t player_wait_ = profile_.n64_player_fields[2];   // its ticks left to wait
     const bool effect_;
     uint32_t root_ = 0;                     // the sound's sequence player or channel, once the driver has started it
     uint32_t data_ = 0;                     // the sequence's data

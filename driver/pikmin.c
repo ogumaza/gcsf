@@ -37,6 +37,9 @@
  * gives each event its volume and pan by its place against the camera. The driver doesn't run the game's check of
  * its events. The event then stays as long as the effect plays, as an event that the game updates each frame does.
  * The driver watches the track that plays the effect.
+ * The sound of the formation plays in a track of the effects sequence while the player moves the formation. The
+ * game's function for the formation takes the move as x and y, -127 to 127, once a frame. It writes x and the move's
+ * length to ports of the track. The driver gives it x from the port list's port 2 and y from port 3 each frame.
  * A step that fails stops the driver with its number in the status word (step 1 is the driver's check of its parameter
  * block). `driver_params.status` reports the driver's progress to the player (see docs/gcsf.md).
  *
@@ -64,6 +67,7 @@
 #define EFFECT_SYSTEM 1u
 #define EFFECT_PLAYER 2u
 #define EFFECT_EVENT 3u
+#define EFFECT_FORMATION 4u
 #define EVENT_TYPE(number) ((number) >> 12)
 #define EVENT_ACTION(number) ((number) & 0xfffu)
 
@@ -94,6 +98,17 @@ static const u32 scene_systems[] = {14, 15, 2};
 #define TRACK_STATE 0x3cu
 #define TRACK_FREE 0u
 #define TRACK_CHILDREN 16u
+
+/* The ports of the formation's track that Jac_Orima_Formation (0x80018200) writes: x, and the length of the move
+   (x, y), from 0 to 179. It writes 1 to port 0 as a move starts and 0 as it ends. The driver passes port 2's value as
+   x and port 3's as y. With x 0, the ports take those values. */
+#define FORMATION_X_PORT 2u
+#define FORMATION_Y_PORT 3u
+
+/* The offset of the port list in the parameter block. The word after the driver's entry holds the list's address. */
+#define PORT_LIST_OFFSET 0xcc
+#define TEXT(x) #x
+#define NUMBER_TEXT(x) TEXT(x)
 
 struct Params {
     u32 magic;
@@ -148,7 +163,16 @@ struct Params {
     u32 system_track;       /* the name of the track that plays the system's effects */
     u32 player_track;       /* the name of the track that plays the player's effects */
     u32 events_track;       /* the name of the events' root track. Its children play the events */
+    /* the game profile for the formation */
+    u32 move_formation;  /* void Jac_Orima_Formation(s32 x, s32 y) */
+    u32 formation_track; /* the name of the effects sequence's track for the formation */
+    /* the ports that the player sets: (port << 16) | value */
+    u32 port_count;
+    u32 ports[MAX_PORTS];
 };
+
+_Static_assert(__builtin_offsetof(struct Params, port_count) == PORT_LIST_OFFSET,
+               "the word after the entry holds the port list's address");
 
 __attribute__((section(".params"), used)) volatile struct Params driver_params = {
     .magic = PARAMS_MAGIC,
@@ -195,6 +219,21 @@ static u32 playing_child(const u32* parents, u32 count) {
     return 0;
 }
 
+/* The value of `port` in the port list, sign-extended from 16 bits, or 0. */
+static s32 listed_port(volatile struct Params* p, u32 port) {
+    s32 value = 0;
+    for (u32 i = 0; i < p->port_count && i < MAX_PORTS; i++) {
+        if (p->ports[i] >> 16 == port)
+            value = (s32)(p->ports[i] << 16) >> 16;
+    }
+    return value;
+}
+
+/* One frame of a move of the formation by the port list's x and y, as the game's frame passes the player's move. */
+static void move_formation(volatile struct Params* p) {
+    ((fn2)p->move_formation)((u32)listed_port(p, FORMATION_X_PORT), (u32)listed_port(p, FORMATION_Y_PORT));
+}
+
 /* Steps 8 to 11: an effect. */
 __attribute__((noreturn)) static void play_effect(volatile struct Params* p) {
     /* The effects' other wave groups, then a pass on the disc after them. */
@@ -225,9 +264,10 @@ __attribute__((noreturn)) static void play_effect(volatile struct Params* p) {
        one of the player's. */
     *(volatile u32*)p->scene = SCENE_OF_PLAY;
     const u32 number = EFFECT_NUMBER(p->sound_id);
+    const u32 kind = EFFECT_KIND(p->sound_id);
     u32 parents[2] = {system_track, player_track};
     u32 count = 2;
-    switch (EFFECT_KIND(p->sound_id)) {
+    switch (kind) {
     case EFFECT_SYSTEM:
         if (number == EFFECT_CLOSES_MENU)
             *(volatile u32*)p->menu = 1;
@@ -245,6 +285,19 @@ __attribute__((noreturn)) static void play_effect(volatile struct Params* p) {
         count = 1;
         break;
     }
+    case EFFECT_FORMATION:
+        /* Without a move, the formation plays nothing. */
+        if (!listed_port(p, FORMATION_X_PORT) && !listed_port(p, FORMATION_Y_PORT)) {
+            p->status = STATUS_FINISHED;
+            for (;;)
+                wait_frame();
+        }
+        parents[0] = ((fn1)p->get_track_handle)(p->formation_track);
+        if (!parents[0])
+            fail(10);
+        move_formation(p);
+        count = 1;
+        break;
     default:
         fail(10);
     }
@@ -253,12 +306,16 @@ __attribute__((noreturn)) static void play_effect(volatile struct Params* p) {
     for (u32 frames = 0; !(piece_root = playing_child(parents, count)); frames++) {
         if (frames > SETUP_FRAMES)
             fail(11);
+        if (kind == EFFECT_FORMATION)
+            move_formation(p);
         ((fn0)p->update_camera)();
         wait_frame();
     }
 
     p->sound = (u32)&piece_root;
     for (;;) {
+        if (kind == EFFECT_FORMATION)
+            move_formation(p);
         ((fn0)p->update_camera)();
         check_end(p);
         wait_frame();
@@ -346,6 +403,7 @@ __attribute__((noreturn)) void driver_main(void) {
     watch_piece(p);
 }
 
+/* The entry, then the port list's address. */
 __attribute__((naked, section(".text.entry"))) void driver_entry(void) {
-    __asm__ volatile("b driver_main");
+    __asm__ volatile("b driver_main\n\t.long driver_params + " NUMBER_TEXT(PORT_LIST_OFFSET));
 }

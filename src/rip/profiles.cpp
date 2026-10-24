@@ -348,6 +348,7 @@ const GameProfile kWindWakerUsa = {
             5,                    // sound_state_offset
             0x8028fff8,           // set_camera
             0x803ed050,           // default_camera
+            0x80298b74,           // set_port_data
         },
     .watch =
         {
@@ -368,12 +369,61 @@ const GameProfile kWindWakerUsa = {
             .parent_offset = 0x31c,
             .children_offset = 0x320,
         },
+    // The effects that read a port that the game sets when it starts them. An ID such as 0x2803 is effect se2-0003.
+    // Port 6 holds the low 16 bits of the map information that the game passes with an effect. For a step, a jump, a
+    // landing or a climb, that's the material of the ground in the game's collision data, 1 to 27. For a hit, it's the
+    // material of the surface, or a code from 32 up for the kind of thing hit. An effect plays nothing for 0. Some
+    // values play the same variant. A list holds the lowest value that plays each variant. The game also gives every
+    // effect port 9: the reverb of the room that the effect plays in. Rips play effects without it. se3-0050, a
+    // Stalfos's step, plays nothing without it. Its list holds the reverbs of the rooms that place a Stalfos.
+    .port_effects =
+        {
+            {0x2803, 6, {1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+                         20, 21, 22, 25, 26, 27, 32, 33, 48, 49, 50, 51, 52, 53, 54, 65, 66, 68}},
+            {0x2804, 6, {1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+                         20, 21, 22, 25, 26, 27, 32, 33, 48, 49, 50, 51, 52, 53, 54, 65, 66, 68}},
+            {0x2805, 6, {1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+                         20, 21, 22, 25, 26, 27, 32, 33, 48, 49, 50, 51, 52, 53, 54, 65, 66, 68}},
+            {0x2833, 6, {1,  2,  3,  4,  6,  7,  8,  9,  10, 12, 13, 14, 15, 16, 17, 18,
+                         19, 20, 21, 22, 25, 26, 27, 32, 33, 49, 51, 52, 53, 54, 68}},
+            {0x2834, 6, {1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+                         20, 21, 22, 25, 26, 27, 32, 33, 48, 49, 50, 51, 52, 53, 54, 65, 66, 68}},
+            {0x2855, 6, {1, 2, 3, 4, 6, 7, 9, 12, 15, 16, 18, 19, 20, 21, 22, 25, 32, 49, 50, 52, 53, 54, 68}},
+            {0x286f, 6, {1, 2, 3, 4, 6, 7, 9, 10, 12, 17, 19, 20, 21, 22, 25, 32, 49, 51, 52, 53, 54, 68}},
+            {0x287a, 6, {1, 2, 3, 4, 6, 9, 10, 12, 17, 18, 19, 20, 21, 22, 25, 32, 48, 49, 51, 52, 53, 54, 68}},
+            {0x287b, 6, {1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+                         20, 21, 22, 25, 26, 27, 32, 33, 48, 49, 50, 51, 52, 53, 54, 65, 66, 68}},
+            {0x3800, 6, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 17, 18, 19, 20, 21, 22, 24, 26, 27}},
+            {0x3801, 6, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 18, 19, 20, 21, 22, 23, 26, 27}},
+            {0x3802, 6, {3, 6, 9, 11, 13, 26}},
+            {0x3803, 6, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 18, 19, 20, 21, 26, 27}},
+            {0x380a, 6, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 17, 18, 19, 20, 21, 22, 24, 26, 27}},
+            {0x380b, 6, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 18, 19, 20, 21, 22, 23, 26, 27}},
+            {0x380c, 6, {3, 6, 9, 11, 13, 26}},
+            {0x3815, 6, {1, 2, 8, 9, 13, 18}},
+            {0x3818, 6, {1, 2, 8, 9, 13, 18}},
+            {0x3826, 6, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 17, 18, 19, 20, 21, 22, 24, 26, 27}},
+            {0x3827, 6, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 18, 19, 20, 21, 22, 23, 26, 27}},
+            {0x3828, 6, {3, 6, 9, 11, 13, 26}},
+            {0x3829, 6, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 18, 19, 20, 21, 26, 27}},
+            {0x382b, 6, {1, 3, 5, 6, 19}},
+            {0x382c, 6, {1, 3, 5, 6, 19}},
+            {0x382d, 6, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 17, 18, 19, 20, 21, 22, 24, 26, 27}},
+            {0x382e, 6, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 18, 19, 20, 21, 22, 23, 26, 27}},
+            {0x382f, 6, {1, 2, 3, 4, 5, 6, 7, 9, 12, 19, 20, 21, 22, 26}},
+            {0x3830, 6, {1, 2, 3, 4, 5, 6, 7, 9, 12, 19, 20, 21, 22, 26}},
+            {0x3832, 9, {40, 80, 100, 110, 120, 127}},
+            {0x592d, 6, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 18, 19, 20, 21, 22, 23, 26, 27}},
+        },
 };
 
 // The parameters of Mario Golf's driver (driver/mario_golf.c's Params from arena_lo on): the OS's arena, the sizes of
 // Camelot's heaps and the heap for a song, and the addresses of the OS's functions and variables and of the game's
 // functions. The driver calls the functions of `before_sound` before the game's sound set-up. An entry of 0 calls
-// nothing. After the set-up, the driver waits `set_up_retraces` video retraces.
+// nothing. After the set-up, the driver waits `set_up_retraces` video retraces. The functions from `load_voice_bank`
+// on load and start the game's effects. A game without one of them gives 0. `upload_check` is the instruction that
+// compares the count of MusyX's queue of uploads to ARAM with its limit, or 0. While a voice bank loads, the driver
+// sets that limit to 1.
 struct MarioGolfParams
 {
     // The words in the order of the driver's parameter block.
@@ -386,6 +436,8 @@ struct MarioGolfParams
     uint32_t context_init = 0, context_object = 0, heaps_init = 0, create_heap = 0, select_heap = 0;
     std::array<uint32_t, 4> before_sound = {};
     uint32_t sound_init = 0, set_up_retraces = 0, load_banks = 0, play_song = 0, play_jingle = 0;
+    uint32_t load_voice_bank = 0, play_voice = 0, play_effect = 0, load_narrations = 0, play_narration = 0,
+             load_court = 0, load_file = 0, push_group = 0, upload_check = 0;
 };
 
 std::vector<uint32_t> MarioGolfParams::Words() const
@@ -424,7 +476,16 @@ std::vector<uint32_t> MarioGolfParams::Words() const
             set_up_retraces,
             load_banks,
             play_song,
-            play_jingle};
+            play_jingle,
+            load_voice_bank,
+            play_voice,
+            play_effect,
+            load_narrations,
+            play_narration,
+            load_court,
+            load_file,
+            push_group,
+            upload_check};
 }
 
 // Mario Golf: Toadstool Tour (USA). Its sound library is MusyX, under a layer of Camelot code.
@@ -436,6 +497,18 @@ std::vector<uint32_t> MarioGolfParams::Words() const
 // system table at the top of MEM1 and run on past MEM1's end. The patch makes ClearArena return at once. Emulated
 // memory starts cleared. The game's main would set the arena from 0x80550000 to 0x81750000. The driver sets it from
 // 0x80550000 to 0x81700000.
+//
+// The game's tables give 737 effects. The bank loader pushes group 87. Group 87 holds the effects that the table at
+// 0x801320CC gives. 37 voice banks hold the characters' voices and the menu's effects, and 51 groups hold a narration
+// each. A rip of a bank's effect loads the bank through JVoiceLoad1 and starts the effect through voiceFXcall. A rip of
+// an effect of group 87 starts it through fx_play. Both put the effect in volume group 1 and start it in studio 0. The
+// game's narration player loads a narration's group and starts the narration. A rip gives each effect a volume and a
+// pan of 0xFF. MusyX then takes both from the effect's row. Most of the game's calls give 0xFF too.
+//
+// JVoiceLoad1's upload callback (0x80012724) reads a bank's samples in chunks of 0x2000 bytes. The chunks go into two
+// buffers in turn. MusyX's upload loop (0x8008BA64) queues each chunk's upload. The queue holds 16 uploads. GCSF's
+// drive reads a chunk sooner than the ARAM DMA moves one. Without the driver's limit, the uploads fall behind. Most of
+// a bank's chunks then reach ARAM with the data of a later chunk.
 const GameProfile kMarioGolfUsa = {
     .name = "Mario Golf: Toadstool Tour",
     .game_id = "GFTE01",
@@ -477,6 +550,11 @@ const GameProfile kMarioGolfUsa = {
             .load_banks = 0x80012a9c,
             .play_song = 0x80013230,
             .play_jingle = 0x800138ec,
+            .load_voice_bank = 0x80012844, // JVoiceLoad1
+            .play_voice = 0x800120a8,      // voiceFXcall
+            .play_effect = 0x80011b88,     // fx_play
+            .play_narration = 0x80013be8,
+            .upload_check = 0x8008baa8, // cmplwi r0, 16
         }
             .Words(),
     .song_table = 0x80137784,
@@ -485,11 +563,25 @@ const GameProfile kMarioGolfUsa = {
     .jingle_count = 9,
     .bank_files = {"B/T/M", "B/T/N", "B/T/O", "B/T/P", "D/L/L", "D/L/M", "D/L/N", "D/L/O"},
     .library_name = "MarioGolf",
+    .effect_ranges = 0x801320cc,
+    .voice_banks = 0x80137308,
+    .voice_bank_count = 37,
+    .voice_bank_size = 0x14,
+    .narrations = 0x801375ec,
+    .narration_count = 51,
     .patches = {{0x80030e4c, 0x4e800020}}, // ClearArena: blr
     .track_slots = 0x8025e034,
     .track_slot_size = 0x18,
     .track_slot_count = 16,
     .song_lists = {0x802d84e4, 0x802d84e0},
+    .musyx_voices = {.count = 64,
+                     .synth = 0x802d8518, // synthVoice
+                     .synth_size = 0x404,
+                     .dsp = 0x802d8564, // dspVoice
+                     .dsp_size = 0xf4,
+                     .state_offset = 0xec,
+                     .loop_handler = 0x8007adc4}, // mcmdLoop
+    .musyx_effect_bit = 0x80000000,
 };
 
 // Mario Power Tennis (USA, disc version 1). Camelot's layer over MusyX is a later build of Mario Golf's. Mario Golf's
@@ -503,6 +595,19 @@ const GameProfile kMarioGolfUsa = {
 // the volume in the top byte. The game plays its jingles from the same table. The banks are the 8 files of MusyX's
 // sound groups 0x3F and 0x40. The sequencer is at 0x802C80F8. A song's track slots start 0xF04 bytes into it, and each
 // holds its tick at +8.
+//
+// The game has 980 effects in MusyX groups 0 to 65. The bank loader pushes group 63. Group 63 holds the effects that
+// the table at 0x802177E8 gives. 18 voice banks hold the characters' voices. Group 65 holds the narrations, and 8
+// groups hold the courts' effects. 37 groups hold the other 56 effects. No table in main.dol lists them. Two packed
+// files on the disc name them: a table in the code that A/O/E unpacks to, and a table in C/I/L. The groups follow each
+// other on the disc, from groups 26 to 44, then from groups 0 to 17. A rip of a bank's effect loads the bank through
+// JVoiceLoad1 and starts the effect through voiceFXcall. voiceFXcall puts the effect in volume group 1. A rip of a
+// narration pushes group 65 through NarrationInit, then starts the narration through the game's narration player. A rip
+// of a court's effect loads the court's group through the game's court loader. A rip of an effect of the other groups
+// loads its group as the bank loader loads its groups. The game's starter of effects (0x8001DA10) then starts an effect
+// of group 63, of a court or of the other groups. Every effect plays in studio 1, with controller 0x5B at 0x40. A rip
+// gives each effect a volume and a pan of 0xFF. MusyX then takes both from the effect's row. Most of the game's calls
+// give 0xFF too.
 const GameProfile kMarioPowerTennisUsa = {
     .name = "Mario Power Tennis",
     .game_id = "GOME01",
@@ -546,6 +651,14 @@ const GameProfile kMarioPowerTennisUsa = {
             .load_banks = 0x8001a214,
             .play_song = 0x80019fc4,
             .play_jingle = 0x8001afd8,
+            .load_voice_bank = 0x8001b77c, // JVoiceLoad1
+            .play_voice = 0x8001ba3c,      // voiceFXcall
+            .play_effect = 0x8001da10,
+            .load_narrations = 0x8001a31c, // NarrationInit
+            .play_narration = 0x8001b25c,
+            .load_court = 0x8001a670,
+            .load_file = 0x800083fc,
+            .push_group = 0x8001a124,
         }
             .Words(),
     .song_table = 0x802165e8,
@@ -553,11 +666,31 @@ const GameProfile kMarioPowerTennisUsa = {
     .song_name_size = 0x18,
     .bank_files = {"A/O/F", "A/O/G", "A/O/H", "A/O/I", "A/O/J", "A/O/K", "A/O/L", "A/O/M"},
     .library_name = "MarioPowerTennis",
+    .effect_ranges = 0x802177e8,
+    .voice_banks = 0x80215e98,
+    .voice_bank_count = 18,
+    .voice_bank_size = 0x20,
+    .voice_bank_name_size = 16,
+    .narrations = 0x80216298,
+    .narration_count = 106,
+    .narration_files = 754, // A/O/N
+    .court_banks = 0x80217828,
+    .court_bank_count = 10,
+    .other_groups = 2566, // B/X/J
+    .other_group_count = 37,
     .patches = {{0x80058404, 0x48000104}}, // OSInit: b past the arena's clearing
     .track_slots = 0x802c9004,
     .track_slot_size = 0x18,
     .track_slot_count = 16,
     .song_lists = {0x8030a22c, 0x8030a228},
+    .musyx_voices = {.count = 64,
+                     .synth = 0x8030a260, // synthVoice
+                     .synth_size = 0x458,
+                     .dsp = 0x8030a358, // dspVoice
+                     .dsp_size = 0xf8,
+                     .state_offset = 0xf0,
+                     .loop_handler = 0x800ad3c0}, // mcmdLoop
+    .musyx_effect_bit = 0x80000000,
 };
 
 // WarioWare, Inc.: Mega Party Game$! (USA). Its sound library is MusyX, under a layer of Intelligent Systems' code. The
@@ -813,7 +946,7 @@ const GameProfile kPikminUsa = {
     .event_offsets = 0x80225a68,
     .other_effects = {JacEffectId(JacEffect::kSystem, 25), JacEffectId(JacEffect::kSystem, 30),
                       JacEffectId(JacEffect::kSystem, 31), JacEffectId(JacEffect::kSystem, 36),
-                      JacEffectId(JacEffect::kPlayer, 0x800c)},
+                      JacEffectId(JacEffect::kPlayer, 0x800c), JacEffectId(JacEffect::kFormation, 0)},
     // Effect 0 of the system stops the effects. The effects sequence plays nothing for 15. 18 plays part 8 of demobgm,
     // which the ripper lists as music. 32 plays a stream.
     .left_out_effects = {JacEffectId(JacEffect::kSystem, 0), JacEffectId(JacEffect::kSystem, 15),
@@ -870,6 +1003,8 @@ const GameProfile kPikminUsa = {
             0x10009,    // system_track: the name of the effects sequence's track for the system's effects
             0x1000a,    // player_track: the name of its track for the player's effects
             0x20000,    // events_track: the name of the events' root track. Its children play the events
+            0x80018200, // move_formation: Jac_Orima_Formation
+            0x10007,    // formation_track: the name of the effects sequence's track for the formation
         },
     .watch =
         {
@@ -888,6 +1023,10 @@ const GameProfile kPikminUsa = {
             .parent_offset = 0x40,
             .children_offset = 0x44,
         },
+    // The sound of the formation. Jac_Orima_Formation (0x80018200) takes the player's move as x and y, -127 to 127. It
+    // writes x to port 2 of the formation's track and the move's length to port 3. The rip plays a full move straight
+    // ahead: x 0 and y 127.
+    .port_effects = {{JacEffectId(JacEffect::kFormation, 0), 3, {127}}},
 };
 
 // Donkey Kong Jungle Beat (USA). Its sound library is JAudio2, in the generation of Twilight Princess's, under the
@@ -947,6 +1086,20 @@ const GameProfile kJungleBeatUsa = {
             0x80351e58,           // music_tables: each BGM's tables of track states
             0x803533bc,           // music_states: the second table's states
             0x80253ef8,           // set_music_state: the BGM player's function for a state of the second table
+            0xd08,                // chord_offset: the audio manager's chord effects
+            164,                  // chord_records: the database's count says 218
+            0x8024c4c8,           // start_chord_effect: startChordSe
+            0xd0c,                // stage_offset: the audio manager's stage object
+            0x8025049c,           // start_stage_music
+            0x80253684,           // set_track_states: the BGM player's function for a code for each track
+            0x810,                // rhythm_offset: the audio manager's rhythm
+            0x80248784,           // rhythm_frame: the rhythm's frame process
+            0x50042,              // swapped_effect: two stages play other effects with its records
+            0x50063,              // swaps: such an effect
+            0x2c,                 //   and its stage
+            0x50062,              // the other such effect
+            0x35,                 //   and its stage
+            0,                    // music: written by the driver
         },
     .watch =
         {
@@ -965,6 +1118,8 @@ const GameProfile kJungleBeatUsa = {
             .wave_bank_table_offset = 0xfc, // its table of wave banks
             .wave_bank_count_offset = 0xf8, // the table's count
         },
+    .background_sound = 52,       // the driver's word `music`
+    .track_parent_offset = 0x12c, // JASTrack::connectChild (0x80007cec) stores the parent there
 };
 
 // Mario Kart: Double Dash!! (USA). Its sound library is the earliest known build of JAudio2, under the game's audio
@@ -1423,14 +1578,81 @@ const GameProfile kCrystalChroniclesUsa = {
     .red_track_loop = 0x801c6f38,
 };
 
+// The parameters of the driver of Animal Crossing, Doubutsu no Mori+ and Doubutsu no Mori e+
+// (driver/animal_crossing.c's Params from frame_retraces on): the sizes and values that the game's start-up gives, the
+// addresses of the game's functions and variables, and the game's numbers of the music discs' pieces and of Kapp'n's
+// songs. The comments in the driver's Params describe each field.
+struct AnimalCrossingParams
+{
+    // The words in the order of the driver's parameter block.
+    std::vector<uint32_t> Words() const;
+
+    uint32_t frame_retraces = 0, aram_block_count = 0, start_up_sound = 0, start_up_sound_size = 0;
+    uint32_t players = 0, player_size = 0, music_player = 0, music_request = 0;
+    uint32_t os_init = 0, os_init_alarm = 0, dvd_init = 0, vi_init = 0, vi_wait_for_retrace = 0, ar_init = 0,
+             arq_init = 0;
+    uint32_t init_audio = 0, game_frame = 0, check_boot = 0, set_weather = 0, start_music = 0;
+    uint32_t first_disc = 0, last_disc = 0, disc_stereo = 0, place_stereo = 0;
+    uint32_t set_room = 0;
+    uint32_t effects_player = 0, player_channels = 0, effect_slots = 0, effect_slot_count = 0, effect_slot_size = 0,
+             start_effect = 0;
+    uint32_t music_table = 0, first_song = 0, last_song = 0, first_second_part = 0, last_second_part = 0,
+             empty_piece = 0, player_ports = 0;
+    uint32_t aram_size = 0, wide_numbers = 0, set_island = 0;
+};
+
+std::vector<uint32_t> AnimalCrossingParams::Words() const
+{
+    return {frame_retraces,
+            aram_block_count,
+            start_up_sound,
+            start_up_sound_size,
+            players,
+            player_size,
+            music_player,
+            music_request,
+            os_init,
+            os_init_alarm,
+            dvd_init,
+            vi_init,
+            vi_wait_for_retrace,
+            ar_init,
+            arq_init,
+            init_audio,
+            game_frame,
+            check_boot,
+            set_weather,
+            start_music,
+            first_disc,
+            last_disc,
+            disc_stereo,
+            place_stereo,
+            set_room,
+            effects_player,
+            player_channels,
+            effect_slots,
+            effect_slot_count,
+            effect_slot_size,
+            start_effect,
+            music_table,
+            first_song,
+            last_song,
+            first_second_part,
+            last_second_part,
+            empty_piece,
+            player_ports,
+            aram_size,
+            wide_numbers,
+            set_island};
+}
+
 // Animal Crossing (USA). Its sound library is Nintendo's sound library for the Nintendo 64, ported to the GameCube. The
 // port runs the Nintendo 64's sequence player and synthesis on the CPU, inside an early JAudio1 that mixes their output
 // with the DSP's. The game calls it through C functions (Na_*). The sequences, the banks and the samples are in one
 // file, `audiorom.img`. The sound library reads all of it into ARAM as it starts. The game's main (0x800060F8) sets up
 // the OS, the disc, JSystem and the sound library, and waits until the sound library is up. Then it links the game's
 // module. The module calls Na_GameFrame once a frame, and starts its music with Na_BgmStart. The names and addresses
-// come from the disc's link map of main.dol (static.map). The parameters follow driver/animal_crossing.c's Params from
-// frame_retraces.
+// come from the disc's link map of main.dol (static.map).
 //
 // The sound library plays the music in sequence player 1 or 3 and the effects in player 0. A piece of music that plays
 // the hour holds the arrangements for three kinds of weather. The game mutes the channels of the others with masks
@@ -1445,55 +1667,61 @@ const GameProfile kAnimalCrossingUsa = {
     .library = SoundLibrary::kNintendo64,
     .sound_archive = "audiorom.img",
     .params =
-        {
-            2,          // frame_retraces: a frame is two retraces
-            3,          // aram_block_count: JKRAram's ARInit takes a list of 3 blocks
-            0x800c3140, // start_up_sound: nintendo_hi_0
-            0x66a0,     // start_up_sound_size: as the game's sound_initial gives it
-            0x80211f90, // players: AG + 0x3788
-            0x160,      // player_size
-            0x80217bc0, // music_player: sou_now_bgm_handle
-            0x80218361, // music_request: sou_bgm_call_buffer
-            0x800788a4, // os_init: OSInit
-            0x80079074, // os_init_alarm: OSInitAlarm
-            0x800850f4, // dvd_init: DVDInit
-            0x800882c8, // vi_init: VIInit
-            0x80088740, // vi_wait_for_retrace: VIWaitForRetrace
-            0x8008c3cc, // ar_init: ARInit
-            0x8008cff4, // arq_init: ARQInit
-            0x80010c8c, // init_audio: Na_InitAudio
-            0x80010d1c, // game_frame: Na_GameFrame
-            0x80015548, // check_boot: Na_CheckNeosBoot
-            0x80011158, // set_weather: Na_Tenki
-            0x80011170, // start_music: Na_BgmStart
-            128,        // first_disc: from Sou_Na_BgmStart
-            182,        // last_disc
-            9,          // disc_stereo: a hi-fi stereo
-            0x8001405c, // place_stereo: Na_MDPlayerPos
-            0x80015578, // set_room: Na_Museum
-            0,          // effects_player: the game's SE_GROUP
-            0x38,       // player_channels
-            0x800eb670, // effect_slots: sou_trg_se
-            6,          // effect_slot_count
-            0x20,       // effect_slot_size
-            0x8000c784, // start_effect: Sou_TrgStart
-            0x800a9838, // music_table: SEQ_TABLE
-            92,         // first_song: the boat's sing_1st_part_bgm_no
-            111,        // last_song
-            112,        // first_second_part: the boat's sing_2nd_part_bgm_no
-            121,        // last_second_part
-            126,        // empty_piece: its sequence (247) ends at once
-            0x158,      // player_ports: as Nas_GroupSeq reads them
-        },
+        AnimalCrossingParams{
+            .frame_retraces = 2,           // a frame is two retraces
+            .aram_block_count = 3,         // JKRAram's ARInit takes a list of 3 blocks
+            .start_up_sound = 0x800c3140,  // nintendo_hi_0
+            .start_up_sound_size = 0x66a0, // as the game's sound_initial gives it
+            .players = 0x80211f90,         // AG + 0x3788
+            .player_size = 0x160,
+            .music_player = 0x80217bc0,        // sou_now_bgm_handle
+            .music_request = 0x80218361,       // sou_bgm_call_buffer
+            .os_init = 0x800788a4,             // OSInit
+            .os_init_alarm = 0x80079074,       // OSInitAlarm
+            .dvd_init = 0x800850f4,            // DVDInit
+            .vi_init = 0x800882c8,             // VIInit
+            .vi_wait_for_retrace = 0x80088740, // VIWaitForRetrace
+            .ar_init = 0x8008c3cc,             // ARInit
+            .arq_init = 0x8008cff4,            // ARQInit
+            .init_audio = 0x80010c8c,          // Na_InitAudio
+            .game_frame = 0x80010d1c,          // Na_GameFrame
+            .check_boot = 0x80015548,          // Na_CheckNeosBoot
+            .set_weather = 0x80011158,         // Na_Tenki
+            .start_music = 0x80011170,         // Na_BgmStart
+            .first_disc = 128,                 // from Sou_Na_BgmStart
+            .last_disc = 182,
+            .disc_stereo = 9,           // a hi-fi stereo
+            .place_stereo = 0x8001405c, // Na_MDPlayerPos
+            .set_room = 0x80015578,     // Na_Museum
+            .effects_player = 0,        // the game's SE_GROUP
+            .player_channels = 0x38,
+            .effect_slots = 0x800eb670, // sou_trg_se
+            .effect_slot_count = 6,
+            .effect_slot_size = 0x20,
+            .start_effect = 0x8000c784, // Sou_TrgStart
+            .music_table = 0x800a9838,  // SEQ_TABLE
+            .first_song = 92,           // the boat's sing_1st_part_bgm_no
+            .last_song = 111,
+            .first_second_part = 112, // the boat's sing_2nd_part_bgm_no
+            .last_second_part = 121,
+            .empty_piece = 126,    // its sequence (247) ends at once
+            .player_ports = 0x158, // as Nas_GroupSeq reads them
+        }
+            .Words(),
     .library_name = "AnimalCrossing",
     // __OK: blr. The sound library calls it once the game's sound data is in ARAM. It plays the start-up screen's sound
     // on the early JAudio1's sequence player: about 7 s of a voice and a chime. The game plays no music over that
     // sound.
-    .patches = {{0x8000bb84, 0x4e800020}},
-    .music_table = 0x800a9838,    // SEQ_TABLE
-    .sequence_table = 0x800cca40, // AudioseqHeaderStart
-    .n64_effects = 242,           // the sequence that the game's Sou_InitAudio starts in SE_GROUP
-    .n64_effect_banks = 0x188,    // read by the effects channels' scripts
+    // Sou_TrgStart: mr r0, r3 in place of each add of a random number. Sou_TrgStart adds Nap_GetRandom() & 1 to the
+    // numbers 0x61, 0x63, 0x65, 0x67, 0x11e and 0x4028. Sou_TrgStart adds Nap_GetRandom() & 3 to 17 numbers: 0x3b,
+    // 0x13f, 0x43f and every fourth number from 0x501 to 0x53d except 0x52d and 0x535. The game then plays the effect
+    // of the sum. Nap_GetRandom mixes in the time base. Without the adds, a rip plays the effect that its number names.
+    .patches = {{0x8000bb84, 0x4e800020}, {0x8000c930, 0x7c601b78}, {0x8000c94c, 0x7c601b78}},
+    .music_table = 0x800a9838,      // SEQ_TABLE
+    .sequence_table = 0x800cca40,   // AudioseqHeaderStart
+    .n64_effect_numbers = {83, 87}, // Sou_BgmStart plays them through Na_SysTrgStart
+    .n64_effects = 242,             // the sequence that the game's Sou_InitAudio starts in SE_GROUP
+    .n64_effect_banks = 0x188,      // read by the effects channels' scripts
     .n64_players = 0x80211f90,
     .n64_player_count = 5,
     .n64_player_size = 0x160,
@@ -1501,6 +1729,165 @@ const GameProfile kAnimalCrossingUsa = {
     .n64_command_reads = {0x8002bbfc, 0x8002ad2c, 0x80029dd0}, // in Nas_GroupSeq, Nas_SubSeq and __Command_Seq
     .n64_flow = 0x80028ec0,                                    // Common_Com
     .n64_flow_returns = {0x8002bc30, 0x8002adc0, 0x80029e14},
+};
+
+// Doubutsu no Mori+ (Japan), disc version 1. Animal Crossing is the game's American release. The sound library is an
+// earlier build of the one in Animal Crossing. The functions that the driver calls take the same arguments. The
+// structures that the length analysis reads have the same layouts. The names and addresses come from the disc's link
+// map of main.dol (static.map). The releases differ in their sounds. Sou_BgmStart plays numbers 83 to 87 as pieces of
+// music. Animal Crossing plays them as effects. The effects play in sequence 236. Kapp'n's songs have other notes.
+const GameProfile kDoubutsuNoMoriPlusJpn = {
+    .name = "Doubutsu no Mori+",
+    .game_id = "GAFJ01",
+    .dol_sha1 = "25a5ada7a025c092307e61b4420953f36633500d",
+    .main = 0x80005dec,
+    .driver = Driver::kAnimalCrossing,
+    .library = SoundLibrary::kNintendo64,
+    .sound_archive = "audiorom.img",
+    .params =
+        AnimalCrossingParams{
+            .frame_retraces = 2,
+            .aram_block_count = 3,
+            .start_up_sound = 0x800bb900,  // nintendo_hi_0
+            .start_up_sound_size = 0x9900, // as the game's main gives it
+            .players = 0x80211998,         // AG + 0x3780
+            .player_size = 0x160,
+            .music_player = 0x802175b0,        // sou_now_bgm_handle
+            .music_request = 0x80217c09,       // sou_bgm_call_buffer
+            .os_init = 0x8007a58c,             // OSInit
+            .os_init_alarm = 0x8007ace4,       // OSInitAlarm
+            .dvd_init = 0x80086e14,            // DVDInit
+            .vi_init = 0x80089e94,             // VIInit
+            .vi_wait_for_retrace = 0x8008a30c, // VIWaitForRetrace
+            .ar_init = 0x8008e0ac,             // ARInit
+            .arq_init = 0x8008f2c4,            // ARQInit
+            .init_audio = 0x8000e31c,          // Na_InitAudio
+            .game_frame = 0x8000e428,          // Na_GameFrame
+            .check_boot = 0x80011b24,          // Na_CheckNeosBoot
+            .set_weather = 0x8000eab0,         // Na_Tenki
+            .start_music = 0x8000eac8,         // Na_BgmStart
+            .first_disc = 128,                 // from Sou_SpecialRoutine06
+            .last_disc = 182,
+            .disc_stereo = 9,
+            .place_stereo = 0x80010588, // Na_MDPlayerPos
+            .set_room = 0x80011b44,     // Na_Museum
+            .effects_player = 0,
+            .player_channels = 0x38,
+            .effect_slots = 0x800e48d0, // sou_trg_se
+            .effect_slot_count = 6,
+            .effect_slot_size = 0x20,
+            .start_effect = 0x8000bfa4, // Sou_TrgStart
+            .music_table = 0x800a63e8,  // SEQ_TABLE
+            .first_song = 92,
+            .last_song = 111,
+            .first_second_part = 112,
+            .last_second_part = 121,
+            .empty_piece = 126, // its sequence (241) ends at once
+            .player_ports = 0x158,
+        }
+            .Words(),
+    .library_name = "DoubutsuNoMoriPlus",
+    .patches = {{0x8000b7f0, 0x4e800020},  // __OK: blr (see Animal Crossing's profile)
+                {0x8000c110, 0x7f83e378},  // Sou_TrgStart: mr r3, r28 in place of the add of Nap_GetRandom() & 1
+                {0x8000c120, 0x7f83e378}}, // Sou_TrgStart: mr r3, r28 in place of the add of Nap_GetRandom() & 3
+    .music_table = 0x800a63e8,             // SEQ_TABLE
+    .sequence_table = 0x800c5200,          // AudioseqHeaderStart
+    .n64_effects = 236,
+    .n64_effect_banks = 0x188,
+    .n64_players = 0x80211998,
+    .n64_player_count = 5,
+    .n64_player_size = 0x160,
+    .n64_read_byte = 0x80026240,                               // Nas_ReadByteData
+    .n64_command_reads = {0x80028474, 0x80027588, 0x800265d0}, // in Nas_GroupSeq, Nas_SubSeq and __Command_Seq
+    .n64_flow = 0x80025740,                                    // Common_Com
+    .n64_flow_returns = {0x800284a8, 0x80027618, 0x80026614},
+};
+
+// Doubutsu no Mori e+ (Japan), disc version 1. The sound library is a later build of the one in Animal Crossing. The
+// build numbers the pieces and their sequences with 16 bits. SEQ_TABLE holds 384 entries of 16 bits, and the table of
+// sequences holds 353 sequences. Na_InitAudio takes the start-up screen's sound, the sound's size and the ARAM for the
+// sound library. The game's main works out that size from the size of audiorom.img (Na_GetAudioARAMSize). A sequence
+// player takes 4 more bytes. Its fields from +4 on lie up to 4 bytes further on. The names and addresses come from the
+// disc's link map of main.dol (static.map).
+//
+// The music discs' pieces are 208 to 367 (Sou_Na_BgmStart). The island's piece, 376, plays a copy of piece 91's
+// sequence. The game mutes six of its channels (BGM_MUTE_PRIVATE_ISLAND) unless the islander is there
+// (Na_PrivateIslandStatus). The empty piece is 90. Its sequence (87) has no notes and ends after a tick. The only
+// sequence that ends at once is 351. A port can't hold that number.
+const GameProfile kDoubutsuNoMoriEPlusJpn = {
+    .name = "Doubutsu no Mori e+",
+    .game_id = "GAEJ01",
+    .dol_sha1 = "7574bec2692efc921c0975c52af41038f3fb7093",
+    .main = 0x80006428,
+    .driver = Driver::kAnimalCrossing,
+    .library = SoundLibrary::kNintendo64,
+    .sound_archive = "audiorom.img",
+    .params =
+        AnimalCrossingParams{
+            .frame_retraces = 2,
+            .aram_block_count = 3,
+            .start_up_sound = 0x800e89e0,  // nintendo_hi_0
+            .start_up_sound_size = 0x66a0, // as the game's sound_initial gives it
+            .players = 0x8028bb18,         // AG + 0x3800
+            .player_size = 0x164,
+            .music_player = 0x80291762,        // sou_now_bgm_handle
+            .music_request = 0x80292069,       // sou_bgm_call_buffer
+            .os_init = 0x8009e514,             // OSInit
+            .os_init_alarm = 0x8009ed4c,       // OSInitAlarm
+            .dvd_init = 0x800aa430,            // DVDInit
+            .vi_init = 0x800ada3c,             // VIInit
+            .vi_wait_for_retrace = 0x800adeec, // VIWaitForRetrace
+            .ar_init = 0x800b2070,             // ARInit
+            .arq_init = 0x800b3bb0,            // ARQInit
+            .init_audio = 0x8001544c,          // Na_InitAudio
+            .game_frame = 0x800154e4,          // Na_GameFrame
+            .check_boot = 0x80019300,          // Na_CheckNeosBoot
+            .set_weather = 0x80015944,         // Na_Tenki
+            .start_music = 0x8001595c,         // Na_BgmStart
+            .first_disc = 208,                 // from Sou_Na_BgmStart
+            .last_disc = 367,
+            .disc_stereo = 9,
+            .place_stereo = 0x80017e14, // Na_MDPlayerPos
+            .set_room = 0x80019330,     // Na_Museum
+            .effects_player = 0,
+            .player_channels = 0x3c,
+            .effect_slots = 0x80112310, // sou_trg_se
+            .effect_slot_count = 6,
+            .effect_slot_size = 0x20,
+            .start_effect = 0x80010eac, // Sou_TrgStart
+            .music_table = 0x800d1940,  // SEQ_TABLE
+            .first_song = 92,
+            .last_song = 111,
+            .first_second_part = 112,
+            .last_second_part = 121,
+            .empty_piece = 90, // its sequence (87) ends after a tick, without a sound
+            .player_ports = 0x15c,
+            .aram_size = 0x81b640, // as the game's main works it out
+            .wide_numbers = 1,
+            .set_island = 0x80019488, // Na_PrivateIslandStatus
+        }
+            .Words(),
+    .library_name = "DoubutsuNoMoriEPlus",
+    // This release's Sou_TrgStart adds Nap_GetRandom() & 1 to 0x63, 0x65, 0x67, 0x11e, 0x148, 0x475 and 0x4028.
+    .patches = {{0x80010260, 0x4e800020},  // __OK: blr (see Animal Crossing's profile)
+                {0x80011064, 0x7c601b78},  // Sou_TrgStart: mr r0, r3 in place of the add of Nap_GetRandom() & 1
+                {0x80011080, 0x7c601b78}}, // Sou_TrgStart: mr r0, r3 in place of the add of Nap_GetRandom() & 3
+    .music_table = 0x800d1940,             // SEQ_TABLE
+    .sequence_table = 0x800f22e0,          // AudioseqHeaderStart
+    .n64_pieces = 384,
+    .n64_wide_numbers = true,
+    .n64_island_piece = 376,
+    .n64_effect_numbers = {83, 87}, // Sou_BgmStart plays them through Na_SysTrgStart
+    .n64_effects = 346,
+    .n64_effect_banks = 0x188,
+    .n64_players = 0x8028bb18,
+    .n64_player_count = 5,
+    .n64_player_size = 0x164,
+    .n64_read_byte = 0x8002da40,                               // Nas_ReadByteData
+    .n64_command_reads = {0x8002fbdc, 0x8002ed0c, 0x8002ddb0}, // in Nas_GroupSeq, Nas_SubSeq and __Command_Seq
+    .n64_flow = 0x8002cea0,                                    // Common_Com
+    .n64_flow_returns = {0x8002fc10, 0x8002eda0, 0x8002ddf4},
+    .n64_player_fields = {0x7c, 0x1c, 0x12},
 };
 
 // The Pokémon Colosseum Bonus Disc's download program (USA). The Bonus Disc's menu runs it from a TGC,
@@ -1635,6 +2022,8 @@ static_assert(offsetof(MusyXParams, studios) == kMusyXStudios * 4);
 static_assert(offsetof(MusyXParams, aux_callback) == kMusyXAuxCallbacks * 4);
 static_assert(offsetof(MusyXParams, aux_user) == kMusyXAuxBlocks * 4);
 static_assert(offsetof(MusyXParams, aux_prepare) == kMusyXAuxPreparations * 4);
+static_assert(offsetof(MusyXParams, group_volume) == kMusyXGroupVolume * 4);
+static_assert(offsetof(MusyXParams, snd_master_volume) == kMusyXMasterVolume * 4);
 
 // Metroid Prime (USA, disc version 2). Its sound library is MusyX 2.0, under Retro Studios' audio system. Its music
 // streams from the disc, apart from the four songs in MidiData.pak.
@@ -1712,10 +2101,17 @@ const GameProfile kMetroidPrimeUsa = {
 // to mono. A rip plays it as on a console set to stereo. The set-up then gives studio 0 two standard reverbs. Aux A's
 // lasts 3.6 s, and aux B's 1 s. The game's play function (0x800A0E24) sets aux A's reverb for each song. A byte for
 // each song ID at 0x802108B0 picks the reverb of 3.6 s (1) or one of 2.5 s (2). With 0, aux A keeps its reverb. A rip
-// then takes the one of 3.6 s, as at start-up.
+// then takes the one of 3.6 s, as at start-up. At 0x800A2374 the set-up calls sndVolume(127, 0, 0xFF). That call gives
+// the volume groups of the songs and the effects their full volume.
+//
+// The game's sound layer starts an effect through 0x800A1978 or 0x800A13D8. Each calls sndFXStartEx with studio 0.
+// Every call of 0x800A1978 passes a volume of 127 and a pan of 64. The voices in battle go through 0x800F036C and
+// 0x800A13D8, with a volume and a pan from their caller. The game can later set an effect's pan from the place of the
+// sound's source, through controller 10 (0x800A17B4). A rip plays every effect at 127 in the centre. Every row of the
+// groups' tables of effects gives those values too.
 //
 // The length analysis reads the first of MusyX's song instances, at 0x802FB7E8. Its 16 sections start 0x1508 bytes into
-// it, 0x38 bytes apart, and each holds its count of loops at +0x34.
+// it, 0x38 bytes apart, and each holds its count of loops at +0x34. The analysis reads MusyX's 64 voices for an effect.
 const GameProfile kTalesOfSymphoniaUsa = {
     .name = "Tales of Symphonia",
     .game_id = "GQSEAF",
@@ -1759,6 +2155,7 @@ const GameProfile kTalesOfSymphoniaUsa = {
             .aux_user = {0x802cc464, 0x802cc310},     // their reverbs
             .aux_prepare = {0x80150ee4, 0x80150ee4},  // sndAuxCallbackPrepareReverbSTD for both
             .aux_midi = {0xff, 0xff},                 // no MIDI channel controls aux A or aux B
+            .snd_volume = 0x80138f0c,
         }
             .Words(),
     .bank_files = {"S/inst.snd"},
@@ -1774,6 +2171,13 @@ const GameProfile kTalesOfSymphoniaUsa = {
     .song_lists = {0x8035ac2c, 0x8035ac28},
     .section_loops = 0x802fcd24,
     .section_loop_size = 0x38,
+    .musyx_voices = {.count = 64,
+                     .synth = 0x8035ac60,
+                     .synth_size = 0x458,
+                     .dsp = 0x8035ad48,
+                     .dsp_size = 0xf8,
+                     .state_offset = 0xf0,
+                     .loop_handler = 0x8013e8a4},
 };
 
 // Star Fox Adventures (USA, disc version 1). Its sound library is MusyX, under Rare's sound layer.
@@ -1782,10 +2186,17 @@ const GameProfile kTalesOfSymphoniaUsa = {
 // entries at 0x803369F4. It then starts the audio interface, sets MusyX's memory hooks and calls sndInit: 48 voices, 48
 // for music, 24 for effects, one studio, the flag that encodes the default studio for Dolby Pro Logic II, and 16 MiB of
 // ARAM. It then sets the same numbers of voices again. The output is in stereo unless the console is set to mono. The
-// set-up then gives studio 0's aux A a standard reverb of 3 s and sets MusyX's volumes to their defaults.
+// set-up then gives studio 0's aux A a standard reverb of 3 s and calls sndVolume(127, 0, 0xFF) at 0x80009D84. That
+// call gives the volume groups of the songs and the effects their full volume. A call of sndMasterVolume(127, 100, 1,
+// 1) follows. MusyX's master volumes start at 127. The call leaves them there.
+//
+// The game starts an effect through 0x8000C4D8. That function calls sndFXStartEx with the volume of the effect's row in
+// Sfx.bin, a pan of 0x40 and studio 0. In some places of the game's world, 0x8000BB64 sets a level for the effects'
+// sends to aux A. 0x8000C4D8 then sends each effect there with controller 0x5B. Everywhere else, and in a rip, the
+// level is 0 and the function sets no controller.
 //
 // The length analysis reads the first of MusyX's song instances, at 0x803B15B0. Its 16 sections start 0x14E8 bytes into
-// it, 0x38 bytes apart, and each holds its count of loops at +0x34.
+// it, 0x38 bytes apart, and each holds its count of loops at +0x34. The analysis reads MusyX's 48 voices for an effect.
 const GameProfile kStarFoxAdventuresUsa = {
     .name = "Star Fox Adventures",
     .game_id = "GSAE01",
@@ -1823,12 +2234,13 @@ const GameProfile kStarFoxAdventuresUsa = {
             .snd_seq_play = 0x8027c140, // sndSeqPlayEx
             .seq_play_form = 1,         // sndSeqPlayEx takes a studio
             .snd_seq_volume = 0x80272e84,
-            .snd_fx_start_ex = 0, // no effects yet
+            .snd_fx_start_ex = 0x8027300c,
             .snd_set_aux_processing_callbacks = 0x802732c0,
             .aux_callback = {0x80285324, 0}, // sndAuxCallbackReverbSTD for aux A, and nothing for aux B
             .aux_user = {0x803368a0, 0},     // aux A's reverb
             .aux_prepare = {0x80285380, 0},  // sndAuxCallbackPrepareReverbSTD for aux A
             .aux_midi = {0xff, 0xff},        // no MIDI channel controls aux A or aux B
+            .snd_volume = 0x802730d4,
         }
             .Words(),
     .library_name = "StarFoxAdventures",
@@ -1840,6 +2252,13 @@ const GameProfile kStarFoxAdventuresUsa = {
     .song_lists = {0x803deeb4, 0x803deeb0},
     .section_loops = 0x803b2acc,
     .section_loop_size = 0x38,
+    .musyx_voices = {.count = 48,
+                     .synth = 0x803deee8,
+                     .synth_size = 0x404,
+                     .dsp = 0x803defc4,
+                     .dsp_size = 0xf4,
+                     .state_offset = 0xec,
+                     .loop_handler = 0x80275dd0},
 };
 
 // Star Wars Rogue Squadron II: Rogue Leader (USA). Its sound library is MusyX.
@@ -1862,8 +2281,18 @@ const GameProfile kStarFoxAdventuresUsa = {
 // probably fills the buffers from the disc as the song plays. GCSF doesn't rip streams. Those songs make no sound in a
 // rip, and the ripper skips them. Eight more songs play a stream along with their notes. A rip leaves them out.
 //
+// The set-up then calls sndVolume(127, 0, 0xFF) (0x7FD49310 in the game). That call gives every volume group its full
+// volume. The game's table of sounds (0x7FDDBF30 in the game) holds 522 rows of 12 bytes. A row gives an effect's ID
+// in a big-endian half and the effect's volume in the byte at 3. Two floats follow. An ID of 0xFFFF marks an empty
+// row. Several rows can give one effect, at different volumes. The function at 0x7FD5123C plays a row through
+// sndFXStartEx, with a pan from its caller and studio 0. Three functions (0x7FD4BF18, 0x7FD4BF80 and 0x7FD4BFE8) play
+// rows 489 to 491 at the row's volume times a setting, with a pan of 64. The function at 0x7FD51294 starts a row's
+// effect through 0x80011D18 instead, with values for controllers 0x83 and 0x0B. A rip plays an effect at the most
+// common volume of its rows, in the centre, with no controllers. An effect that no row names takes the volume and the
+// pan of its row in its group's table of effects.
+//
 // The length analysis reads the first of MusyX's song instances, at 0x800694F0. Its 16 sections start 0x14E8 bytes into
-// it, 0x38 bytes apart, and each holds its count of loops at +0x34.
+// it, 0x38 bytes apart, and each holds its count of loops at +0x34. The analysis reads MusyX's 56 voices for an effect.
 const GameProfile kRogueLeaderUsa = {
     .name = "Star Wars Rogue Squadron II: Rogue Leader",
     .game_id = "GSWE64",
@@ -1901,12 +2330,13 @@ const GameProfile kRogueLeaderUsa = {
             .snd_seq_play = 0x8001d040, // sndSeqPlayEx
             .seq_play_form = 1,         // sndSeqPlayEx takes a studio
             .snd_seq_volume = 0x80011b10,
-            .snd_fx_start_ex = 0, // no effects yet
+            .snd_fx_start_ex = 0x80011c98,
             .snd_set_aux_processing_callbacks = 0x80012070,
             .aux_callback = {0x80026ea4, 0}, // sndAuxCallbackReverbHI for aux A, and nothing for aux B
             .aux_user = {0x800ae1e0, 0},     // aux A's reverb
             .aux_prepare = {0x80026f00, 0},  // sndAuxCallbackPrepareReverbHI for aux A
             .aux_midi = {0xff, 0xff},        // no MIDI channel controls aux A or aux B
+            .snd_volume = 0x80011f90,
         }
             .Words(),
     .library_name = "RogueLeader",
@@ -1943,6 +2373,15 @@ const GameProfile kRogueLeaderUsa = {
     .song_lists = {0x8009646c, 0x80096468},
     .section_loops = 0x8006aa0c,
     .section_loop_size = 0x38,
+    .musyx_voices = {.count = 56,
+                     .synth = 0x80096498,
+                     .synth_size = 0x404,
+                     .dsp = 0x80096574,
+                     .dsp_size = 0xf4,
+                     .state_offset = 0xec,
+                     .loop_handler = 0x80016468},
+    .musyx_effects = 0x7fddbf30,
+    .musyx_effect_count = 522,
 };
 
 // Pokémon Colosseum (USA). Its sound library is MusyX, under the game's sound layer.
@@ -2035,10 +2474,22 @@ const GameProfile kColosseumUsa = {
 // initialises the ARAM with a stack of 24 entries at 0x8031B140. It then starts the audio interface, sets MusyX's
 // memory hooks and calls sndInit: 64 voices, 32 for music, 32 for effects, one studio, and 10 MiB of ARAM. The output
 // is in stereo unless the console is set to mono. The game's options offer only those two. The set-up then gives
-// studio 0's aux A and aux B MusyX's high-quality reverb. Aux A's lasts 1.5 s, and aux B's 1 s.
+// studio 0's aux A and aux B MusyX's high-quality reverb. Aux A's lasts 1.5 s, and aux B's 1 s. The set-up also calls
+// sndMasterVolume(127, 0, 1, 1) and sndVolume(127, 0, 0xFF) (0x80148F88). That call gives every volume group its full
+// volume.
+//
+// The game's start-up (0x8014BA5C) pushes the group of bio0/sound/all.arc, then the groups of the archives in its table
+// at 0x80255D68, and keeps them. A row of the table gives a group's ID in a big-endian word and the address of the
+// archive's name. Ten rows name archives of weapons, such as we02. A negative ID ends the table. A rip of an effect
+// pushes the group of all.arc and the effect's group (see GatherResidentEvil). The game starts an effect through
+// 0x80149918, with a volume and a pan from the caller. 112 of the 117 calls there give a volume of 0xFF. MusyX then
+// plays the effect at the volume of the effect's row. 72 of the calls give a pan of 64, and 12 give 0xFF. 98% of the
+// rows give a pan of 64, and so do the rows of the effects that calls name by a constant ID. 0x801499B8 then sets
+// controller 0x5D, aux B's send, to a level that the game keeps at 0x80379BC0. A rip plays an effect at the volume and
+// the pan of its row, without that send.
 //
 // The length analysis reads the first of MusyX's song instances, at 0x8033AA90. Its 16 sections start 0x14E8 bytes into
-// it, 0x38 bytes apart, and each holds its count of loops at +0x34.
+// it, 0x38 bytes apart, and each holds its count of loops at +0x34. The analysis reads MusyX's 64 voices for an effect.
 const GameProfile kResidentEvilZeroUsa = {
     .name = "Resident Evil Zero",
     .game_id = "GBZE08",
@@ -2082,6 +2533,7 @@ const GameProfile kResidentEvilZeroUsa = {
             .aux_user = {0x8031b1a0, 0x8031b380},     // their reverbs
             .aux_prepare = {0x801e809c, 0x801e809c},  // sndAuxCallbackPrepareReverbHI for both
             .aux_midi = {0xff, 0xff},                 // no MIDI channel controls aux A or aux B
+            .snd_volume = 0x801cf2f8,
         }
             .Words(),
     .library_name = "ResidentEvilZero",
@@ -2107,6 +2559,13 @@ const GameProfile kResidentEvilZeroUsa = {
     .song_lists = {0x8037a2cc, 0x8037a2c8},
     .section_loops = 0x8033bfac,
     .section_loop_size = 0x38,
+    .musyx_voices = {.count = 64,
+                     .synth = 0x8037a300,
+                     .synth_size = 0x404,
+                     .dsp = 0x8037a3dc,
+                     .dsp_size = 0xf4,
+                     .state_offset = 0xec,
+                     .loop_handler = 0x801d553c},
 };
 
 // Nintendo Puzzle Collection (Japan). Its sound library is MusyX 2.0. The disc holds a menu and three games: Dr. Mario,
@@ -2119,8 +2578,9 @@ const GameProfile kResidentEvilZeroUsa = {
 // (0x800124C8). A rip plays in stereo, the options' default. Each module sets up studio 0's aux effects in the module's
 // memory. A rip places the effects' blocks in a part of main.dol's BSS that only the game's graphics use: aux A's at
 // 0x80100000, and aux B's at 0x80100200. The menu, Dr. Mario and Panel de Pon call sndVolume(127, 0, 0xFF). The menu
-// and Dr. Mario then call sndVolume(110, 0, 0xFF). A song's start sets the song's group again. A rip leaves the second
-// call out.
+// and Dr. Mario then call sndVolume(110, 0, 0xFF). A song's start sets the song's group again. A rip of a song leaves
+// the second call out. A rip of an effect makes the call (see AddPuzzleMenu). Yoshi's Cookie also sets MusyX's master
+// volumes from its options (see AddYoshisCookie).
 //
 // The length analysis reads the first of MusyX's song instances, at 0x80203500. The instance's 16 sections start
 // 0x14E8 bytes in, 0x38 bytes apart. Each section holds a count of loops at +0x34.
@@ -2161,13 +2621,16 @@ const GameProfile kPuzzleCollectionJpn = {
             .snd_seq_play = 0x8002c3b0, // sndSeqPlayEx
             .seq_play_form = 1,         // sndSeqPlayEx takes a studio
             .snd_seq_volume = 0x8002264c,
-            .snd_fx_start_ex = 0, // no effects
+            .snd_fx_start_ex = 0x800227d4,
             .snd_set_aux_processing_callbacks = 0x80022b54,
             .aux_callback = {0x80035f00, 0x80037088}, // sndAuxCallbackReverbHI and sndAuxCallbackChorus
             .aux_user = {0x80100000, 0x80100200},     // aux A's reverb and aux B's chorus (see above)
             .aux_prepare = {0x80035f5c, 0x800373f4},  // sndAuxCallbackPrepareReverbHI and sndAuxCallbackPrepareChorus
             .aux_midi = {0xff, 0xff},                 // no MIDI channel controls aux A or aux B
             .snd_volume = 0x80022968,
+            .snd_fx_ctrl = 0x800226d4,
+            .snd_fx_ctrl14 = 0x80022734,
+            .snd_master_volume = 0x800229c8, // for Yoshi's Cookie's sounds alone (see AddYoshisCookie)
         }
             .Words(),
     .library_name = "PuzzleCollection",
@@ -2189,6 +2652,13 @@ const GameProfile kPuzzleCollectionJpn = {
     .song_lists = {0x8022d6fc, 0x8022d6f8},
     .section_loops = 0x80204a1c,
     .section_loop_size = 0x38,
+    .musyx_voices = {.count = 64,
+                     .synth = 0x8022d730,
+                     .synth_size = 0x404,
+                     .dsp = 0x8022d80c,
+                     .dsp_size = 0xf4,
+                     .state_offset = 0xec,
+                     .loop_handler = 0x80025a60},
 };
 
 // Metroid Prime 2: Echoes (USA). Its sound library is a later build of MusyX 2.0, under Retro Studios' audio system.
@@ -2702,6 +3172,8 @@ const std::vector<GameProfile> kProfiles = {kFourSwordsUsa,
                                             kCollectorsEditionUsa,
                                             kCrystalChroniclesUsa,
                                             kAnimalCrossingUsa,
+                                            kDoubutsuNoMoriPlusJpn,
+                                            kDoubutsuNoMoriEPlusJpn,
                                             kColosseumBonusUsa,
                                             kMetroidPrimeUsa,
                                             kTalesOfSymphoniaUsa,

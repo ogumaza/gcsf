@@ -10,8 +10,8 @@ core.
 ## Features
 
 - Like kode54's PSF-family components, the component shows tags as metadata: `game` as album, `year` as date, and
-  `replaygain_*` as ReplayGain. Tags can be edited. Editing rewrites the tag area and keeps `_lib`, `length`, `fade` and
-  `volume`.
+  `replaygain_*` as ReplayGain. Tags can be edited. Editing rewrites the tag area and keeps `_lib`, `length`, `fade`,
+  `volume` and `gcsf_var`.
 - Length and fade come from the `length` and `fade` tags. Files without a length tag play for the default length and
   fade. They stop early when the sound ends by itself.
 - Advanced preferences › Decoding › GCSF decoder: default length and fade, endless playback, and rendering ahead. Endless

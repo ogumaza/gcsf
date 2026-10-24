@@ -110,9 +110,10 @@ std::optional<Timing> MeasureJAudioSound(Player& player, const GameProfile& prof
 
 // A MusyX game's songs, from the tables in its main.dol: the songs, then the jingles (SongEntries). A song's ID holds
 // its table in the top byte (0 for the songs, 1 for the jingles) and its number in the table below. Its label is its
-// file's name without the extension. A game whose code names its songs (GameProfile::named_songs) lists them in the
-// table's order instead (NamedSongs). The table then gives each song's ID, and a song's label is its name. The effects
-// that such a game's play function starts follow the songs (PlayedEffects).
+// file's name without the extension. The effects of a game for driver/mario_golf.c follow the jingles
+// (CamelotEffects). A game whose code names its songs (GameProfile::named_songs) lists them in the table's order
+// instead (NamedSongs). The table then gives each song's ID, and a song's label is its name. The effects that such a
+// game's play function starts follow the songs (PlayedEffects).
 std::vector<Sound> MusyXSongs(const disc::GameFiles& game, const GameProfile& profile);
 
 // The sounds of a game for driver/musyx.c: those of its catalogue (GatherMusyX), in order. A sound's ID is its number
@@ -126,9 +127,13 @@ std::vector<Sound> CatalogueSounds(const disc::GameFiles& game, const GameProfil
 std::optional<std::string> AddMusyXCatalogue(ProgramBuilder& program, const disc::GameFiles& game,
                                              const GameProfile& profile, const std::vector<uint32_t>* sounds);
 
-// The sound files of another MusyX game: the sound banks and every song's file. Returns the error, or nothing.
+// The sound files of another MusyX game: the sound banks, every song's file and the files of the groups that hold the
+// effects of a game for driver/mario_golf.c (CamelotEffectFiles). With `sounds`, the IDs of the sounds that the library
+// plays, the files of the effects' groups hold zeros of their sizes unless one of the sounds has the profile's
+// `musyx_effect_bit`. A song never opens them. The disc's table of files and the places of the files on the disc then
+// stay the same. Returns the error, or nothing.
 std::optional<std::string> AddMusyXFiles(ProgramBuilder& program, const disc::GameFiles& game,
-                                         const GameProfile& profile);
+                                         const GameProfile& profile, const std::vector<uint32_t>* sounds);
 
 // The length of a MusyX sound that the driver has started: a MusyXSong's, or a MusyXEffect's for an effect of the
 // catalogue in `library` or a sound ID with the profile's `musyx_effect_bit`. Returns nullopt for an effect of a

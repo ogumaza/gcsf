@@ -37,8 +37,8 @@ struct Traits
     static constexpr uint8_t kPsfVersion = gcsf::kPsfVersionGcsf;
     static constexpr uint64_t kMaxFileSize = 256u << 20; // largest file read into memory
 
-    // No GCSF tag sets how a file plays.
-    static constexpr std::array<const char*, 0> kPlaybackTags = {};
+    // An effect that waits for a port that the game sets would go silent if removing the tags dropped gcsf_var.
+    static constexpr std::array<const char*, 1> kPlaybackTags = {gcsf::kVariablesTag};
 
     static constexpr const char* kVersion = GCSF_VERSION;
     static constexpr const char* kAbout =

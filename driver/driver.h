@@ -36,6 +36,11 @@ typedef int s32;
 /* The most waves that a .minigcsf names, for a driver whose block holds a wave list after the sound's handle. */
 #define MAX_WAVES 64u
 
+/* The most ports that a player sets, for a driver with a port list. The word after a driver's entry holds the list's
+ * address (docs/gcsf.md, "Driver"). An entry gives a port's number in its high 16 bits and the port's value in its low
+ * 16 bits. */
+#define MAX_PORTS 16u
+
 /* The bit of the machine state register that lets external interrupts in, such as the audio interface's and the
  * DSP's. */
 #define MSR_EE 0x8000u

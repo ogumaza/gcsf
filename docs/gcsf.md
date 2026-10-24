@@ -202,7 +202,10 @@ the system, an effect of the player, or an action of an event. For an event's ac
 of the action's type at the camera. The sound starts when a child of the effect's track starts to play. The handle then
 points at a word that holds that child. Once a frame, the driver calls the game's update of the camera. That update
 gives each event its volume and pan by its place against the camera. An event at the camera plays at full volume, in
-the middle.
+the middle. The sound of the formation plays in a track of the effects sequence while the player moves the formation.
+For that sound, the driver calls the game's function for a move of the formation once a frame. It passes the value of
+port 2 of the port list as x and that of port 3 as y. The function writes x and the move's length to ports 2 and 3 of
+the formation's track. The function writes 1 to port 0 as the move starts.
 
 Donkey Kong Jungle Beat's driver is `driver/jungle_beat.c`. It sets up the video interface, JSystem's heaps and ARAM
 manager, and the game's heaps. It loads the game's sound files as the game does: the start-up archive, the sequence
@@ -213,6 +216,16 @@ tracks start silent. The game turns them on later, or never. A piece whose first
 next state at once. The game turns that piece's tracks on later. From then on the driver calls the audio manager's frame
 process once per video retrace. An entry of its wave list holds a wave bank in its high 16 bits and a group of that
 bank's wave system in its low 16 bits.
+
+A chord effect plays over a stage's music (see "Chord effects" in "Ripping"). The driver starts the music of a stage
+through the game's stage object. Then the driver turns each of the music's tracks off at once with code 2 of the BGM
+player's track states. The tracks still run. The driver calls the game's `startChordSe` with the effect's first record
+until one of the chord players is busy. After each audio frame, the driver runs the frame process of the game's rhythm.
+In the game, an object of the scenes runs that process. The status turns 1 when the first step of the effect sounds. The
+handle holds the JAISound of the step that sounds. While the next step waits for a beat, the handle holds the JAISound
+of the last step. The effect ends when no step sounds and none waits. The driver looks up the effect's record before
+the waves load. The work between the last frame process and the start of another sound then stays as it was. The
+timing of a start against the DSP's frames sets the samples of the output.
 
 Mario Kart: Double Dash!!'s driver is `driver/double_dash.c`. It sets up the video interface, JSystem's heaps and ARAM
 manager, and the game's audio heap. It loads the start-up archive as the game does and passes it to the game's audio
@@ -228,8 +241,14 @@ the ARAM and the game's heaps. The game's sound set-up then starts MusyX, and th
 sound groups. Mario Power Tennis's set-up also fades MusyX's two masters from 127 to 101 over 200 ms. The game plays
 no music before the fade has ended. For Mario Power Tennis, the driver waits 13 video retraces after the set-up. The
 driver starts the song by its number in the game's song table, or the jingle by its number in the jingle table. The
-game starts a jingle from another thread. The jingle sounds half a second later. The driver's thread then sleeps. The
-song plays from the audio and DSP interrupts. Mario Power Tennis plays through the same driver.
+game starts a jingle from another thread. The jingle sounds half a second later. A sound effect plays through the game's
+functions for effects instead. The sound ID gives what the driver loads first: the effect's voice bank, its court's bank
+or the game's narrations. Mario Golf reads a voice bank's samples from the disc in chunks. The chunks go into two
+buffers in turn. MusyX queues each chunk's upload to ARAM. On the console, each upload ends before the drive has read
+the next chunk. GCSF's drive answers sooner than the ARAM DMA moves a chunk. While a Mario Golf voice bank loads, the
+driver therefore limits MusyX's queue to one upload. For a Mario Power Tennis effect of a group that no table of the
+game lists, the driver loads the group as the game's bank loader loads its groups. The driver's thread then sleeps. The
+sound plays from the audio and DSP interrupts. Mario Power Tennis plays through the same driver.
 
 WarioWare, Inc.: Mega Party Game$!'s driver is `driver/warioware.c`. It sets up the game's heaps. The game's file loader
 then reads the game's five sound files from the disc. The driver puts each one where the game's sound set-up looks for
@@ -320,8 +339,22 @@ For an effect, the driver waits for the sound library's sequence of effects. The
 once the sound library is up. The driver then starts the effect by the game's number for it. The sound library gives the
 effect one of six slots. The channel of the sequence with the slot's number plays the effect. The game starts an effect
 that has no place in the scene through one function. In most scenes, that function plays effect 0x424 as effect 0x16e.
-The driver therefore calls the function that this one calls, with the same values. The sound library frees the slot when
-the effect ends.
+The driver therefore calls the function that this one calls, with the same values. That function adds a random number
+from 0 to 3 or from 0 to 1 to the numbers of some effects. The game then plays the effect of the sum. The rip patches
+out both adds. Each rip plays the effect that its number names. The sound library frees the slot when the effect ends.
+
+Doubutsu no Mori+, the game's Japanese release, runs the same driver. The release's sound library is an earlier build of
+the same port. The driver calls the same functions at other addresses.
+
+Doubutsu no Mori e+, a later Japanese release of the game, runs the driver too. The release's sound library is a later
+build of the port. The build numbers the pieces and their sequences with 16 bits. The game's table of pieces holds a
+16-bit sequence number for each piece. The driver reads and writes the table in 16-bit entries. In this build, the
+function that starts the sound library takes the start-up screen's sound, the size of that sound and the size of ARAM
+for the library. The game works out the size of ARAM from the size of `audiorom.img`. The driver passes the same size.
+In this release, the music discs' pieces are 208 to 367. The game mutes six channels of the island's piece unless the
+islander is on the island. The driver sets whether the islander is there before it starts a piece. A port holds a byte.
+The only sequence that ends at once has a number above 255. For Kapp'n's songs, the driver uses a piece whose sequence
+plays no note and ends after one tick.
 
 The Pokémon Colosseum Bonus Disc's driver is `driver/colosseum_bonus.c`. The disc plays its sequenced sound in one
 program, the one that sends Jirachi to a Game Boy Advance. That program is a disc image inside the disc, a TGC (see
@@ -346,23 +379,24 @@ queue and the audio interface. The driver then sets MusyX's memory hooks. The ho
 bottom up. sndInit follows, with the game's numbers of voices and the game's share of ARAM. Then the driver sets the
 game's output mode. MusyX starts each of its volume groups at a volume of 0. A song's start sets the song's group. An
 effect's start leaves the effect's group alone. The start-ups of Metroid Prime, Metroid Prime 2: Echoes, Paper Mario:
-The Thousand-Year Door, Rebel Strike, Nintendo Puzzle Collection and the NDDEMO tech demo call sndVolume(127, 0, 0xFF).
-That call gives every group its full volume. The driver makes it for these games too. The driver reads the sound's entry
-from the rip's catalogue (see "MusyX catalogue" below). The entry can give words for the driver to write into the game's
-memory, such as the settings of the game's reverbs. A game's profile can name aux effects for studio 0. The driver
-prepares them and passes them to sndSetAuxProcessingCallbacks. The driver writes the entry's words before it prepares
-the effects. A word can therefore change them in the driver's block. Yoshi's Cookie's songs in Nintendo Puzzle
-Collection do that (see "Ripping"). After the words, the driver can set the volume of every group through sndVolume, and
-MusyX's master volumes for music and for effects through sndMasterVolume. Both calls take a time of 0. The profile's
-parameters or the entry's words give the volumes. Each group that the entry names is in a set of four files in the rip:
-the project, the pool, the sample directory and the samples. The driver reads them and pushes the group with
-sndPushGroup. Groups in a row from one set share its files. MusyX copies the samples to ARAM. A song plays from its file
-through sndSeqPlayEx, with the song's group and MusyX's song ID. An effect plays through sndFXStartEx. A volume or a pan
-of 0xFF there takes the effect's value from its group's table of effects. The entry can then set the effect's MIDI
-controllers, through sndFXCtrl and sndFXCtrl14. Paper Mario: The Thousand-Year Door sets an effect's volume, its pitch
-wheel and its send to the reverb that way. The driver turns external interrupts off from the effect's start to its last
-controller. No audio frame plays the effect without its controllers. The driver's thread then sleeps. The sound plays
-from the audio and DSP interrupts.
+The Thousand-Year Door, Tales of Symphonia, Star Fox Adventures, Rogue Leader, Rebel Strike, Resident Evil Zero,
+Nintendo Puzzle Collection and the NDDEMO tech demo call
+sndVolume(127, 0, 0xFF). That call gives every group its full volume. The driver makes it for these games too. The
+driver reads the sound's entry from the rip's catalogue (see "MusyX catalogue" below). The entry can give words for the
+driver to write into the game's memory, such as the settings of the game's reverbs. A game's profile can name aux
+effects for studio 0. The driver prepares them and passes them to sndSetAuxProcessingCallbacks. The driver writes the
+entry's words before it prepares the effects. A word can therefore change them in the driver's block. Yoshi's Cookie's
+songs in Nintendo Puzzle Collection do that (see "Ripping"). After the words, the driver can set the volume of every
+group through sndVolume, and MusyX's master volumes for music and for effects through sndMasterVolume. Both calls take a
+time of 0. The profile's parameters or the entry's words give the volumes. Each group that the entry names is in a set
+of four files in the rip: the project, the pool, the sample directory and the samples. The driver reads them and pushes
+the group with sndPushGroup. Groups in a row from one set share its files. MusyX copies the samples to ARAM. A song
+plays from its file through sndSeqPlayEx, with the song's group and MusyX's song ID. An effect plays through
+sndFXStartEx. A volume or a pan of 0xFF there takes the effect's value from its group's table of effects. The entry can
+then set the effect's MIDI controllers, through sndFXCtrl and sndFXCtrl14. Paper Mario: The Thousand-Year Door sets an
+effect's volume, its pitch wheel and its send to the reverb that way. The driver turns external interrupts off from the
+effect's start to its last controller. No audio frame plays the effect without its controllers. The driver's thread then
+sleeps. The sound plays from the audio and DSP interrupts.
 
 `driver/musyx_upload.c` is the driver of Pokémon Channel. It builds `driver/musyx.c` with one addition. The game's
 sample file is larger than main memory. The driver pushes each group without samples in memory. MusyX then calls its
@@ -399,13 +433,32 @@ The Wind Waker's driver has a wave list. An entry gives a wave system's number i
 system in its low 16 bits. The driver skips a wave system that the sound library has loaded already. Each of the
 game's wave systems has one group.
 
+A driver's entry is at 0x81700000. The word at **0x81700004** holds the address of the driver's port list, or 0 for a
+driver without one. The list holds the number of ports that the player sets, then 16 entries. An entry gives a port's
+number in its high 16 bits and the port's value in its low 16 bits. A player fills the list from the `gcsf_var` tag
+(see "Tags"). The driver gives the sound those ports. The Wind Waker's driver has a port list, after its game profile.
+Port 6 holds the low 16 bits of the map information that the game passes with an effect. The driver passes port 6's
+value to `startSoundVec` as that information. The driver gives the sound each other port after the start, through
+`JAISound::setPortData`. The sound library writes those ports to the effect's track when the effect's sequence starts.
+The game's `seStart` gives every effect port 9 that way: the reverb of the room that the effect plays in. Pikmin's
+driver has a port list after its game profile too.
+
 Pikmin 2's driver has a wave list too. Its entries have the same layout. The game has one wave system, with 49 groups.
 Group 0 holds the effects. The sound system loads it at start-up, and the driver skips it. A scene loads at most two
 other groups.
 
+Donkey Kong Jungle Beat's driver has a wave list too. The last word of its game profile, at 0x1E8 of the block, is
+written by the driver: the JAISound of the music that a chord effect plays over, or 0. The ripper's length analysis
+leaves out the commands of that sound's tracks.
+
 Mario Golf's driver doesn't use the handle. The top byte of a Mario Golf sound ID gives the table, and its low 16 bits
 give the song's number in that table. Table 0 holds the songs, and table 1 the jingles. Mario Power Tennis has only
-table 0. It holds the jingles too. The driver plays them as songs.
+table 0. It holds the jingles too. The driver plays them as songs. A top byte from 0x80 to 0x83 selects a sound effect.
+With 0x80, the low 16 bits give the effect's ID. Bits 16 to 23 give its voice bank's number plus 1, or 0 for an effect
+of the bank that the game loads at start-up. With 0x81, the low 16 bits give a narration's number in the game's table of
+narrations. With 0x82, the low 16 bits give the ID of an effect of a court's bank, and bits 16 to 23 the court's number.
+With 0x83, bits 0 to 11 give the ID of an effect of a group that no table of the game lists. Bits 12 to 23 give half the
+number of the group's first file.
 
 WarioWare's driver doesn't use the handle either. A WarioWare sound ID is MusyX's song ID: the song's MusyX song
 group in the top byte and its number in the low 16 bits. The driver passes that number to the game's play function. An
@@ -439,7 +492,12 @@ game plays another piece. The 24 pieces that play the hours change with the weat
 channels by the weather and the hour. The game numbers the museum's rooms 1 for the lobby, 2 for the paintings, 3 for
 the fish, 4 for the insects and 5 for the fossils. Each room mutes some of the museum piece's channels. Every other
 piece ignores both. The low 16 bits of an effect's ID give the game's number for the effect: its bank in bits 8 to 15
-and its place in the bank in the low byte.
+and its place in the bank in the low byte. Doubutsu no Mori+'s sound IDs follow the same rules.
+
+In Doubutsu no Mori e+, the game's numbers of pieces take 16 bits. A piece's ID there gives the number in the low 16
+bits, the weather in bits 16 to 19 and the museum's room in bits 20 to 22. Bit 23 is set when the islander is on the
+island. Only the island's piece, 376, depends on that bit. The IDs of the release's effects follow the same rules as in
+Animal Crossing.
 
 The Bonus Disc's driver writes the handle too. While the effect plays, the handle is the effect's entry in the sound
 library's table. The driver writes 0 when the effect ends. A Bonus Disc sound ID is the sound library's number for the
@@ -520,6 +578,17 @@ the game's sound table, and `gcsf_mode` with the value `game`.
 `length` and `fade` count time at the reported rate of 32,028 Hz: a player plays `length` × 32,028 stereo samples
 before the fade.
 
+`gcsf_var` sets ports of the sound before the sound starts. Some effects read a value that the game's code puts on a
+port when it starts them, such as the material of the ground under a footstep. They play nothing, or another variant,
+without it. The value is one or more assignments `N=V`, in the form of 3SF's `3sf_var`, separated by commas or white
+space. Line breaks count as white space. N is a port, 0 to 15. V is −32,768 to 32,767, and the port takes its low 16
+bits. Each number is decimal, or hex with a `0x` prefix, and may have a minus sign. A later assignment to the same port
+wins. A player ignores the whole tag if any part of it is malformed or out of range. The player writes the ports into
+the driver's port list (see "Driver") after it loads the set's MEM chunks and before the boot. A set whose driver has
+no port list ignores the tag. `gcsfrip` writes the tag for each variant of such an effect, with the assignments in
+increasing order of N, in decimal, separated by ", ": `gcsf_var=6=4`. The foobar2000 component keeps the tag when it
+rewrites a file's tags.
+
 ## Ripping
 
 `gcsfrip` builds sets from a GameCube disc image or an extracted disc. A game requires a driver profile. Profiles
@@ -529,12 +598,12 @@ Swords Plus, The Legend of Zelda: Twilight Princess (USA), The Legend of Zelda: 
 (USA), Super Mario Sunshine (USA), Pikmin (USA), Donkey Kong Jungle Beat (USA) and Mario Kart: Double Dash!! (USA). It
 also supports Mario Golf: Toadstool Tour (USA), Mario Power Tennis (USA), WarioWare, Inc.: Mega Party Game$! (USA),
 Pikmin 2 (USA), Pac-Man Vs. (USA), the menu of The Legend of Zelda: Collector's Edition (USA), Final Fantasy Crystal
-Chronicles (USA), Animal Crossing (USA), the Pokémon Colosseum Bonus Disc (USA), Metroid Prime (USA, disc version 2),
-Metroid Prime 2: Echoes (USA), Paper Mario: The Thousand-Year Door (USA), Tales of Symphonia (USA), Star Fox Adventures
-(USA, disc version 1), Star Wars Rogue Squadron II: Rogue Leader (USA), Star Wars Rogue Squadron III: Rebel Strike
-(USA), Pokémon Colosseum (USA), Resident Evil Zero (USA), Pokémon Channel (USA), Mario Party 4 (USA, disc version 1),
-Nintendo Puzzle Collection (Japan) and the NDDEMO tech demo. The Bonus Disc's profile matches the program in a TGC on
-the disc (see below).
+Chronicles (USA), Animal Crossing (USA), Doubutsu no Mori+ (Japan, disc version 1), Doubutsu no Mori e+ (Japan, disc
+version 1), the Pokémon Colosseum Bonus Disc (USA), Metroid Prime (USA, disc version 2), Metroid Prime 2: Echoes (USA),
+Paper Mario: The Thousand-Year Door (USA), Tales of Symphonia (USA), Star Fox Adventures (USA, disc version 1), Star
+Wars Rogue Squadron II: Rogue Leader (USA), Star Wars Rogue Squadron III: Rebel Strike (USA), Pokémon Colosseum (USA),
+Resident Evil Zero (USA), Pokémon Channel (USA), Mario Party 4 (USA, disc version 1), Nintendo Puzzle Collection
+(Japan) and the NDDEMO tech demo. The Bonus Disc's profile matches the program in a TGC on the disc (see below).
 
 The `.gcsflib` contains:
 
@@ -551,15 +620,17 @@ The `.gcsflib` contains:
   file (`pikibank.bx`), the sequence archive (`pikiseq.arc`) and every wave archive that the bank file's wave systems
   name. Pikmin 2's library also holds the other files that the game's sound layer reads: the conductors
   (`Conductor.arc`), `Key.arc`, the lists of music and streams, and the track maps. For Mario Golf and Mario Power
-  Tennis, the disc's header, the files of the game's two MusyX sound groups and every song's file (an SNG), as `FILE`
-  chunks. For Final Fantasy Crystal Chronicles, the disc's header, every piece's file (`dvd/sound/Music/*.bgm`), the
+  Tennis, the disc's header, the files of the game's two MusyX sound groups, every song's file (an SNG) and the files of
+  the other groups that hold effects, four for each group, as `FILE` chunks. For Final Fantasy Crystal Chronicles, the
+  disc's header, every
+  piece's file (`dvd/sound/Music/*.bgm`), the
   four blocks of effects that the game loads (blocks 0 to 3 in `dvd/sound/SE/Block/`), the effects' SEP files from
   number 4000 on (`dvd/sound/SE/Sep/*.sep`) and the wave banks that the pieces and the effects name
-  (`dvd/sound/Wave/*.wd`), as `FILE` chunks. For Animal Crossing, the disc's header and the game's sound data
-  (`audiorom.img`), as `FILE` chunks. For the Pokémon Colosseum Bonus Disc, the disc header of the TGC's program and the
-  effects' scripts and samples (`pm6fgm.sem` and `pm6fgm.ssm`), as `FILE` chunks. For a game for `driver/musyx.c` or
-  `driver/musyx_upload.c`, such as Metroid Prime, the disc's header, the catalogue of the game's sounds, and the MusyX
-  files of their groups and songs (see "MusyX catalogue");
+  (`dvd/sound/Wave/*.wd`), as `FILE` chunks. For Animal Crossing, Doubutsu no Mori+ and Doubutsu no Mori e+, the disc's
+  header and the game's sound data (`audiorom.img`), as `FILE` chunks. For the Pokémon Colosseum Bonus Disc, the disc
+  header of the TGC's program and the effects' scripts and samples (`pm6fgm.sem` and `pm6fgm.ssm`), as `FILE` chunks.
+  For a game for `driver/musyx.c` or `driver/musyx_upload.c`, such as Metroid Prime, the disc's header, the catalogue of
+  the game's sounds, and the MusyX files of their groups and songs (see "MusyX catalogue");
 - a process descriptor.
 
 The wave archives are every one that the start-up archive's wave systems name, unless the game loads its wave groups as
@@ -587,19 +658,30 @@ categories. Each one after them names a sound, and its word is the sound's ID. A
 ID.
 
 Some of The Wind Waker's effects make no sound in a rip, and the ripper skips them. Most are empty: their code
-returns at once, and the game plays nothing for them either. 34 others read a port that the game sets when it starts
-the effect, and they play nothing while the port holds 0:
+returns at once, and the game plays nothing for them either. 30 others read a port that the game sets when it starts
+the effect. They play nothing while the port holds 0. A rip holds their variants instead. Each variant plays the
+effect with one value of the port:
 
-- **Port 6** holds the low 16 bits of the map information that the game passes with the effect, such as the material
-  of the ground under a footstep. The driver passes 0. These effects read it: se2-0003 to 0005, se2-0051 to 0052,
-  se2-0085, se2-0111, se2-0122 to 0123, se3-0000 to 0003, se3-0010 to 0012, se3-0021, se3-0024, se3-0038 to 0041,
-  se3-0043 to 0048 and se5-0301.
-- **Port 9** holds a value that the game gives the effect. These effects read it: se3-0049 to 0050, se4-0254 to 0255
-  and se4-0327.
+- **Port 6** holds the low 16 bits of the map information that the game passes with an effect. For a step, a jump, a
+  landing or a climb, the game passes the material of the ground in its collision data: 1 to 27. For a hit, it passes
+  the material of the surface, or a code from 32 up for the kind of thing hit. These effects read port 6: se2-0003 to
+  0005, se2-0051 to 0052, se2-0085, se2-0111, se2-0122 to 0123, se3-0000 to 0003, se3-0010 to 0012, se3-0021,
+  se3-0024, se3-0038 to 0041, se3-0043 to 0048 and se5-0301.
+- **Port 9** holds the reverb of the room that the effect plays in. The game's `seStart` gives every effect that port.
+  Rips play effects without it. se3-0050, a Stalfos's step, plays nothing while port 9 holds 0. A rip holds a variant
+  for each reverb of the rooms that place a Stalfos: 40, 80, 100, 110, 120 and 127.
+
+A variant's `gcsf_var` tag holds its port's value, and its title is the effect's name, a space and the tag's value, such
+as `se3-0000 6=4`. Its file shares the effect's number. A user can play another value by changing the tag. The profile
+lists each effect's values (`GameProfile::port_effects`). Values that play the same samples share one variant. The list
+holds the lowest of them. Four effects that read port 9 make no sound with any value: se3-0049, se4-0254, se4-0255 and
+se4-0327. The ripper skips them.
 
 Donkey Kong Jungle Beat has effects like these too. 133 are empty. 68 read port 0xb, and some of them also ports 0xc to
-0xf. Most take the key of a note from those ports. They play nothing while port 0xb holds 0, and the driver leaves it
-0. Two more make no sound in a rip. `gcsfrip` names each effect that it skips.
+0xf. Most take the key of a note from those ports. They play nothing while port 0xb holds 0. The game's chord code
+writes the ports of the effects that the chord database names. A rip plays those effects through that code (see
+"Chord effects"). Port 0xb holds 0 for the others. Two more make no sound in a rip. `gcsfrip` names each effect that it
+skips.
 
 Mario Kart: Double Dash!! keeps its music's sequences in the start-up archive. It has no sequence archive. Its voices
 play the banks of three more start-up archives in the first one's `baac` block. The game loads one of those at a time.
@@ -607,21 +689,27 @@ The ripper walks each effect's sequence for the banks that it selects. A voice's
 bank, plus 1, in bits 28 to 31. The library holds the wave archives of the archives that its sounds load. The ripper
 skips the effects whose volume in the sound table is 0, and the empty ones.
 
-Animal Crossing keeps no names for its music. Its code holds a table of 256 numbers. Each number gives the sequence that
-the game plays for it. A rip names a piece after its number, for example `bgm046`. The 24 pieces that play the hours are
-ripped once for each weather that changes them, for example `bgm001-fine`, `bgm001-snow` and `bgm001-sakura`. The
-museum's piece is ripped once for each room, for example `bgm088-lobby`. Where several numbers play the same sequence,
-the ripper rips the first of them. Numbers 0 and 83 to 87 aren't ripped: 0 stops the music, and 83 to 87 play effects.
-Numbers 92 to 111 are the first parts of Kapp'n's songs, and 112 to 121 are their second parts. A rip of a first part
-ends with the first part, and each second part has a rip of its own (see "Driver"). Sequences that the table doesn't
-give aren't ripped as music. They play the effects, the voices and the sounds of some furniture.
+Animal Crossing keeps no names for its music. Neither do Doubutsu no Mori+ and Doubutsu no Mori e+. Each release's code
+holds a table of the game's numbers for its pieces: 256 in Animal Crossing and Doubutsu no Mori+, and 384 in Doubutsu no
+Mori e+. Each number gives the sequence that the game plays for it. A rip names a piece after its number, for example
+`bgm046`. The 24 pieces that play the hours are ripped once for each weather that changes them, for example
+`bgm001-fine`, `bgm001-snow` and `bgm001-sakura`. The museum's piece is ripped once for each room, for example
+`bgm088-lobby`. The island's piece in Doubutsu no Mori e+ has two rips: `bgm376-islander` with the islander on the
+island, and `bgm376-no-islander` without. Where several numbers play the same sequence, the ripper rips the first of
+them. Number 0 isn't ripped: it stops the music. In Animal Crossing and Doubutsu no Mori e+, numbers 83 to 87 play
+effects. The rips of those two releases leave the numbers out. Doubutsu no Mori+ plays them as pieces of music. Doubutsu
+no Mori+'s rips include them. Numbers 92 to 111 are the first parts of Kapp'n's songs, and 112 to 121 are their second
+parts. A rip of a first part ends with the first part, and each second part has a rip of its own (see "Driver").
+Sequences that the table doesn't give aren't ripped as music. They play the effects, the voices and the sounds of some
+furniture.
 
 The game keeps no names for its effects either. They play from six banks in the sequence of effects. A rip names an
 effect after its bank and its place in the bank, for example `se2-017`. Effect 0 of bank 0 isn't ripped: the game's
-slots use the number 0 for no effect. For some effects, the game adds a random number from 0 to 1 or from 0 to 3 to the
-effect's number. A rip of such an effect plays the variant that the game's first random number picks. Each variant is
-also ripped under its number. The game's continuous sounds, such as rivers and insects, play in other channels of the
-sequence. The ripper rips neither them nor the villagers' voices.
+slots use the number 0 for no effect. For 17 effects, the game adds a random number from 0 to 3 to the effect's number.
+For five or six others, by release, the game adds 0 or 1. The game then plays the effect of the sum. A rip of such an
+effect plays the effect that its number names (see "Driver"). The effects that the sum can name have rips of their own.
+The game's continuous sounds, such as rivers and insects, play in other channels of the sequence. The ripper rips
+neither them nor the villagers' voices.
 
 The Pokémon Colosseum Bonus Disc plays its sequenced sound in one program, `tgc/pokedownload.tgc`. A TGC is a disc
 image inside a disc. It holds a program's disc header, its `main.dol`, its file system table and its files. gcsfrip
@@ -661,7 +749,16 @@ sequence block with the sound's ID. Type 0x30 plays a stream. The data's ninth b
 
 Mario Golf's code lists its songs in two tables: 38 songs and 9 jingles. Mario Power Tennis's code lists 111 songs and
 jingles in one table. Each entry names the song's file. A `.minigcsf` selects a song by its table and number (see
-"Driver"). `--bgm` takes every song and jingle. A song's name is its file's name without the extension.
+"Driver"). `--bgm` takes every song and jingle. A song's name is its file's name without the extension. Both games' code
+lists their sound effects too. Mario Golf's lists 737: the ranges of IDs of the bank that the game loads at start-up, 37
+voice banks and 51 narrations. Mario Power Tennis's lists 924: the range of its start-up bank, 18 voice banks, 106
+narrations in one group and the banks of 10 courts. 37 more groups of Mario Power Tennis follow each other on the disc.
+They hold the game's other 56 effects. A group's four files are its pool, its project, its sample directory and its
+samples. The ripper lists the effects after the songs and jingles. An effect's name is its voice bank's name, `se` for
+the start-up bank and the other groups, or `court` for a court's bank, then a hyphen and its ID in four digits, for
+example `mario-0154`. A narration's name is `narration-` and its effect's ID. A song reads none of the files of the
+effects' groups. A rip without an effect, such as a rip of the music alone, holds zeros in place of those files. Each
+file keeps its size. The disc's table of files and the places of the other files on the disc then stay the same.
 
 Pikmin's code holds the index of its sequences: a BARC of 22 entries that gives each sequence's name and its offset and
 size in `pikiseq.arc`. The first entry is the effects sequence, and the second plays the system's events. Five entries
@@ -677,11 +774,13 @@ example `demobgm-5`. The game plays 13 more pieces, most of them in cutscenes, f
 Pikmin's code also holds a catalogue of its sound effects, with their names. A row gives how the game starts the
 effect: as an effect of the system, as an effect of the player, or as an action of an event of a given type. An
 effect's ID is 0x80000000 | kind << 24 | number << 8 | sequence. The kind is 1 for an effect of the system, 2 for one
-of the player and 3 for an event's action. The number is the effect's number, or the event's type << 12 | the action.
-The sequence is 0, the effects sequence, or 1, the events' sequence. An effect takes its name from the catalogue, for
-example `SE_FLOG_JUMP`. Where the actions of several events play the same effect, the ripper lists it once, with the
-first row's name. The game's code plays a few effects that the catalogue doesn't list: effects of the system in the demo
-of a found ship part, and a voice of the player. Their names are their IDs in hex. The ripper leaves out four effects of
+of the player, 3 for an event's action and 4 for the sound of the formation. The number is the effect's number, or the
+event's type << 12 | the action. The sequence is 0, the effects sequence, or 1, the events' sequence. An effect takes
+its name from the catalogue, for example `SE_FLOG_JUMP`. Where the actions of several events play the same effect, the
+ripper lists it once, with the first row's name. The game's code plays a few effects that the catalogue doesn't list:
+effects of the system in the demo of a found ship part, a voice of the player and the sound of the formation. Their
+names are their IDs in hex. A rip of the formation holds one variant, `84000000 3=127`: a full move straight ahead (x 0
+and y 127, see "Driver"). The ripper leaves out four effects of
 the system. One stops the effects, one plays nothing, one plays a part of `demobgm`, and one plays a stream. An event of
 the ship's type starts the ship's idling as the game creates it. A rip plays the ship's actions on an event of another
 type. That event reaches the same entries in the table of actions.
@@ -864,7 +963,22 @@ every song. The game plays a song at the music's volume of its options, 127 at t
 the reverb of aux A for each song (see the profile in `src/rip/profiles.cpp`). A song's catalogue entry holds those
 settings. The disc holds six songs that the table leaves out: `bgm_etc004` and `temp1` to `temp5`. The game's code
 names none of them, and the ripper leaves them out. Both discs hold the same code and the same music. A rip of either
-disc gives the same set. The game's sound effects and voices aren't ripped.
+disc gives the same set.
+
+The game's sound effects and voices follow the songs. Each of the other `.snd` files in `S/` holds one group of effects:
+`se.snd` the game's common effects, `se_ev00.snd` to `se_ev07.snd` the effects of events, and `v_01_llo.snd` to
+`v_70_bh18.snd` the voices in battle. The effects' IDs rise from file to file in the order of the files' names. The
+ripper lists the effects in that order. The game's code names the first nine of those files. The code also names nine
+voice files of the party in `BTL/`. They hold the same bytes as the first nine voice files in `S/`. Another file in
+`BTL/` holds the samples of the other voice files, in the order of the files. The ripper reads every group from `S/`.
+One voice file holds no pool and only 256 bytes of samples. MusyX can't push that file's group. A rip leaves out the
+file's effects. The game's start-up (0x800708C8) pushes the music's group, then the common effects' group. The game
+keeps both. The common effects take some samples and tables from the music's group. The effects of events take samples,
+macros and tables from the common effects' group. A rip of an effect therefore pushes those two groups first, then the
+effect's group. The game starts an effect through sndFXStartEx with a volume of 127, a pan of 64 and studio 0. Every row
+of the groups' tables of effects gives the same volume and pan. The game can later set an effect's pan from the place of
+the sound's source. A rip plays every effect in the centre. Nothing names the effects. A rip names an effect after its
+file and its ID in four decimal digits, for example `se-0012` or `v_01_llo-0501`.
 
 Star Fox Adventures' code lists its music in a table at 0x802C5E80: 99 entries of 16 bytes. An entry gives MusyX's song
 ID in a big-endian half and the song's group in the next byte. The address of the song's name follows at +4.
@@ -880,7 +994,20 @@ A song plays at the volume that most of its triggers give it. Of volumes that ti
 Trigger 0xEC plays a song that its caller picks. A song that no other trigger names takes that trigger's volume, 80. The
 game starts a song at volume 0 and raises it to the trigger's volume over 0.5 s. A rip starts the song at the trigger's
 volume. `midi.wad` holds a 100th song, 0x33. A trigger names it, but the table doesn't, and the game never plays it. The
-ripper leaves it out. The game's sound effects aren't ripped.
+ripper leaves it out.
+
+The game's sound effects follow the songs, in the order of their IDs: every effect of the effects groups that the game
+pushes. All of them are in `starfoxs`. A rip of an effect pushes the same groups as a rip of a song. The game starts
+its effects through the rows of `audio/data/Sfx.bin`, 32 bytes each. A row gives the effect's volume in its byte at 2.
+Six effect IDs follow from 0xA, in big-endian halves. The top four bits of the row's last byte give how many of them
+the row uses. The game picks one of those at random. An ID of 0 picks no effect. The game passes the row's volume, a
+pan of 0x40 and studio 0 to sndFXStartEx. An effect plays at the volume that most of its rows with a volume above 0
+give it. Of volumes that tie, the first one in the file wins. An effect whose rows all give 0 plays at 0 and makes no
+sound. The ripper skips it. An effect that no row names takes the volume and the pan of its row in its group's table of
+effects. In some places of the game's world, the game sends its effects to aux A's reverb through controller 0x5B. A
+rip plays the effects without that send. Everywhere else, the game does the same. The game's code names none of its
+effects. The disc's `audio/starfox.h.bak` names the effects of an earlier build. The IDs in that header don't match the
+game's project. A rip names an effect after its set and its ID in four decimal digits, for example `starfoxs-0420`.
 
 Star Wars Rogue Squadron II: Rogue Leader packs most of its files in `Rogue2/data.dat`. `Rogue2/data.dir` lists them in
 lines of text: a file's path, padded with spaces to 64 characters, then its offset in the pack, its size and two more
@@ -900,7 +1027,19 @@ volume that the hall gives it. The hall fades a song in over 300 ms. A rip leave
 start their songs through 0x7FD4CE78 in the game, with a song's group, its ID and a volume. They play `Song_0x6E-0x65`,
 which the hall doesn't list, at volume 0x67 in two of their three calls. A rip plays it at that volume. No call in the
 game's code gives a volume for the other songs that the hall doesn't list. The levels' scripts probably give them. A
-rip plays them at MusyX's full volume. The game's sound effects aren't ripped.
+rip plays them at MusyX's full volume.
+
+Banks 0 to 19 hold the game's sound effects. The ripper lists them after the songs, bank by bank. Each effect's ID
+belongs to one bank. Some effects of banks 1 to 19 play samples of bank 0. Bank 0 shares no ID of a macro, a table or
+a sample with those banks. A rip of an effect pushes the groups of bank 0, then those of the effect's bank, each in the
+bank's order. The game's table of sounds, at 0x7FDDBF30 in the game, holds 522 rows of 12 bytes. A row gives an
+effect's ID in a big-endian half and the effect's volume in the row's byte at 3. An ID of 0xFFFF marks an empty row.
+Several rows can give one effect, at different volumes. To play a row, the game calls sndFXStartEx with the row's
+volume, a pan from the caller and studio 0. Three functions scale the volumes of rows 489 to 491 by a setting. Another
+starts a row's effect with values for two controllers. A rip leaves both out. A rip plays an effect at the volume that
+most of its rows give it, in the centre. Of volumes that tie, the first row wins. An effect that no row names takes
+the volume and the pan of its row in its group's table of effects. A rip names an effect after its ID in four decimal
+digits, for example `RogueLeader-0048`.
 
 `main.dol` is a loader. It holds the OS, MusyX and a second DOL: the game. The loader maps the game in at 0x7FC00000.
 The driver runs only the loader's code. A rip skips the loader's set-up of the game's heaps and the game's static
@@ -976,7 +1115,25 @@ the fade-in out. No room plays `bgm_52`. The game's extras play it at 100/127 of
 at 100. At start-up the game gives aux A and aux B MusyX's high-quality reverb. Aux A's lasts 1.5 s, and aux B's 1 s. A
 song's catalogue entry holds their settings. The game also sets MusyX's master volumes to 127 at start-up. A rip leaves
 them at MusyX's defaults. The output is the same. Many of the game's cutscenes stream their music and voices from
-`bio0/demo/`. GCSF doesn't rip streams. The game's sound effects aren't ripped.
+`bio0/demo/`. GCSF doesn't rip streams.
+
+The game's sound effects follow the songs. Each of the other archives in `bio0/sound/` holds one group of effects. Its
+samples are in the file of the same name with the extension `.sam`. `all.arc` holds the effects that the whole game
+plays. The others hold the effects of rooms, doors, enemies, weapons and the extras, and the voices. The first disc
+holds 137 such archives and the second 192. 100 of them are on both discs, with the same files. The ripper lists the
+effects archive by archive, in the order of the archives' names. The game's start-up pushes the group of `all.arc`, then
+the groups of ten archives of weapons, and keeps them. A table in the game's code at 0x80255D68 lists the ten. A row of
+8 bytes gives a group's ID in a big-endian word and the address of the archive's name. A negative ID ends the table.
+Those groups share no ID of a macro, a table, a sample or an effect with the other archives. The effects of each archive
+start only macros and samples of that archive. A rip of an effect pushes the group of `all.arc`, then the effect's
+group. The game starts an effect through sndFXStartEx with a volume and a pan from the caller. The game then sets the
+effect's send to aux B. Most calls give a volume of 0xFF. MusyX then takes the volume of the effect's row in its group's
+table of effects. 98% of the rows give a pan of 64. A rip plays an effect at the volume and the pan of its row, without
+the send. 2,002 rows on the first disc and 1,436 on the second give a volume of 0. Their effects make no sound at that
+volume. In all but two archives, those rows start the same macro. The tables of most archives hold 50 rows. The rows of
+volume 0 look like the tables' unused rows. The ripper leaves them out. A rip names an effect after its archive and its
+ID in four decimal digits, for example `sh00-1467`. The archives of the cutscenes in `bio0/demo/` hold the cutscenes'
+effects too. The ripper leaves those out.
 
 Star Wars Rogue Squadron III: Rebel Strike packs its files in `Rogue3/data.dat` as Rogue Leader does. `Rogue3/data.dir`
 pads each number with spaces on its left. The 172 banks in `audio/data` have Rogue Leader's layout. Many banks hold
@@ -1037,23 +1194,42 @@ songs in group 1. Dr. Mario plays its songs at full volume during play. The game
 in its manual and in some other states. A rip plays each song at full volume. Panel de Pon's code gives each song a
 volume in a table. Yoshi's Cookie's module holds a table of the items in `ycookie.bin`: the files of three groups, then
 the songs, then the groups' samples. The game pushes groups 0 and 1 at start-up, and group 2 before a song of that
-group. Yoshi's Cookie plays its songs at the volume for music in the game's options. A rip plays them at the options'
-default.
+group. Yoshi's Cookie sets MusyX's master volumes for music and for effects from two levels in the game's options.
+Tables at 0x179B74 and 0x179B7F in the module's section 5 give the volume of each level, for music and for effects. A
+rip takes the options' default levels: a song plays with the master for music at 58, and an effect with the master for
+effects at 105.
 
 The ripper lists the menu's 9 songs, then Dr. Mario's 24, Panel de Pon's 59 and Yoshi's Cookie's 26. A song's name
 starts with its module's name. The menu's songs take their IDs, for example `menu-01`. Dr. Mario's and Panel de Pon's
 take the games' names for them, for example `panepon-flower_01`. Yoshi's Cookie's take the names of their files, for
-example `ycookie-sng05`. `--bgm` takes every song. The games' sound effects aren't ripped.
+example `ycookie-sng05`. `--bgm` takes every song. The effects follow the songs: the menu's 9, then Dr. Mario's 106,
+Panel de Pon's 527 and Yoshi's Cookie's 65. An effect's name is its module's name, `-se-` and the effect's ID in four
+digits, for example `panepon-se-0012`. `dr_mario-se-0105` makes no sound. A rip leaves it out.
 
-Each module sets up studio 0's aux effects for its songs. The menu, Dr. Mario and Panel de Pon give aux A MusyX's
-high-quality reverb, with the same settings, and aux B MusyX's chorus. The profile names those effects. A song's
+The menu's effects are in group 0, Dr. Mario's and Panel de Pon's in group 0 of their sets, and Yoshi's Cookie's in
+group 1. A rip of an effect pushes the groups that the module pushes at start-up. The menu and Dr. Mario start an effect
+through sndFXStartEx with a volume and a pan of 0xFF and studio 0. MusyX then takes both from the group's table of
+effects. Panel de Pon starts most of its effects through a table at 0x165678 in its module's section 5. The table gives
+each effect 16 bytes, in the order of the effects' IDs: the volume at +4 and the pan at +5. A volume of 0xFF there gives
+110, and a pan of 0xFF the group's pan. A rip does the same. Other calls in Panel de Pon's code start an effect with a
+volume and a pan of 0xFF. Yoshi's Cookie's module holds a table of effects at 0x1797B4 in section 5, with a row of 12
+bytes for each: the effect's ID in a big-endian word, then the effect's volume, pan, surround pan, motion and reverb
+send. A motion of 0 keeps the pan still, and every row holds 0. The game starts an effect through sndFXStartEx with the
+row's volume and pan and studio 0. The game then sets controller 0x5B to the reverb send and controller 0x83 to the
+surround pan. In stereo, the game gives every effect a surround pan of 64. A rip does the same. The table holds 80 rows.
+The project lacks the effects of the last 15.
+
+Each module sets up studio 0's aux effects for its sounds. The menu, Dr. Mario and Panel de Pon give aux A MusyX's
+high-quality reverb, with the same settings, and aux B MusyX's chorus. The profile names those effects. A sound's
 catalogue entry holds the settings of the reverb and the chorus. Yoshi's Cookie gives aux A MusyX's standard reverb and
-aux B no effect. The words of a Yoshi's Cookie song replace aux A's callback and preparation in the driver's block, and
+aux B no effect. The words of a Yoshi's Cookie sound replace aux A's callback and preparation in the driver's block, and
 clear aux B's. Yoshi's Cookie also limits MusyX to 40 voices for music and 24 for effects with sndSetMaxVoices. The
-song's words write those limits into MusyX's state. The menu, Dr. Mario and Panel de Pon call sndVolume(127, 0, 0xFF).
-The menu and Dr. Mario then call sndVolume(110, 0, 0xFF). A song's start sets the song's group again. A rip leaves the
-second call out. The game's options set the output to mono, stereo or surround. A rip plays in stereo, the options'
-default.
+sound's words write those limits into MusyX's state. The menu, Dr. Mario and Panel de Pon call sndVolume(127, 0, 0xFF).
+The menu and Dr. Mario then call sndVolume(110, 0, 0xFF). A song's start sets the song's group again. A rip of a song
+leaves the second call out. The effects keep 110. A rip of an effect makes the second call too. Yoshi's Cookie calls
+sndVolume(127, 0, 0xFD) and sndVolume(127, 0, 0xFE), then sets the master volumes. A rip's sndVolume(127, 0, 0xFF) gives
+the same volumes. The rip then sets the master that the sound plays under. The game's options set the output to mono,
+stereo or surround. A rip plays in stereo, the options' default.
 
 The NDDEMO tech demo is a GameCube disc that never went on sale. Its disc ID is `00\0E01`: a game code of two zeros
 and a NUL, then E, and the maker code 01. `gcsfrip` prints the NUL as `\x00`. The disc's header leaves out the
@@ -1070,13 +1246,13 @@ loop.
 
 The demo's four sound effects are in group 1. The group's table of effects in `nddemo.prj` lists them in rows of 10
 bytes, the rows of Metroid Prime's projects (see above). A row starts with the effect's ID in a big-endian half. The
-demo starts each effect through sndFXStartEx (0x80047DD4) with the effect's ID, a volume and a pan of 0xFF, and
-studio 0. The group's table then gives the volume and the pan. Four functions of the demo start one effect each:
-0x800272A0 effect 0, 0x80027270 effect 1, 0x80027240 effect 2 and 0x80027210 effect 3. A fifth, at 0x800272D0, starts
-effect 0 and then sets two of its MIDI controllers through sndFXCtrl14 (0x80047D74): 0x84 and the pitch wheel, 0x80,
-each to 0x1000. A rip plays each effect as the first four functions start it. A rip of an effect pushes both groups
-first. The rip lists the effects after the songs, in the order of the table. The disc's header `audio/nddemo.h` names them. It holds a
-line `#define SFX<name> <ID>` for each effect. A rip names an effect as that line does, for example `SFXcoin_oneshot`.
+demo starts each effect through sndFXStartEx (0x80047DD4) with the effect's ID, a volume and a pan of 0xFF, and studio
+0. The group's table then gives the volume and the pan. Four functions of the demo start one effect each: 0x800272A0
+effect 0, 0x80027270 effect 1, 0x80027240 effect 2 and 0x80027210 effect 3. A fifth, at 0x800272D0, starts effect 0 and
+then sets two of its MIDI controllers through sndFXCtrl14 (0x80047D74): 0x84 and the pitch wheel, 0x80, each to 0x1000.
+A rip plays each effect as the first four functions start it. A rip of an effect pushes both groups first. The rip lists
+the effects after the songs, in the order of the table. The disc's header `audio/nddemo.h` names them. It holds a line
+`#define SFX<name> <ID>` for each effect. A rip names an effect as that line does, for example `SFXcoin_oneshot`.
 
 The demo's sound library is an early MusyX. Its sndInit takes no number of studios. Its sequencer runs five times in
 each frame, in steps of 1 ms. A step adds floor(floor(tempo × 3,072 / 60) × 65 / 8) / 65,536 ticks. The build takes a
@@ -1084,6 +1260,56 @@ millisecond as 65 / 65,536 of a second, not 1 / 1,000. The demo's songs therefor
 says. A rip plays them at the demo's speed. The disc's library takes only names in the 8.3 form unless `bi2.bin` allows
 long names. The demo's `bi2.bin` doesn't. A rip patches the library to take the driver's long names. The demo has no
 DVDReadAsyncPrio. The driver reads the disc through DVDReadPrio instead.
+
+### Chord effects
+
+Donkey Kong Jungle Beat plays many of its instruments' effects (`JA_SE_IST_*`) in the chords of the music. The sequence
+of such an effect reads its keys from ports 0xb to 0xf of its tracks. While port 0xb holds 0, the sequence plays
+nothing. The game's chord code works out the keys and writes the ports as it starts each step of the effect. A record of
+the chord database (`ChordSeDataBase.csd`) starts an effect. The chord archive (`JaiChord.arc`) holds a chord file for
+each stage's music. The addresses below are in the USA release's main.dol (`GYBE01`).
+
+- `startChordSe` (0x8024c4c8) starts a record. It takes the audio manager's chord effects (the pointer at +0xd08 of the
+  manager), the record, an object, 0, and the volume in f1. The game passes a volume of 1.0. The function refuses a
+  record until the music's chords are in. Some states of the game make it refuse records too.
+- `startChordSe` swaps two effects by stage. The stage object, at +0xd0c of the audio manager, holds the stage's number
+  at +4. At stage 0x2c, a record of `JA_SE_IST_AUTO_COMP_ALTO_SAX` (0x50042) or `JA_SE_IST_AUTO_COMP_TRUMPET` (0x50045)
+  plays `JA_SE_IST_AUTO_COMP_E_PIANO_T` (0x50063) in its place. At stages 0x35 and 0x41, such a record plays
+  `JA_SE_IST_AUTO_COMP_E_PIANO` (0x50062).
+- 0x8024c28c takes one of the chord system's 64 players, at +0xc of the chord effects. A player's byte at +0x18 is set
+  from its start until the game stops it. Its byte at +0x19 is set while a step of its effect waits for a beat. Its
+  sound object at +0x34 holds the steps' JAISoundHandles at +0 and their number at +4.
+- 0x8025049c starts the music of the stage object's row (+0xc) of the stage table (0x803b3978, 16 bytes a row) in the
+  BGM player. It then lets chord effects start (the stage object's byte at +0x34). The row is normally the stage's
+  number. The first row holds `JA_BGM_MAIN_01`.
+- The rhythm, at +0x810 of the audio manager, follows the music's beats. Its frame process (0x80248784) runs from an
+  object of the game's scenes. The audio manager's frame process doesn't call it.
+- 0x80253684 (player, codes, time) sets each of a piece's 16 tracks by a code, as a state of the BGM player does. Code 2
+  sets a track's volume to 0 and mutes the track at once (`JASTrack::mute`, 0x800088dc). A muted track runs on. It
+  starts no notes: `JASTrack::noteOn` (0x8000805c) returns at once while the track or one of its parents is muted.
+
+The chord database's words are big-endian. "CDSE" is at +4, the number of entries at +8 and the offset of the table of
+records at +0xc. The table holds a count, then 16 bytes for each record: the entry, the sound ID and two more words. The
+table's count can be larger than the file holds. The file holds 164 records and one of zeros. The count says 218. The
+driver reads only the records that the file holds.
+
+**The state of a rip.** The game plays a chord effect only over a stage's music. Its keys depend on the stage, on the
+chord of the moment and on earlier keys. A rip plays one state: the state that the game plays first or most, by its
+code. The driver starts the music of stage 0, the first row of the stage table. The game plays stage 0 for any scene
+that the table leaves out. The driver then turns each of the music's tracks off at once with code 2. The tracks still
+run and give the effect its chords and beats. Their notes take no channels and look up no waves. The driver starts each
+effect through `startChordSe` with the lowest-numbered record that names it. The key memory and the random state are
+those of the game after its start-up. `JA_SE_IST_AUTO_COMP_E_PIANO_T` plays at stage 0x2c and
+`JA_SE_IST_AUTO_COMP_E_PIANO` at stage 0x35. Both play the first record of `JA_SE_IST_AUTO_COMP_ALTO_SAX`. A step that
+waits for a beat waits for the music's first beat of its kind. The records name 72 effects. With the two that some
+stages play in their place, a rip covers 74. In this state, 12 of them play no notes. The ripper skips them.
+
+**The end of an effect.** A player stays busy after its last step until the game stops it. Later in a combo, the game
+moves some effects on by more steps. A rip plays the steps that start by themselves: the first step and the steps that
+wait for a beat. The effect ends when no step sounds and no step waits for a beat. Some effects repeat their steps until
+the game stops them. Their rips play to the length analysis's limit. The driver writes the music's JAISound to its block
+(see "Driver"). The length analysis leaves out the commands of that sound's tracks. A track belongs to the music if the
+music's root track is the track or one of its parents. A JASTrack holds its parent at +0x12c.
 
 ### Wave groups
 
@@ -1196,7 +1422,7 @@ the piece's channels and each of their layers runs a script too. Each script is 
 player's script is the root. The channels and layers follow in the order in which they start. A counted loop counts as a
 subroutine. A piece ends when its sequence player stops. An effect plays in a channel of the sequence of effects. That
 channel's script is the effect's root. The channel's layers follow. An effect ends when the sound library frees its
-slot.
+slot. Doubutsu no Mori+ and Doubutsu no Mori e+ follow the same rules.
 
 The Bonus Disc's effects follow the MusyX rules, with the sound library's list of the effects that play in place of
 MusyX's lists. An effect that ends leaves the list. Its rip plays until half a second after its last sound. AX's output
@@ -1215,9 +1441,13 @@ later of two points: 10 seconds after its sound last changed, and the second tim
 has gone back to the start of its loop. An effect whose voices have all settled while no sample plays has ended. The
 other rules for MusyX's songs still apply. Some of Rebel Strike's macros jump back through GOTO instead of LOOP. Most of
 them make a random choice or test a variable first. The ripper finds no loop in them. 19 of the game's effects play to
-the 600-second limit that way. Pokémon Channel's effects, its music included, follow the same rules. So do the
-effects of Pokémon Colosseum, Mario Party 4 and the NDDEMO tech demo, and the effects that WarioWare, Inc.: Mega
-Party Game$! starts through sndFXStartEx. WarioWare's effects that are songs follow the rules for its songs.
+the 600-second limit that way. Pokémon Channel's effects, its music included, follow the same rules. So do the effects
+of Tales of Symphonia, Star Fox Adventures, Rogue Leader, Pokémon Colosseum, Resident Evil Zero, Mario Party 4, Mario
+Golf: Toadstool Tour, Mario Power Tennis, Nintendo Puzzle Collection and the NDDEMO tech demo, and the effects that
+WarioWare, Inc.: Mega Party Game$! starts through sndFXStartEx. WarioWare's effects that are songs follow the rules for
+its songs. Two of Tales of Symphonia's effects play to the limit too. In one, the macro waits a random time before it
+jumps back. In the other, the macro waits 100 minutes before it holds. Three of Rogue Leader's effects reach the limit
+as well. Their macro tests a variable, plays a sample and jumps back through GOTO.
 
 The ripper lists and skips the sounds that never make a sound. It also skips a sound that stops the emulated machine
 with an error before the sound makes a sound. The ripper's message then gives the error. Luigi's Mansion's se2-0239 is

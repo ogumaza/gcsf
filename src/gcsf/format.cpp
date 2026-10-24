@@ -4,9 +4,11 @@
 
 #include "gcsf/format.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "xsflib/bytes.h"
@@ -60,6 +62,31 @@ std::optional<std::string> ProcessDescriptor::Check() const
     }
 
     return CheckDescriptorFlags("process", flags, kFlagDspRequired);
+}
+
+std::optional<xsflib::psf::Variables> PortList::Parse(std::string_view tag)
+{
+    std::optional<xsflib::psf::Variables> ports = xsflib::psf::ParseVariables(tag);
+    if (!ports || ports->rbegin()->first >= static_cast<int>(kMaxPorts))
+    {
+        return std::nullopt;
+    }
+
+    return ports;
+}
+
+std::vector<uint8_t> PortList::Data(const xsflib::psf::Variables& ports)
+{
+    std::vector<uint8_t> data(kSize);
+    xsflib::StoreBe32(data.data(), static_cast<uint32_t>(ports.size()));
+    std::size_t at = 4;
+    for (const auto& [port, value] : ports)
+    {
+        xsflib::StoreBe32(&data[at], static_cast<uint32_t>(port) << 16 | static_cast<uint16_t>(value));
+        at += 4;
+    }
+
+    return data;
 }
 
 } // namespace gcsf

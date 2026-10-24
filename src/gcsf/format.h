@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "xsflib/psf/program.h"
@@ -82,6 +83,27 @@ struct DriverBlock
     static constexpr uint32_t kWaveListOffset = 0x14;
     static constexpr uint32_t kMaxWaves = 64;
     static constexpr uint32_t kListedProfileOffset = kWaveListOffset + 4 + 4 * kMaxWaves;
+};
+
+// The tag that sets the sound's ports before the sound starts (docs/gcsf.md, "Tags"). A game's code gives some effects
+// a value on a port when it starts them, such as the material of the ground under a footstep.
+constexpr char kVariablesTag[] = "gcsf_var";
+
+// The port list of a driver that sets its sound's ports (docs/gcsf.md, "Driver"). The word at kPointer, after the
+// driver's entry, holds the list's address, or 0 for a driver without a list. The list holds the number of ports, then
+// kMaxPorts entries. An entry gives a port's number in its high 16 bits and the port's value in its low 16 bits.
+struct PortList
+{
+    static constexpr uint32_t kPointer = 0x81700004;
+    static constexpr uint32_t kMaxPorts = 16;
+    static constexpr uint32_t kSize = 4 + 4 * kMaxPorts;
+
+    // The ports that a gcsf_var tag sets: assignments "N=V" as xsflib::psf::ParseVariables reads them, with each N a
+    // port below kMaxPorts. Returns nullopt for a tag that's malformed or names another port.
+    static std::optional<xsflib::psf::Variables> Parse(std::string_view tag);
+
+    // The list's bytes for the ports that Parse returned.
+    static std::vector<uint8_t> Data(const xsflib::psf::Variables& ports);
 };
 
 // What xsflib::psf's set loader requires of GCSF: its descriptor, version byte, name and driver block.

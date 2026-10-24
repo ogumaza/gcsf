@@ -99,6 +99,23 @@ MusyXCatalogue GatherMusyX(const disc::GameFiles& game, const GameProfile& profi
 // unpacks to more than 64 MiB.
 std::vector<uint8_t> UnpackYay0(std::span<const uint8_t> file);
 
+// An effect of a project's effects group: the group's ID, the effect's ID and the volume of the effect's row.
+struct ProjectEffect
+{
+    uint16_t group = 0;
+    uint16_t id = 0;
+    uint8_t volume = 0;
+};
+
+// The effects of the effects groups in `project`, a MusyX project file, in the file's order. A group's header starts
+// with the offset of the next group (0xFFFFFFFF ends the list), then the group's ID and its type (1 for effects) in
+// big-endian halves. An effects group's header gives the offset of its table of effects at 0x1C. The table holds the
+// number of effects in a big-endian half, two more bytes, and 10 bytes for each effect, starting with the effect's ID
+// in a big-endian half. The byte at +4 of an effect's row limits the voices that play the effect at once. MusyX never
+// starts an effect whose limit is 0. The list leaves such an effect out. The byte at +6 is the effect's volume. Every
+// offset counts from the start of the file. Throws xsflib::FormatError if the file is damaged.
+std::vector<ProjectEffect> ProjectEffects(std::span<const uint8_t> project);
+
 // The catalogue's path in the library.
 inline constexpr char kMusyXCatalogue[] = "MusyX/sounds.bin";
 

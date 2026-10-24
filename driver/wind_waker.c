@@ -19,7 +19,7 @@
  *   6. the waves that the .minigcsf names, one group of a wave system each;
  *   7. the sound: the sound library starts it by its JAudio sound ID. Before the sound, the driver sets the sound
  *      library's default camera once. The game's sound set-up clears the camera. The game's camera process then sets
- *      it once a frame.
+ *      it once a frame. The sound gets the ports that the player sets (the port list).
  * Then the game's audio process runs once a frame, forever. A step that fails stops the driver with its number in the
  * status word (step 1 is the driver's check of its parameter block). `driver_params.status` reports the driver's
  * progress to the player (see docs/gcsf.md).
@@ -38,6 +38,15 @@
 
 /* A JAISound's state once its sequence plays. */
 #define SOUND_PLAYING 4u
+
+/* The port that holds the low 16 bits of the map information that the game passes with an effect
+   (JAIZelBasic::getMapInfoFxline), such as the material of the ground under a footstep. */
+#define MAP_INFO_PORT 6u
+
+/* The offset of the port list in the parameter block. The word after the driver's entry holds the list's address. */
+#define PORT_LIST_OFFSET 0x1c8
+#define TEXT(x) #x
+#define NUMBER_TEXT(x) TEXT(x)
 
 struct Params {
     u32 magic;
@@ -93,7 +102,14 @@ struct Params {
     u32 sound_state_offset; /* a JAISound's state (a byte) */
     u32 set_camera;         /* void JAIBasic::setCameraInfo(Vec* position, Vec* last_position, Mtx, u32 camera) */
     u32 default_camera;     /* the sound library's default camera: its position, last position and matrix */
+    u32 set_port_data;      /* void JAISound::setPortData(u8 port, u16 value) */
+    /* the ports that the player sets: (port << 16) | value */
+    u32 port_count;
+    u32 ports[MAX_PORTS];
 };
+
+_Static_assert(__builtin_offsetof(struct Params, port_count) == PORT_LIST_OFFSET,
+               "the word after the entry holds the port list's address");
 
 __attribute__((section(".params"), used)) volatile struct Params driver_params = {
     .magic = PARAMS_MAGIC,
@@ -218,10 +234,22 @@ __attribute__((noreturn)) void driver_main(void) {
     const u32 camera = p->default_camera;
     ((fn5)p->set_camera)(word(p->sound_library), word(camera), word(camera + 4), word(camera + 8), 0);
 
-    /* The sound, from no position. The game starts its music that way. */
-    ((fn7)p->start_sound)(word(p->sound_library), p->sound_id, (u32)&p->sound, 0, 0, 0, 4);
+    /* The sound, from no position. The game starts its music that way. The value of the map information's port is the
+       map information. The game gives an effect its other ports after the start, before the sound library's next
+       frame starts the effect's sequence. The game's seStart gives every effect port 9 that way: the room's reverb. */
+    u32 map_info = 0;
+    for (u32 i = 0; i < p->port_count && i < MAX_PORTS; i++) {
+        if (p->ports[i] >> 16 == MAP_INFO_PORT)
+            map_info = p->ports[i] & 0xffff;
+    }
+    ((fn7)p->start_sound)(word(p->sound_library), p->sound_id, (u32)&p->sound, 0, 0, map_info, 4);
     if (!p->sound)
         fail(7);
+    for (u32 i = 0; i < p->port_count && i < MAX_PORTS; i++) {
+        const u32 port = p->ports[i] >> 16;
+        if (port != MAP_INFO_PORT && port < MAX_PORTS)
+            ((fn3)p->set_port_data)(p->sound, port, p->ports[i] & 0xffff);
+    }
     p->status = STATUS_PLAYING;
 
     for (;;) {
@@ -232,6 +260,7 @@ __attribute__((noreturn)) void driver_main(void) {
     }
 }
 
+/* The entry, then the port list's address. */
 __attribute__((naked, section(".text.entry"))) void driver_entry(void) {
-    __asm__ volatile("b driver_main");
+    __asm__ volatile("b driver_main\n\t.long driver_params + " NUMBER_TEXT(PORT_LIST_OFFSET));
 }

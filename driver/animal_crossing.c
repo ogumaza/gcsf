@@ -7,6 +7,10 @@
  * stored in the game's .gcsflib. The player boots the game's start-up code: the OS initialisation and the static
  * constructors. The rip patches the game's main to branch here.
  *
+ * Doubutsu no Mori+ and Doubutsu no Mori e+, the game's Japanese releases, run the driver too. In e+, the sound
+ * library numbers the pieces and their sequences with 16 bits. e+'s Na_InitAudio takes other arguments.
+ * Params.wide_numbers and Params.aram_size cover the differences.
+ *
  * The driver calls the game's functions to do what the game's start-up does for sound, without its graphics. The
  * profile in `driver_params` gives their addresses. The ripper fills in the profile. The steps:
  *   2. the sound ID's kind and the size of ARInit's block list. Then the OS, its alarms, the disc, the video interface
@@ -15,8 +19,9 @@
  *      The sound library starts its threads. One of them reads the game's sound data from the disc into ARAM;
  *   3. the game's sound frame, once a retrace, until the sound library is up. The game's start-up waits the same way;
  *   4. for a piece of music, the weather, for a piece that plays the hour, then the piece, by the game's number of the
- *      piece. In the museum, the room picks the arrangement of the museum's piece. The first part of one of Kapp'n's
- *      songs gets an empty second part. A second part plays as a piece of its own;
+ *      piece. In the museum, the room picks the arrangement of the museum's piece. On e+'s island, the arrangement of
+ *      the island's piece depends on whether the islander is there. The first part of one of Kapp'n's songs gets an
+ *      empty second part. A second part plays as a piece of its own;
  *   5. the piece's sequence player, once the game's sound frame has started it;
  *   6. for an effect, the effects sequence. The game's sound frame starts that sequence once the sound library is up;
  *   7. the effect, by the game's number of the effect. The game's function for it takes a free slot for effects.
@@ -41,6 +46,13 @@
 #define SOUND_WEATHER(id) (((id) >> 8) & 0xffu)
 #define SOUND_PIECE(id) ((id) & 0xffu)
 #define KIND_MUSIC 0u
+
+/* With Params.wide_numbers, a piece's ID holds the game's number of the piece in the low 16 bits, the weather in bits
+   16 to 19 and the museum's room in bits 20 to 22. Bit 23 is set when the islander is on the island. */
+#define WIDE_PIECE(id) ((id) & 0xffffu)
+#define WIDE_WEATHER(id) (((id) >> 16) & 0xfu)
+#define WIDE_ROOM(id) (((id) >> 20) & 0x7u)
+#define WIDE_ISLANDER(id) (((id) >> 23) & 0x1u)
 
 /* An effect's sound ID: 1 in the top byte, and the game's number of the effect in the low 16 bits. */
 #define KIND_EFFECT 1u
@@ -92,13 +104,17 @@ struct Params {
     u32 effect_slot_size;  /* the size of a slot */
     u32 start_effect;      /* void Sou_TrgStart(u16, float volume, float, float pitch, u8 pan, u8 reverb, float) */
     /* the game profile: Kapp'n's songs */
-    u32 music_table;       /* SEQ_TABLE: the sequence of each of the game's numbers of pieces, a byte each */
+    u32 music_table;       /* SEQ_TABLE: the sequence of each of the game's numbers of pieces (see piece_sequence) */
     u32 first_song;        /* the game's number of the first part of the first song */
     u32 last_song;         /* and of the last song */
     u32 first_second_part; /* the game's number of the first of the songs' second parts */
     u32 last_second_part;  /* and of the last */
-    u32 empty_piece;       /* the game's number of a piece whose sequence ends at once */
+    u32 empty_piece;       /* the game's number of a piece whose sequence ends at once, without a sound */
     u32 player_ports;      /* the offset in a sequence player of its 8 ports, a byte each */
+    /* the game profile: Doubutsu no Mori e+ */
+    u32 aram_size;    /* 0, or the ARAM that Na_InitAudio takes in e+'s form of the call (see driver_main) */
+    u32 wide_numbers; /* 1 if the game numbers its pieces and their sequences with 16 bits (see WIDE_PIECE) */
+    u32 set_island;   /* 0, or void Na_PrivateIslandStatus(u8 islander) */
 };
 
 __attribute__((section(".params"), used)) volatile struct Params driver_params = {
@@ -170,19 +186,36 @@ static const u32 effect_values[4] = {0x3f800000, 0x3f800000, 0x3f800000, 0}; /* 
    has ended about 5 s before. Its script then waits about 26 s more, while the second part plays, and ends.
 
    With no request, the ports hold 0 and 0 from the piece's start (Na_StaffRollStart). The script would then start
-   sequence 0 on player 0, the effects' player. For a first part, the driver writes the first part's player and a
-   sequence that ends at once to the ports. The first part's player then stops where the second part would start. For a
-   second part, the driver writes the second part's sequence to the empty piece's entry in SEQ_TABLE and starts the
-   empty piece. Sou_BgmStart then plays the second part as it plays any piece. */
+   sequence 0 on player 0, the effects' player. For a first part, the driver writes the first part's player and the
+   empty piece's sequence to the ports. The first part's player then stops where the second part would start. A port
+   holds a byte. The empty piece's sequence therefore has a number below 256. For a second part, the driver writes the
+   second part's sequence to the empty piece's entry in SEQ_TABLE and starts the empty piece. Sou_BgmStart then plays
+   the second part as it plays any piece. */
 #define PORTS_THIS_PLAYER 0xffu
 
 static void write_byte(u32 address, u32 value) {
     *(volatile unsigned char*)address = (unsigned char)value;
 }
 
+static void write_halfword(u32 address, u32 value) {
+    *(volatile unsigned short*)address = (unsigned short)value;
+}
+
+/* The sequence of the game's piece `piece` in SEQ_TABLE. An entry takes a byte, or 16 bits with wide_numbers. */
+static u32 piece_sequence(volatile struct Params* p, u32 piece) {
+    return p->wide_numbers ? halfword(p->music_table + 2 * piece) : byte(p->music_table + piece);
+}
+
+static void set_piece_sequence(volatile struct Params* p, u32 piece, u32 sequence) {
+    if (p->wide_numbers)
+        write_halfword(p->music_table + 2 * piece, sequence);
+    else
+        write_byte(p->music_table + piece, sequence);
+}
+
 static void end_after_first_part(volatile struct Params* p, u32 player) {
     write_byte(player + p->player_ports, PORTS_THIS_PLAYER);
-    write_byte(player + p->player_ports + 1, byte(p->music_table + p->empty_piece));
+    write_byte(player + p->player_ports + 1, piece_sequence(p, p->empty_piece));
 }
 
 /* An effect. The game's sound frame starts the effects sequence once the sound library is up. The sequence's first
@@ -240,8 +273,13 @@ __attribute__((noreturn)) void driver_main(void) {
 
     /* The sound library, with the sound of the start-up screen. The game's start-up gives no data to copy in advance:
        the sound library reads the game's sound data from the disc. The sound library would then play the start-up
-       screen's sound, for about 7 s. The rip patches that out (see the game's profile). */
-    ((fn6)p->init_audio)((u32)disc_failed, 0, 0, p->start_up_sound, p->start_up_sound_size, 0);
+       screen's sound, for about 7 s. The rip patches that out (see the game's profile). e+'s Na_InitAudio takes no
+       data to copy. It takes the start-up screen's sound, its size and the ARAM for the sound library. e+'s main works
+       out that size from the size of the game's sound data. */
+    if (p->aram_size)
+        ((fn4)p->init_audio)((u32)disc_failed, p->start_up_sound, p->start_up_sound_size, p->aram_size);
+    else
+        ((fn6)p->init_audio)((u32)disc_failed, 0, 0, p->start_up_sound, p->start_up_sound_size, 0);
     for (u32 frames = 0; !((fn0)p->check_boot)(); frames++) {
         if (frames > SETUP_FRAMES)
             fail(3);
@@ -255,14 +293,18 @@ __attribute__((noreturn)) void driver_main(void) {
     /* The piece. The game's sound frame runs the request: it picks the sequence player and sends the sound library
        the commands that start the piece there. The sound starts at that frame. The sequence player starts at the
        sound library's next audio frame. */
-    u32 piece = SOUND_PIECE(p->sound_id);
+    const u32 id = p->sound_id;
+    u32 piece = p->wide_numbers ? WIDE_PIECE(id) : SOUND_PIECE(id);
     const u32 disc = piece >= p->first_disc && piece <= p->last_disc;
     const u32 first_part = piece >= p->first_song && piece <= p->last_song;
     if (piece >= p->first_second_part && piece <= p->last_second_part) {
-        write_byte(p->music_table + p->empty_piece, byte(p->music_table + piece));
+        set_piece_sequence(p, p->empty_piece, piece_sequence(p, piece));
         piece = p->empty_piece;
     }
-    ((fn1)p->set_weather)(SOUND_WEATHER(p->sound_id));
+    ((fn1)p->set_weather)(p->wide_numbers ? WIDE_WEATHER(id) : SOUND_WEATHER(id));
+    /* e+'s island. The game's start of the island's piece mutes some channels unless the islander is there. */
+    if (p->set_island)
+        ((fn1)p->set_island)(WIDE_ISLANDER(id));
     ((fn1)p->start_music)(piece);
     wait_retraces(p->frame_retraces);
     ((fn0)p->game_frame)();
@@ -273,7 +315,7 @@ __attribute__((noreturn)) void driver_main(void) {
     p->status = STATUS_PLAYING;
 
     /* The museum's room. The game sets it a frame or more after it has started the piece. */
-    const u32 room = SOUND_ROOM(p->sound_id);
+    const u32 room = p->wide_numbers ? WIDE_ROOM(id) : SOUND_ROOM(id);
     if (room)
         ((fn1)p->set_room)(room);
 

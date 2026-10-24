@@ -335,7 +335,8 @@ bool FindsWaves(const GameProfile& profile)
 bool TrimsLibrary(const GameProfile& profile)
 {
     return profile.driver == Driver::kMusyX || profile.driver == Driver::kMusyXUpload ||
-           profile.library == SoundLibrary::kRed || profile.library == SoundLibrary::kJac;
+           profile.driver == Driver::kMarioGolf || profile.library == SoundLibrary::kRed ||
+           profile.library == SoundLibrary::kJac;
 }
 
 std::span<const uint8_t> DolBytes(const ntdlib::Dol& dol, uint32_t address)
@@ -433,6 +434,39 @@ std::vector<Sound> SoundsFromCodeOrFiles(const disc::GameFiles& game, const Game
     return {};
 }
 
+// Adds the variants of the profile's port effects to `sounds`, each after its effect (GameProfile::port_effects). A
+// variant's label is the effect's, a space and its gcsf_var tag, such as "se3-0000 6=1".
+void AddPortVariants(const GameProfile& profile, std::vector<Sound>& sounds)
+{
+    if (profile.port_effects.empty())
+    {
+        return;
+    }
+
+    std::vector<Sound> listed;
+    for (Sound& sound : sounds)
+    {
+        const auto effect = std::find_if(profile.port_effects.begin(), profile.port_effects.end(),
+                                         [&sound](const PortEffect& e) { return e.id == sound.id; });
+        listed.push_back(std::move(sound));
+        if (effect == profile.port_effects.end())
+        {
+            continue;
+        }
+
+        const Sound base = listed.back();
+        for (const int16_t value : effect->values)
+        {
+            Sound variant = base;
+            variant.ports = {{effect->port, value}};
+            variant.label = base.label + " " + xsflib::psf::FormatVariables(variant.ports);
+            listed.push_back(std::move(variant));
+        }
+    }
+
+    sounds = std::move(listed);
+}
+
 } // namespace
 
 std::optional<GameSounds> ListGameSounds(const disc::GameFiles& game, const GameProfile& profile, std::string* error)
@@ -464,6 +498,8 @@ std::optional<GameSounds> ListGameSounds(const disc::GameFiles& game, const Game
 
         return std::nullopt;
     }
+
+    AddPortVariants(profile, listed.sounds);
 
     return listed;
 }
@@ -643,7 +679,7 @@ std::optional<std::string> AddSoundFiles(ProgramBuilder& program, const disc::Ga
     switch (profile.library)
     {
     case SoundLibrary::kMusyX:
-        return AddMusyXFiles(program, game, profile);
+        return AddMusyXFiles(program, game, profile, sounds);
     case SoundLibrary::kRed:
         return AddRedFiles(program, game, profile, sounds);
     case SoundLibrary::kHal:
@@ -734,7 +770,7 @@ ProgramChunks MiniChunks(uint32_t id, const FileChunk* file, const std::vector<u
 } // namespace
 
 std::vector<uint8_t> BuildMini(uint32_t id, const std::string& lib_name, Tags tags, const FileChunk* file,
-                               const std::vector<uint32_t>* waves)
+                               const std::vector<uint32_t>* waves, const xsflib::psf::Variables* ports)
 {
     const ProgramChunks chunks = MiniChunks(id, file, waves);
     ProgramBuilder program;
@@ -749,6 +785,10 @@ std::vector<uint8_t> BuildMini(uint32_t id, const std::string& lib_name, Tags ta
     }
 
     tags["_lib"] = lib_name;
+    if (ports && !ports->empty())
+    {
+        tags[kVariablesTag] = xsflib::psf::FormatVariables(*ports);
+    }
 
     return WritePsf(kPsfVersionGcsf, {}, program.Data(), tags);
 }
@@ -779,13 +819,18 @@ LoadedSet LibrarySet(const std::vector<uint8_t>& library)
     return set;
 }
 
-LoadedSet SoundSet(LoadedSet library, uint32_t id, const FileChunk* file, const std::vector<uint32_t>* waves)
+LoadedSet SoundSet(LoadedSet library, uint32_t id, const FileChunk* file, const std::vector<uint32_t>* waves,
+                   const xsflib::psf::Variables* ports)
 {
     ProgramChunks mini = MiniChunks(id, file, waves);
     library.memory.insert(library.memory.end(), std::make_move_iterator(mini.memory.begin()),
                           std::make_move_iterator(mini.memory.end()));
     library.files.insert(library.files.end(), std::make_move_iterator(mini.files.begin()),
                          std::make_move_iterator(mini.files.end()));
+    if (ports && !ports->empty())
+    {
+        library.tags[kVariablesTag] = xsflib::psf::FormatVariables(*ports);
+    }
 
     return library;
 }
@@ -867,10 +912,11 @@ LengthAnalyzer::LengthAnalyzer(const std::vector<uint8_t>& library, const GamePr
 LengthAnalyzer::~LengthAnalyzer() = default;
 
 std::optional<Timing> LengthAnalyzer::Analyze(uint32_t id, const FileChunk* file, const std::vector<uint32_t>* waves,
-                                              std::vector<jaudio::WaveUse>* played, std::string* stop) const
+                                              std::vector<jaudio::WaveUse>* played, std::string* stop,
+                                              const xsflib::psf::Variables* ports) const
 {
     std::set<jaudio::WaveUse> found;
-    std::optional<Timing> timing = Play(id, file, waves, played ? &found : nullptr, false, stop);
+    std::optional<Timing> timing = Play(id, file, waves, played ? &found : nullptr, false, stop, ports);
     if (played)
     {
         played->assign(found.begin(), found.end());
@@ -879,10 +925,11 @@ std::optional<Timing> LengthAnalyzer::Analyze(uint32_t id, const FileChunk* file
     return timing;
 }
 
-std::optional<std::vector<jaudio::WaveUse>> LengthAnalyzer::FindWaves(uint32_t id, const FileChunk* file) const
+std::optional<std::vector<jaudio::WaveUse>> LengthAnalyzer::FindWaves(uint32_t id, const FileChunk* file,
+                                                                      const xsflib::psf::Variables* ports) const
 {
     std::set<jaudio::WaveUse> found;
-    if (!Play(id, file, nullptr, &found, true, nullptr))
+    if (!Play(id, file, nullptr, &found, true, nullptr, ports))
     {
         return std::nullopt;
     }
@@ -892,12 +939,13 @@ std::optional<std::vector<jaudio::WaveUse>> LengthAnalyzer::FindWaves(uint32_t i
 
 std::optional<std::vector<uint32_t>> LengthAnalyzer::FindWaveGroups(uint32_t id, const FileChunk* file,
                                                                     const std::vector<jaudio::WaveSystem>& systems,
-                                                                    std::size_t* group_count) const
+                                                                    std::size_t* group_count,
+                                                                    const xsflib::psf::Variables* ports) const
 {
     std::optional<std::vector<uint32_t>> groups = GameWaveGroups(impl_->profile, id);
     if (!groups)
     {
-        const std::optional<std::vector<jaudio::WaveUse>> waves = FindWaves(id, file);
+        const std::optional<std::vector<jaudio::WaveUse>> waves = FindWaves(id, file, ports);
         if (!waves)
         {
             return std::nullopt;
@@ -920,11 +968,11 @@ std::optional<std::vector<uint32_t>> LengthAnalyzer::FindWaveGroups(uint32_t id,
 }
 
 std::optional<Timing> LengthAnalyzer::Play(uint32_t id, const FileChunk* file, const std::vector<uint32_t>* waves,
-                                           std::set<jaudio::WaveUse>* found, bool lookups_sound,
-                                           std::string* stop) const
+                                           std::set<jaudio::WaveUse>* found, bool lookups_sound, std::string* stop,
+                                           const xsflib::psf::Variables* ports) const
 {
     Player player;
-    if (!player.Load(SoundSet(impl_->library, id, file, waves)) || !player.Start())
+    if (!player.Load(SoundSet(impl_->library, id, file, waves, ports)) || !player.Start())
     {
         return std::nullopt;
     }

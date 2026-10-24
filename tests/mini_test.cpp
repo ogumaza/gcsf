@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 
 // Unit tests for the .minigcsf's program (rip::BuildMini): the sound's ID, the wave list for a driver that names a
-// sound's waves, and a file that replaces one of the library's files.
+// sound's waves, a file that replaces one of the library's files, and the ports of a variant of an effect.
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
@@ -10,6 +11,7 @@
 #include <vector>
 
 #include "xsflib/bytes.h"
+#include "xsflib/psf/psf.h"
 #include "xsflib/testing/check.h"
 
 #include "gcsf/format.h"
@@ -135,6 +137,41 @@ void TestNamesWaves()
     XSFLIB_CHECK(!rip::NamesWaves(listed));
 }
 
+void TestPorts()
+{
+    // A variant of an effect that reads a port gets its ports in the gcsf_var tag. Its program is the effect's.
+    const xsflib::psf::Variables kPorts = {{9, 40}, {6, 4}};
+    const std::vector<uint32_t> kWaves = {5};
+    const Mini mini = Parse(rip::BuildMini(0x3800 | 0x800, "game.gcsflib", {}, nullptr, &kWaves, &kPorts));
+
+    XSFLIB_CHECK(mini.tags.at(kVariablesTag) == "6=4, 9=40");
+    XSFLIB_CHECK(mini.chunks.memory.size() == 2 && Words(mini.chunks.memory[1]) == std::vector<uint32_t>({1, 5}));
+
+    // Without ports, or with none, a mini has no gcsf_var tag.
+    const xsflib::psf::Variables kNone;
+
+    XSFLIB_CHECK(Parse(rip::BuildMini(1, "game.gcsflib", {}, nullptr, &kWaves, &kNone)).tags.count(kVariablesTag) == 0);
+    XSFLIB_CHECK(Parse(rip::BuildMini(1, "game.gcsflib", {})).tags.count(kVariablesTag) == 0);
+}
+
+void TestPortVariants()
+{
+    // The Wind Waker's and Pikmin's profiles list the effects whose variants a rip holds: each a port and the lowest
+    // value of each variant, in increasing order.
+    for (const rip::GameProfile& profile : rip::KnownProfiles())
+    {
+        for (const rip::PortEffect& effect : profile.port_effects)
+        {
+            Check(profile.driver == rip::Driver::kWindWaker || profile.driver == rip::Driver::kPikmin,
+                  std::string(profile.name) + ": a driver with a port list");
+            Check(effect.port >= 0 && effect.port < static_cast<int>(PortList::kMaxPorts) && !effect.values.empty() &&
+                      std::is_sorted(effect.values.begin(), effect.values.end()) &&
+                      std::adjacent_find(effect.values.begin(), effect.values.end()) == effect.values.end(),
+                  std::string(profile.name) + ": the port and the values of effect " + std::to_string(effect.id));
+        }
+    }
+}
+
 } // namespace
 
 int main()
@@ -143,6 +180,8 @@ int main()
     TestWaves();
     TestFile();
     TestNamesWaves();
+    TestPorts();
+    TestPortVariants();
 
     return xsflib::testing::Summary("mini");
 }

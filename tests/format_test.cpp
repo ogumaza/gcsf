@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 
 // Unit tests for the GCSF file format code (src/gcsf/format.*): the version byte, program chunks, the process
-// descriptor, the driver block's check, _lib loading and the loading order. xsflib's psf_test tests the PSF container,
-// its tags and its times.
+// descriptor, the driver block's check, _lib loading, the loading order and the port list. xsflib's psf_test tests the
+// PSF container, its tags and its times.
 
 #include "gcsf/format.h"
 
@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "xsflib/bytes.h"
+#include "xsflib/psf/psf.h"
 #include "xsflib/testing/check.h"
 #include "xsflib/testing/sets.h"
 
@@ -206,6 +207,24 @@ static void TestLoadingOrder()
     XSFLIB_CHECK(gap.sources.size() == 3 && gap.sources[2] == "dir/sub/extra.minigcsf");
 }
 
+static void TestPortList()
+{
+    // The gcsf_var tag takes the form of 3SF's 3sf_var, with ports 0 to 15 (docs/gcsf.md, "Tags").
+    const auto ports = PortList::Parse("9=0x7f, 6=4\n6=-1");
+
+    XSFLIB_CHECK(ports && *ports == xsflib::psf::Variables({{6, -1}, {9, 127}}));
+    XSFLIB_CHECK(PortList::Parse("15=1") && !PortList::Parse("16=1") && !PortList::Parse("6") && !PortList::Parse("") &&
+                 !PortList::Parse("6=32768"));
+
+    // The list holds the number of ports, then an entry for each: the port in the high half and its value in the low
+    // half. The rest of the list's 16 entries stays 0.
+    const std::vector<uint8_t> list = PortList::Data(*ports);
+
+    XSFLIB_CHECK(list.size() == PortList::kSize && PortList::kSize == 68);
+    XSFLIB_CHECK(xsflib::LoadBe32(&list[0]) == 2 && xsflib::LoadBe32(&list[4]) == 0x0006ffff &&
+                 xsflib::LoadBe32(&list[8]) == 0x0009007f && xsflib::LoadBe32(&list[12]) == 0);
+}
+
 int main()
 {
     TestVersionByte();
@@ -213,6 +232,7 @@ int main()
     TestChunks();
     TestLoadSet();
     TestLoadingOrder();
+    TestPortList();
 
     return xsflib::testing::Summary("format");
 }
