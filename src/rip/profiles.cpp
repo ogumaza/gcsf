@@ -756,9 +756,43 @@ const GameProfile kWarioWareUsa = {
     .musyx_effect_bit = 0x80000000,
 };
 
+// A room's sound information in Luigi's Mansion (USA): the room's sound_echo_parameter, sound_room_size << 6 and
+// sound_room_code << 8. They are fields of the game's table of rooms (roominfo). 0x8002d90c reads the table, and the
+// game packs the fields so at 0x8018d48c.
+constexpr uint32_t RoomSound(uint32_t echo, uint32_t size, uint32_t code)
+{
+    return echo | size << 6 | code << 8;
+}
+
+// The states in which Luigi's Mansion (USA) plays LuigiSings. The game's start of the piece (0x8018c274) and its frame
+// (0x8018bd84) pick the tracks. Children 4 to 7 of the root track hold the tune. One of them plays at a time. Child 4
+// plays while Luigi has more than 70 of his 100 points of health, child 5 while he has more than 40, and child 6 below
+// that. Child 7 plays alone while the room's lights are on, unless the room's sound_room_size is 2. The other children
+// accompany the tune by the room (0x80189488): children 0 to 3 and 11 in a room whose sound_room_code is 6 or 7 and in
+// room 35 while it's dark, child 9 in a room whose sound_room_size is 2, and children 8 and 10 in the other rooms.
+// Rooms 19, 32 and 65 get no accompaniment. The frame also sets the piece's tempo: 0.6 + 0.4 x the health / 100. With
+// the lights on, it scales that by the time between Luigi's steps, to 0.9 while he stands still. A state's rip takes
+// the most health of its band and the first room of the room table that gives its tracks.
+constexpr SingingState kLuigiSingsStates[] = {
+    {"hallway 100 HP", 100, false, 6, RoomSound(10, 0, 7)},
+    {"hallway 70 HP", 70, false, 6, RoomSound(10, 0, 7)},
+    {"hallway 40 HP", 40, false, 6, RoomSound(10, 0, 7)},
+    {"room 100 HP", 100, false, 0, RoomSound(10, 1, 0)},
+    {"room 70 HP", 70, false, 0, RoomSound(10, 1, 0)},
+    {"room 40 HP", 40, false, 0, RoomSound(10, 1, 0)},
+    {"outdoors 100 HP", 100, false, 11, RoomSound(0, 2, 1)},
+    {"outdoors 70 HP", 70, false, 11, RoomSound(0, 2, 1)},
+    {"outdoors 40 HP", 40, false, 11, RoomSound(0, 2, 1)},
+    {"unaccompanied 100 HP", 100, false, 19, RoomSound(10, 0, 6)},
+    {"unaccompanied 70 HP", 70, false, 19, RoomSound(10, 0, 6)},
+    {"unaccompanied 40 HP", 40, false, 19, RoomSound(10, 0, 6)},
+    {"lit room", 100, true, 0, RoomSound(10, 1, 0)},
+};
+
 // Luigi's Mansion (USA). Its sound library is an early JAudio1. The start-up archive is an AAF. The sequences are one
 // file, and a table in the AAF divides it. The sound library loads all four wave systems at start-up. The parameters
-// follow driver/luigis_mansion.c's Params from frame_retraces.
+// follow driver/luigis_mansion.c's Params from frame_retraces to room_sound. The table of LuigiSings's states
+// (kLuigiSingsStates) follows them.
 const GameProfile kLuigisMansionUsa = {
     .name = "Luigi's Mansion",
     .game_id = "GLME01",
@@ -797,6 +831,13 @@ const GameProfile kLuigisMansionUsa = {
             0x80,                 // wave_systems_offset
             0x60,                 // last_load_offset
             0x8018d6c0,           // start_sound
+            0x8018c274,           // singing_start
+            0x804d91a4,           // music
+            0x80188d04,           // set_health
+            0x80188ce4,           // set_lights
+            0x80188cec,           // set_room_lights
+            0x804d91d0,           // room
+            0x804d7830,           // room_sound
         },
     .watch =
         {
@@ -821,6 +862,8 @@ const GameProfile kLuigisMansionUsa = {
             // 96 ticks a second, that's 2 min 47 s or 5 min 33 s.
             .endless_wait = 0x2000,
         },
+    .singing_piece = 0x80000007,
+    .singing_states = kLuigiSingsStates,
 };
 
 // Super Mario Sunshine (USA). Its sound library is JAudio1, under the game's sound object (MSound). The game keeps its

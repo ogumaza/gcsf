@@ -284,6 +284,24 @@ struct PortEffect
     std::vector<int16_t> values;
 };
 
+// A state of Luigi's Mansion in which the game plays LuigiSings (GameProfile::singing_states). The game starts the
+// piece through a function of its own. That function reads Luigi's health, the room's lights, the room and the room's
+// sound information. It then picks the tracks that play and sets the piece's tempo. The driver gives the game the
+// state and calls the function.
+struct SingingState
+{
+    const char* name;    // the state's rip is named after the piece, a space and this name
+    uint32_t health;     // Luigi's health, 0 to 100
+    bool lights;         // whether the room's lights are on
+    uint32_t room;       // the room's number
+    uint32_t room_sound; // the room's sound information: the room's sound_echo_parameter, sound_room_size << 6 and
+                         // sound_room_code << 8
+};
+
+// The first bit of a sound ID that gives a singing state, from 1 (GameProfile::singing_states). A JAudio1 game's
+// music ID uses only bit 31 and its low 16 bits.
+inline constexpr uint32_t kSingingStateShift = 16;
+
 // A game's driver profile. It names the driver that the game's rips contain and gives the driver's parameters. It also
 // says where the game keeps its sound files and what the length analysis reads in the game's code.
 struct GameProfile
@@ -391,6 +409,12 @@ struct GameProfile
     // (PortList). The list of sounds gives an effect's variants after the effect: one for each value, with the value on
     // the port (see Sound::ports).
     std::vector<PortEffect> port_effects = {};
+
+    // Luigi's Mansion's LuigiSings, by its JAudio sound ID, and the game's states for it. The driver takes the states
+    // as a table after `params`. A state's sound ID is the piece's, with the state's place in the table, from 1, at
+    // kSingingStateShift. The list of sounds gives the states in place of the piece. Other profiles leave the ID 0.
+    uint32_t singing_piece = 0;
+    std::span<const SingingState> singing_states = {};
 
     // A MusyX game's songs. The game's code holds a table of songs at `song_table` and a table of jingles at
     // `jingle_table`, with `song_count` and `jingle_count` entries. An entry starts with the song's file name, then
@@ -675,6 +699,10 @@ struct Sound
     // The ports that the driver sets for a variant of an effect (GameProfile::port_effects). The variant's gcsf_var tag
     // holds them, and its label is the effect's, a space and the tag's value. Other sounds have none.
     xsflib::psf::Variables ports = {};
+
+    // Whether the sound's files take the number of the sound before it in the list: a port effect's variant, or a
+    // singing state after the first (GameProfile::singing_states).
+    bool shares_number = false;
 };
 
 // A JAudio2 sound as gcsfrip rips it: its JAudio sound ID, its name in the name table (or the ID in hex when the table
@@ -713,9 +741,10 @@ struct GameSounds
 // driver/musyx.c, MusyXSongs for another MusyX game, JacPieces and JacEffects for Jac, RedSounds for Red, HalEffects
 // for HAL, and N64Sounds for the Nintendo 64's sound library. The songs and the pieces are music. The effects aren't.
 // A JAudio game's start-up archive lists its sounds (ListSounds), with the profile's sound name table if it has one.
-// The variants of the profile's port effects follow their effects. The sequences that no sound plays follow
-// (UnplayedSequences). A JAudio1 game's list requires its sequence archive.
-// Another game's sequence archive that can't be read or is damaged loses only those sequences. A warning then says so.
+// The variants of the profile's port effects follow their effects. A profile's singing states take the place of their
+// piece. The sequences that no sound plays follow (UnplayedSequences). A JAudio1 game's list requires its sequence
+// archive. Another game's sequence archive that can't be read or is damaged loses only those sequences. A warning then
+// says so.
 // Returns nullopt and sets `error` if a file that the list requires can't be read or is damaged.
 std::optional<GameSounds> ListGameSounds(const disc::GameFiles& game, const GameProfile& profile,
                                          std::string* error = nullptr);

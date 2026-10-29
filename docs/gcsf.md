@@ -166,7 +166,12 @@ Luigi's Mansion's driver is `driver/luigis_mansion.c`. It sets up the video inte
 JSystem's heaps and ARAM manager, and the game's sound set-up. It loads the wave systems that the game loads before its
 first frame. Then it calls the game's sound frame until the sound library is up and every wave system that stays loaded
 is in ARAM. Then it starts the sound by its JAudio sound ID. From then on it calls the sound frame once a frame. A frame
-is two video retraces, as in the game.
+is two video retraces, as in the game. The game starts one piece, LuigiSings, through a function of its own. That
+function reads the game's state: Luigi's health, the room's lights, the room and the room's sound information. It picks
+the tracks that play and sets the piece's tempo. The game's sound frame keeps them up to date. A sound ID of LuigiSings
+holds a state in bits 16 to 23, from 1. The driver's game profile holds a table of the states. For a state, the driver
+gives the game the state and calls that function. The function puts the piece's JAISound in a word of the game's. The
+driver copies that word to the sound's handle once a frame.
 
 Super Mario Sunshine's driver is `driver/super_mario_sunshine.c`. It sets up the video interface, the disc with long
 file names, JSystem's heaps and ARAM manager, and the game's sound object. The sound object sets up the sound library.
@@ -682,6 +687,17 @@ Donkey Kong Jungle Beat has effects like these too. 133 are empty. 68 read port 
 writes the ports of the effects that the chord database names. A rip plays those effects through that code (see
 "Chord effects"). Port 0xb holds 0 for the others. Two more make no sound in a rip. `gcsfrip` names each effect that it
 skips.
+
+Luigi's Mansion plays one piece, `LuigiSings`, by the game's state. Four of its tracks hold the tune. One of them
+plays at a time. Luigi's health picks one of three: above 70 of his 100 points, above 40, or 40 and below. The fourth
+plays alone while the room's lights are on, unless the room is outdoors. Other tracks accompany the tune by the room:
+one set in the hallways, one outdoors and one in the other rooms. Rooms 19, 32 and 65 of the game's table of rooms have
+no accompaniment. Luigi's health also sets the tempo: 0.6 + 0.4 × the health / 100. With the lights on, the time
+between Luigi's steps scales it, to 0.9 while he stands still. A rip holds the piece once for each state, in place of
+the piece: the hallways, the other rooms, outdoors and the rooms without accompaniment, each at 100, 70 and 40 points of
+health, and a lit room at 100 points while Luigi stands still. A state's title is the piece's name followed by the
+place and Luigi's health. The lit room's title gives the place alone. Each state's file shares the piece's number.
+The profile lists the states (`GameProfile::singing_states`).
 
 Mario Kart: Double Dash!! keeps its music's sequences in the start-up archive. It has no sequence archive. Its voices
 play the banks of three more start-up archives in the first one's `baac` block. The game loads one of those at a time.

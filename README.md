@@ -33,10 +33,12 @@ rip streams. The Wind Waker, Luigi's Mansion and Pac-Man Vs. name none of their 
 category and index, for example `se4-0123`, and a piece of music after its file. Some of The Wind Waker's effects play
 one of several variants by a value that the game gives them, such as the material of the ground under a footstep. A
 rip holds each variant, named after the effect and the value, for example `se3-0000 6=4`. The `gcsf_var` tag holds the
-value. A player plays another variant when the tag holds another value. Donkey Kong Jungle Beat plays many of its
-effects in the chords of the music. A rip plays such an effect over the music of one stage, with the music silent. Super
-Mario Sunshine keeps a table of its sounds' names. A rip of it takes its names from that table, for example
-`MSD_BGM_DOLPIC`. Pikmin's code lists its
+value. A player plays another variant when the tag holds another value. Luigi's Mansion picks the tracks of its piece
+`LuigiSings` by Luigi's health and by the room. Luigi's health also sets the piece's tempo. A rip holds the piece once
+for each state, named after the piece, the place and Luigi's health. Donkey Kong Jungle Beat
+plays many of its effects in the chords of the music. A rip plays such an effect over the music of one stage, with the
+music silent. Super Mario Sunshine keeps a table of its sounds' names. A rip of it takes its names from that table,
+for example `MSD_BGM_DOLPIC`. Pikmin's code lists its
 pieces of music by their files' names. A rip of Pikmin names a piece after its file, for example `select`. The game
 plays the music of its cutscenes as parts of one piece. A rip names a part after the piece and the part's number, for
 example `demobgm-5`. The rip includes the sound effects of the game's catalogue. An effect takes its name from the

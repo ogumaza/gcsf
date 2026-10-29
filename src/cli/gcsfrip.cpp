@@ -103,15 +103,16 @@ struct Job
     xsflib::psf::Variables ports; // the ports that the driver sets (rip::Sound::ports)
 };
 
-// The number of each of the game's sounds in the file names: its place in the list without the variants of port
-// effects (rip::Sound::ports). A variant takes its effect's number. The sequences that no sound plays come next.
+// The number of each of the game's sounds in the file names: its place in the list without the sounds that share the
+// number before them (rip::Sound::shares_number). A port effect's variant takes its effect's number, and a singing
+// state takes its piece's. The sequences that no sound plays come next.
 std::vector<uint32_t> SoundNumbers(const std::vector<rip::Sound>& sounds)
 {
     std::vector<uint32_t> numbers;
     uint32_t next = 0;
     for (const rip::Sound& sound : sounds)
     {
-        numbers.push_back(sound.ports.empty() || numbers.empty() ? next++ : numbers.back());
+        numbers.push_back(!sound.shares_number || numbers.empty() ? next++ : numbers.back());
     }
 
     return numbers;

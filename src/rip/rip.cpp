@@ -151,10 +151,20 @@ static_assert(DriverBlock::kMaxWaves == ntdlib::flipper::kMaxWaves);
 constexpr std::size_t kPieceNameSize = 24;
 
 // The profile's driver parameters, in the order of the driver's parameter block: `params`, then for a profile with
-// scene pieces their number and the pieces (driver/pikmin2.c's Piece).
+// scene pieces their number and the pieces (driver/pikmin2.c's Piece), and for a profile with singing states their
+// number and the states (driver/luigis_mansion.c's State).
 std::vector<uint32_t> DriverParameters(const GameProfile& p)
 {
     std::vector<uint32_t> words = p.params;
+    if (!p.singing_states.empty())
+    {
+        words.push_back(static_cast<uint32_t>(p.singing_states.size()));
+        for (const SingingState& state : p.singing_states)
+        {
+            words.insert(words.end(), {state.health, state.lights ? 1u : 0u, state.room, state.room_sound});
+        }
+    }
+
     if (p.scene_pieces.empty())
     {
         return words;
@@ -460,11 +470,39 @@ void AddPortVariants(const GameProfile& profile, std::vector<Sound>& sounds)
             Sound variant = base;
             variant.ports = {{effect->port, value}};
             variant.label = base.label + " " + xsflib::psf::FormatVariables(variant.ports);
+            variant.shares_number = true;
             listed.push_back(std::move(variant));
         }
     }
 
     sounds = std::move(listed);
+}
+
+// Puts the profile's singing states in place of their piece in `sounds` (GameProfile::singing_states). A state's label
+// is the piece's, a space and the state's name, such as "LuigiSings hallway 100 HP". The states share the piece's
+// number.
+void AddSingingStates(const GameProfile& profile, std::vector<Sound>& sounds)
+{
+    const auto piece = std::find_if(sounds.begin(), sounds.end(),
+                                    [&profile](const Sound& sound) { return sound.id == profile.singing_piece; });
+    if (profile.singing_states.empty() || piece == sounds.end())
+    {
+        return;
+    }
+
+    const Sound base = *piece;
+    std::vector<Sound> states;
+    for (std::size_t i = 0; i < profile.singing_states.size(); i++)
+    {
+        Sound state = base;
+        state.id = base.id | static_cast<uint32_t>(i + 1) << kSingingStateShift;
+        state.label = base.label + " " + profile.singing_states[i].name;
+        state.shares_number = i > 0;
+        states.push_back(std::move(state));
+    }
+
+    const auto at = sounds.erase(piece);
+    sounds.insert(at, states.begin(), states.end());
 }
 
 } // namespace
@@ -500,6 +538,7 @@ std::optional<GameSounds> ListGameSounds(const disc::GameFiles& game, const Game
     }
 
     AddPortVariants(profile, listed.sounds);
+    AddSingingStates(profile, listed.sounds);
 
     return listed;
 }
