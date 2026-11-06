@@ -28,6 +28,7 @@
 #include "ntdlib/disc/header.h"
 #include "ntdlib/dol.h"
 #include "ntdlib/flipper/wave_list.h"
+#include "ntdlib/flipper/z2_params.h"
 #include "ntdlib/jaudio/wave_system.h"
 #include "xsflib/binary.h"
 #include "xsflib/bytes.h"
@@ -48,6 +49,7 @@
 #include "rip/driver_mario_golf_blob.h"
 #include "rip/driver_mario_party_blob.h"
 #include "rip/driver_musyx_blob.h"
+#include "rip/driver_musyx_song_controls_blob.h"
 #include "rip/driver_musyx_upload_blob.h"
 #include "rip/driver_pacman_vs_blob.h"
 #include "rip/driver_pikmin2_blob.h"
@@ -135,6 +137,9 @@ std::optional<DriverImage> ImageOf(Driver driver)
     case Driver::kMusyX:
         return DriverImage{musyx::kDriverBlob, musyx::kDriverBase, musyx::kDriverEntry, musyx::kDriverParams,
                            /*wave_list=*/false};
+    case Driver::kMusyXSongControls:
+        return DriverImage{musyx_song_controls::kDriverBlob, musyx_song_controls::kDriverBase,
+                           musyx_song_controls::kDriverEntry, musyx_song_controls::kDriverParams, /*wave_list=*/false};
     case Driver::kMarioParty:
         return DriverImage{mario_party::kDriverBlob, mario_party::kDriverBase, mario_party::kDriverEntry,
                            mario_party::kDriverParams, /*wave_list=*/false};
@@ -146,6 +151,9 @@ std::optional<DriverImage> ImageOf(Driver driver)
 // A driver that NamesWaves reads its wave list in the words of ntdlib's WaveList. The driver block and WaveList allow
 // the same number of waves.
 static_assert(DriverBlock::kMaxWaves == ntdlib::flipper::kMaxWaves);
+
+// A driver that runs ntdlib's start-up of Z2 holds its Z2Params from the sound on. The profile follows the wave list.
+static_assert(DriverBlock::kListedProfileOffset - DriverBlock::kSoundOffset == ntdlib::flipper::z2::kProfileOffset);
 
 // The bytes that driver/pikmin2.c's Piece gives each file name.
 constexpr std::size_t kPieceNameSize = 24;
@@ -161,7 +169,8 @@ std::vector<uint32_t> DriverParameters(const GameProfile& p)
         words.push_back(static_cast<uint32_t>(p.singing_states.size()));
         for (const SingingState& state : p.singing_states)
         {
-            words.insert(words.end(), {state.health, state.lights ? 1u : 0u, state.room, state.room_sound});
+            words.insert(words.end(),
+                         {state.health, state.lights ? 1u : 0u, state.room, state.room_sound, state.shrunk ? 1u : 0u});
         }
     }
 
@@ -342,11 +351,16 @@ bool FindsWaves(const GameProfile& profile)
     return profile.watch.wave_handle_functions[0] != 0;
 }
 
-bool TrimsLibrary(const GameProfile& profile)
+bool UsesMusyXCatalogue(const GameProfile& profile)
 {
     return profile.driver == Driver::kMusyX || profile.driver == Driver::kMusyXUpload ||
-           profile.driver == Driver::kMarioGolf || profile.library == SoundLibrary::kRed ||
-           profile.library == SoundLibrary::kJac;
+           profile.driver == Driver::kMusyXSongControls;
+}
+
+bool TrimsLibrary(const GameProfile& profile)
+{
+    return UsesMusyXCatalogue(profile) || profile.driver == Driver::kMarioGolf ||
+           profile.library == SoundLibrary::kRed || profile.library == SoundLibrary::kJac;
 }
 
 std::span<const uint8_t> DolBytes(const ntdlib::Dol& dol, uint32_t address)
@@ -403,7 +417,7 @@ namespace
 // can't be read.
 std::vector<Sound> SoundsFromCodeOrFiles(const disc::GameFiles& game, const GameProfile& profile)
 {
-    if (profile.driver == Driver::kMusyX || profile.driver == Driver::kMusyXUpload)
+    if (UsesMusyXCatalogue(profile))
     {
         return CatalogueSounds(game, profile);
     }
@@ -478,6 +492,48 @@ void AddPortVariants(const GameProfile& profile, std::vector<Sound>& sounds)
     sounds = std::move(listed);
 }
 
+// Puts the variants of the profile's random effects in place of their effects in `sounds`
+// (GameProfile::random_effects). A variant's label is the effect's, then " key " and the key, such as "se4-0254 key
+// 48". The variants share the effect's number. Gives the profile's random starts their draws
+// (GameProfile::random_starts).
+void AddRandomVariants(const GameProfile& profile, std::vector<Sound>& sounds)
+{
+    if (profile.random_effects.empty() && profile.random_starts.empty())
+    {
+        return;
+    }
+
+    std::vector<Sound> listed;
+    for (Sound& sound : sounds)
+    {
+        const auto start = std::find_if(profile.random_starts.begin(), profile.random_starts.end(),
+                                        [&sound](const RandomStart& s) { return s.id == sound.id; });
+        if (start != profile.random_starts.end())
+        {
+            sound.id |= uint32_t{start->draws} << kRandomDrawsShift;
+        }
+
+        const auto effect = std::find_if(profile.random_effects.begin(), profile.random_effects.end(),
+                                         [&sound](const RandomEffect& e) { return e.id == sound.id; });
+        if (effect == profile.random_effects.end())
+        {
+            listed.push_back(std::move(sound));
+            continue;
+        }
+
+        for (std::size_t i = 0; i < effect->keys.size(); i++)
+        {
+            Sound variant = sound;
+            variant.id = sound.id | uint32_t{effect->keys[i].draws} << kRandomDrawsShift;
+            variant.label = sound.label + " key " + std::to_string(effect->keys[i].key);
+            variant.shares_number = i > 0;
+            listed.push_back(std::move(variant));
+        }
+    }
+
+    sounds = std::move(listed);
+}
+
 // Puts the profile's singing states in place of their piece in `sounds` (GameProfile::singing_states). A state's label
 // is the piece's, a space and the state's name, such as "LuigiSings hallway 100 HP". The states share the piece's
 // number.
@@ -503,6 +559,147 @@ void AddSingingStates(const GameProfile& profile, std::vector<Sound>& sounds)
 
     const auto at = sounds.erase(piece);
     sounds.insert(at, states.begin(), states.end());
+}
+
+// Puts the second set of the profile's piece after the piece in `sounds` (GameProfile::second_set_piece). Its label is
+// the piece's, a space and the set's name, such as "JA_BGM_SELECT map". The set shares the piece's number.
+void AddSecondSet(const GameProfile& profile, std::vector<Sound>& sounds)
+{
+    const auto piece = std::find_if(sounds.begin(), sounds.end(),
+                                    [&profile](const Sound& sound) { return sound.id == profile.second_set_piece; });
+    if (profile.second_set_id == 0 || piece == sounds.end())
+    {
+        return;
+    }
+
+    Sound set = *piece;
+    set.id = profile.second_set_id;
+    set.label += std::string(" ") + profile.second_set_name;
+    set.shares_number = true;
+    sounds.insert(piece + 1, std::move(set));
+}
+
+// Adds the profile's states of pieces of music to `sounds`, each after its piece (GameProfile::music_states). A state's
+// label is the piece's, a space and the state's name, such as "enemy2 near". The states share the piece's number.
+void AddMusicStates(const GameProfile& profile, std::vector<Sound>& sounds)
+{
+    if (profile.music_states.empty())
+    {
+        return;
+    }
+
+    std::vector<Sound> listed;
+    for (Sound& sound : sounds)
+    {
+        listed.push_back(std::move(sound));
+        const Sound base = listed.back();
+        for (const MusicState& state : profile.music_states)
+        {
+            if (state.piece != base.id)
+            {
+                continue;
+            }
+
+            Sound variant = base;
+            variant.id = state.id;
+            variant.label = base.label + " " + state.name;
+            variant.shares_number = true;
+            listed.push_back(std::move(variant));
+        }
+    }
+
+    sounds = std::move(listed);
+}
+
+// Gives the pieces whose tracks the game mutes as it starts them the children to mute (GameProfile::muted_starts). A
+// start with a suffix becomes a sound after its piece. The sound's label is the piece's with the suffix, such as
+// "Z2BGM_FIELD_LINK_DAY_riding", and it shares the piece's number.
+void AddMutedStarts(const GameProfile& profile, std::vector<Sound>& sounds)
+{
+    if (profile.muted_starts.empty())
+    {
+        return;
+    }
+
+    std::vector<Sound> listed;
+    for (Sound& sound : sounds)
+    {
+        const std::size_t piece = listed.size();
+        listed.push_back(std::move(sound));
+        for (const ntdlib::jaudio::MutedStart& start : profile.muted_starts)
+        {
+            if (start.sound != listed[piece].id || listed[piece].stream)
+            {
+                continue;
+            }
+
+            if (start.suffix.empty())
+            {
+                listed[piece].piece_state.muted_children = start.muted_children;
+                continue;
+            }
+
+            Sound variant = listed[piece];
+            variant.label += start.suffix;
+            variant.piece_state.muted_children = start.muted_children;
+            variant.shares_number = true;
+            listed.push_back(std::move(variant));
+        }
+    }
+
+    sounds = std::move(listed);
+}
+
+// Gives the pieces their states (GameProfile::piece_states). A state without a suffix is the piece's. A state with a
+// suffix becomes a sound after the piece and its other starts. The sound's label is the piece's with the suffix, such
+// as "Z2BGM_TOAL_VILLEGE_status1", and it shares the piece's number.
+void AddPieceStates(const GameProfile& profile, std::vector<Sound>& sounds)
+{
+    if (profile.piece_states.empty())
+    {
+        return;
+    }
+
+    std::vector<Sound> listed;
+    for (std::size_t i = 0; i < sounds.size(); i++)
+    {
+        const std::size_t piece = listed.size();
+        listed.push_back(std::move(sounds[i]));
+        if (listed[piece].stream || listed[piece].shares_number)
+        {
+            continue;
+        }
+
+        std::vector<Sound> states;
+        for (const ntdlib::jaudio::MusicState& state : profile.piece_states)
+        {
+            if (state.sound != listed[piece].id)
+            {
+                continue;
+            }
+
+            if (state.suffix.empty())
+            {
+                listed[piece].piece_state = ntdlib::flipper::z2::PieceStateOf(state);
+                continue;
+            }
+
+            Sound variant = listed[piece];
+            variant.label += state.suffix;
+            variant.piece_state = ntdlib::flipper::z2::PieceStateOf(state);
+            variant.shares_number = true;
+            states.push_back(std::move(variant));
+        }
+
+        // The piece's other starts stay right after it.
+        while (i + 1 < sounds.size() && sounds[i + 1].shares_number)
+        {
+            listed.push_back(std::move(sounds[++i]));
+        }
+        listed.insert(listed.end(), std::make_move_iterator(states.begin()), std::make_move_iterator(states.end()));
+    }
+
+    sounds = std::move(listed);
 }
 
 } // namespace
@@ -537,8 +734,13 @@ std::optional<GameSounds> ListGameSounds(const disc::GameFiles& game, const Game
         return std::nullopt;
     }
 
+    AddMusicStates(profile, listed.sounds);
     AddPortVariants(profile, listed.sounds);
+    AddRandomVariants(profile, listed.sounds);
     AddSingingStates(profile, listed.sounds);
+    AddSecondSet(profile, listed.sounds);
+    AddMutedStarts(profile, listed.sounds);
+    AddPieceStates(profile, listed.sounds);
 
     return listed;
 }
@@ -705,7 +907,7 @@ std::optional<std::string> AddSoundFiles(ProgramBuilder& program, const disc::Ga
 {
     program.AddFile(kDiscHeaderPath, game.boot);
 
-    if (profile.driver == Driver::kMusyX || profile.driver == Driver::kMusyXUpload)
+    if (UsesMusyXCatalogue(profile))
     {
         return AddMusyXCatalogue(program, game, profile, sounds);
     }
@@ -785,8 +987,10 @@ namespace
 {
 
 // The chunks of a .minigcsf (see BuildMini): the sound in the driver block, the waves after it if `waves` isn't null,
-// and `file` if it isn't null.
-ProgramChunks MiniChunks(uint32_t id, const FileChunk* file, const std::vector<uint32_t>* waves)
+// the piece's state if `state` holds one, and `file` if it isn't null. The Z2 start-up's parameters start at the
+// sound.
+ProgramChunks MiniChunks(uint32_t id, const FileChunk* file, const std::vector<uint32_t>* waves,
+                         const ntdlib::flipper::z2::PieceState* state)
 {
     ProgramChunks chunks;
     std::vector<uint8_t> sound(4);
@@ -796,6 +1000,13 @@ ProgramChunks MiniChunks(uint32_t id, const FileChunk* file, const std::vector<u
     {
         chunks.memory.push_back(
             {DriverBlock::kAddress + DriverBlock::kWaveListOffset, ntdlib::flipper::WaveList(*waves)});
+    }
+
+    if (std::vector<uint8_t> words = state ? state->Bytes() : std::vector<uint8_t>(); !words.empty())
+    {
+        chunks.memory.push_back({DriverBlock::kAddress + DriverBlock::kSoundOffset +
+                                     ntdlib::flipper::z2::kMutedChildrenOffset - ntdlib::flipper::z2::kSoundOffset,
+                                 std::move(words)});
     }
 
     if (file)
@@ -809,9 +1020,10 @@ ProgramChunks MiniChunks(uint32_t id, const FileChunk* file, const std::vector<u
 } // namespace
 
 std::vector<uint8_t> BuildMini(uint32_t id, const std::string& lib_name, Tags tags, const FileChunk* file,
-                               const std::vector<uint32_t>* waves, const xsflib::psf::Variables* ports)
+                               const std::vector<uint32_t>* waves, const xsflib::psf::Variables* ports,
+                               const ntdlib::flipper::z2::PieceState* state)
 {
-    const ProgramChunks chunks = MiniChunks(id, file, waves);
+    const ProgramChunks chunks = MiniChunks(id, file, waves, state);
     ProgramBuilder program;
     for (const MemChunk& chunk : chunks.memory)
     {
@@ -859,9 +1071,9 @@ LoadedSet LibrarySet(const std::vector<uint8_t>& library)
 }
 
 LoadedSet SoundSet(LoadedSet library, uint32_t id, const FileChunk* file, const std::vector<uint32_t>* waves,
-                   const xsflib::psf::Variables* ports)
+                   const xsflib::psf::Variables* ports, const ntdlib::flipper::z2::PieceState* state)
 {
-    ProgramChunks mini = MiniChunks(id, file, waves);
+    ProgramChunks mini = MiniChunks(id, file, waves, state);
     library.memory.insert(library.memory.end(), std::make_move_iterator(mini.memory.begin()),
                           std::make_move_iterator(mini.memory.end()));
     library.files.insert(library.files.end(), std::make_move_iterator(mini.files.begin()),
@@ -952,10 +1164,11 @@ LengthAnalyzer::~LengthAnalyzer() = default;
 
 std::optional<Timing> LengthAnalyzer::Analyze(uint32_t id, const FileChunk* file, const std::vector<uint32_t>* waves,
                                               std::vector<jaudio::WaveUse>* played, std::string* stop,
-                                              const xsflib::psf::Variables* ports) const
+                                              const xsflib::psf::Variables* ports,
+                                              const ntdlib::flipper::z2::PieceState* state) const
 {
     std::set<jaudio::WaveUse> found;
-    std::optional<Timing> timing = Play(id, file, waves, played ? &found : nullptr, false, stop, ports);
+    std::optional<Timing> timing = Play(id, file, waves, played ? &found : nullptr, false, stop, ports, state);
     if (played)
     {
         played->assign(found.begin(), found.end());
@@ -964,11 +1177,12 @@ std::optional<Timing> LengthAnalyzer::Analyze(uint32_t id, const FileChunk* file
     return timing;
 }
 
-std::optional<std::vector<jaudio::WaveUse>> LengthAnalyzer::FindWaves(uint32_t id, const FileChunk* file,
-                                                                      const xsflib::psf::Variables* ports) const
+std::optional<std::vector<jaudio::WaveUse>> LengthAnalyzer::FindWaves(
+    uint32_t id, const FileChunk* file, const xsflib::psf::Variables* ports,
+    const ntdlib::flipper::z2::PieceState* state) const
 {
     std::set<jaudio::WaveUse> found;
-    if (!Play(id, file, nullptr, &found, true, nullptr, ports))
+    if (!Play(id, file, nullptr, &found, true, nullptr, ports, state))
     {
         return std::nullopt;
     }
@@ -979,12 +1193,13 @@ std::optional<std::vector<jaudio::WaveUse>> LengthAnalyzer::FindWaves(uint32_t i
 std::optional<std::vector<uint32_t>> LengthAnalyzer::FindWaveGroups(uint32_t id, const FileChunk* file,
                                                                     const std::vector<jaudio::WaveSystem>& systems,
                                                                     std::size_t* group_count,
-                                                                    const xsflib::psf::Variables* ports) const
+                                                                    const xsflib::psf::Variables* ports,
+                                                                    const ntdlib::flipper::z2::PieceState* state) const
 {
     std::optional<std::vector<uint32_t>> groups = GameWaveGroups(impl_->profile, id);
     if (!groups)
     {
-        const std::optional<std::vector<jaudio::WaveUse>> waves = FindWaves(id, file, ports);
+        const std::optional<std::vector<jaudio::WaveUse>> waves = FindWaves(id, file, ports, state);
         if (!waves)
         {
             return std::nullopt;
@@ -1008,10 +1223,11 @@ std::optional<std::vector<uint32_t>> LengthAnalyzer::FindWaveGroups(uint32_t id,
 
 std::optional<Timing> LengthAnalyzer::Play(uint32_t id, const FileChunk* file, const std::vector<uint32_t>* waves,
                                            std::set<jaudio::WaveUse>* found, bool lookups_sound, std::string* stop,
-                                           const xsflib::psf::Variables* ports) const
+                                           const xsflib::psf::Variables* ports,
+                                           const ntdlib::flipper::z2::PieceState* state) const
 {
     Player player;
-    if (!player.Load(SoundSet(impl_->library, id, file, waves, ports)) || !player.Start())
+    if (!player.Load(SoundSet(impl_->library, id, file, waves, ports, state)) || !player.Start())
     {
         return std::nullopt;
     }

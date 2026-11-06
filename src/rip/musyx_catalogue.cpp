@@ -333,6 +333,13 @@ void AddReverb(std::vector<MusyXCatalogue::Write>& writes, const MusyXReverb& re
     }
 }
 
+// The address of driver/musyx.c's parameter `index` in the driver's block (see kMusyXAuxCallbacks). A sound's words can
+// change the parameter there.
+uint32_t MusyXParameter(uint32_t index)
+{
+    return DriverBlock::kAddress + DriverBlock::kProfileOffset + index * 4;
+}
+
 // The writes that a sound of the catalogue plays with: the profile's musyx_writes, then the settings of aux A's
 // reverb `aux_a` and of aux B's (GameProfile::reverbs).
 std::vector<MusyXCatalogue::Write> SoundWrites(const GameProfile& profile, const MusyXReverb& aux_a)
@@ -1530,29 +1537,60 @@ struct CutsceneSong
     std::vector<uint8_t> song;
 };
 
-// The songs of Resident Evil Zero's cutscenes, by the ID of each song's group (see GatherResidentEvil). The game loads
-// a cutscene's compressed archive, bio0/demo/<name>.alz (0x80169280). Part 7 of the archive holds the music: an archive
-// of MusyX's pool, project and sample directory, then the song. Part 1 of bio0/demo/<name>sam.arc holds the samples
+// The sound effects of one of Resident Evil Zero's cutscenes, which the game plays as songs: the cutscene's name, the
+// ID of the effects' group, the group's files, and the songs in the order of their parts.
+struct CutsceneEffects
+{
+    std::string name;
+    uint16_t group = 0;
+    MusyXCatalogue::FileSet set;
+    std::vector<std::vector<uint8_t>> songs;
+};
+
+// The sounds of Resident Evil Zero's cutscenes: the songs of their music, by the ID of each song's group, and their
+// sound effects, in the order of the cutscenes' paths in lower case.
+struct Cutscenes
+{
+    std::map<uint16_t, CutsceneSong> songs;
+    std::vector<CutsceneEffects> effects;
+};
+
+// The sounds of Resident Evil Zero's cutscenes (see GatherResidentEvil). The game loads a cutscene's compressed
+// archive, bio0/demo/<name>.alz (0x80169280). Part 7 of the archive holds the music: an archive of MusyX's pool,
+// project and sample directory, then the song. Part 1 of bio0/demo/<name>sam.arc holds the music's samples
 // (0x8016A3C0). The ID of the project's first group is the group in the song's row of the game's list. A rip takes the
-// files from the first cutscene that holds the group, in the order of the paths in lower case. Throws
-// xsflib::FormatError if a cutscene's archives can't be read, are damaged or lack a part of the music.
-std::map<uint16_t, CutsceneSong> CutsceneSongs(const AnyCaseFiles& files)
+// music's files from the first cutscene that holds the group, in the order of the paths in lower case. Part 6 of the
+// archive holds the cutscene's sound effects, if it has any: the pool, the project and the sample directory of their
+// group, then an archive of songs. Part 0 of the archive of samples holds their samples. Throws xsflib::FormatError if
+// a cutscene's archives can't be read, are damaged or lack a part of the music or of the effects.
+Cutscenes ReadCutscenes(const AnyCaseFiles& files)
 {
     constexpr char kCutscenes[] = "bio0/demo/", kCompressed[] = ".alz";
-    // A cutscene's parts: its music in its archive, and the music's samples in its archive of samples.
-    constexpr std::size_t kMusicPart = 7, kMusicSamples = 1;
+    // A cutscene's parts: its effects and its music in its archive, and their samples in its archive of samples.
+    constexpr std::size_t kEffectsPart = 6, kMusicPart = 7, kEffectSamples = 0, kMusicSamples = 1;
 
     const auto bytes = [](std::span<const uint8_t> data)
     {
         return std::vector<uint8_t>(data.begin(), data.end());
     };
+    // A part of the archive that holds MusyX's pool, project and sample directory, and then the songs.
+    const auto group_files = [](const ArchivePart& part, const std::string& path)
+    {
+        std::vector<ArchivePart> parts = ArchiveParts(part.data);
+        if (parts.size() < 4)
+        {
+            throw xsflib::FormatError(path + " lacks a part of its sounds");
+        }
 
-    std::map<uint16_t, CutsceneSong> songs;
-    const std::string cutscenes = xsflib::AsciiLower(kCutscenes);
+        return parts;
+    };
+
+    Cutscenes cutscenes;
+    const std::string cutscene_folder = xsflib::AsciiLower(kCutscenes);
     for (const auto& [lower, path] : files.Paths())
     {
-        if (!lower.starts_with(cutscenes) || !lower.ends_with(kCompressed) ||
-            lower.find('/', cutscenes.size()) != std::string::npos)
+        if (!lower.starts_with(cutscene_folder) || !lower.ends_with(kCompressed) ||
+            lower.find('/', cutscene_folder.size()) != std::string::npos)
         {
             continue;
         }
@@ -1566,28 +1604,53 @@ std::map<uint16_t, CutsceneSong> CutsceneSongs(const AnyCaseFiles& files)
 
         const std::vector<uint8_t> archive = Unalz(files.Read(path));
         const std::vector<ArchivePart> parts = ArchiveParts(archive);
-        if (parts.size() <= kMusicPart || parts[kMusicPart].data.empty())
+        const auto holds = [&](std::size_t part)
+        {
+            return parts.size() > part && !parts[part].data.empty();
+        };
+        if (!holds(kEffectsPart) && !holds(kMusicPart))
         {
             continue;
         }
 
-        const std::vector<ArchivePart> music = ArchiveParts(parts[kMusicPart].data);
         const std::vector<uint8_t> sample_archive = files.Read(*samples);
         const std::vector<ArchivePart> sample_parts = ArchiveParts(sample_archive);
-        if (music.size() < 4 || sample_parts.size() <= kMusicSamples)
+        if (sample_parts.size() <= kMusicSamples)
         {
-            throw xsflib::FormatError(path + " lacks a part of its music");
+            throw xsflib::FormatError(*samples + " lacks a part of its samples");
         }
 
-        const uint16_t group = FirstGroupId(music[1].data);
-        songs.try_emplace(group, CutsceneSong{.set = {.project = bytes(music[1].data),
-                                                      .pool = bytes(music[0].data),
-                                                      .sdir = bytes(music[2].data),
-                                                      .samples = bytes(sample_parts[kMusicSamples].data)},
-                                              .song = bytes(music[3].data)});
+        if (holds(kMusicPart))
+        {
+            const std::vector<ArchivePart> music = group_files(parts[kMusicPart], path);
+            const uint16_t group = FirstGroupId(music[1].data);
+            cutscenes.songs.try_emplace(group, CutsceneSong{.set = {.project = bytes(music[1].data),
+                                                                    .pool = bytes(music[0].data),
+                                                                    .sdir = bytes(music[2].data),
+                                                                    .samples = bytes(sample_parts[kMusicSamples].data)},
+                                                            .song = bytes(music[3].data)});
+        }
+
+        if (holds(kEffectsPart))
+        {
+            const std::vector<ArchivePart> effects = group_files(parts[kEffectsPart], path);
+            CutsceneEffects sounds{.name = path.substr(cutscene_folder.size(), path.size() - cutscene_folder.size() -
+                                                                                   (std::size(kCompressed) - 1)),
+                                   .group = FirstGroupId(effects[1].data),
+                                   .set = {.project = bytes(effects[1].data),
+                                           .pool = bytes(effects[0].data),
+                                           .sdir = bytes(effects[2].data),
+                                           .samples = bytes(sample_parts[kEffectSamples].data)}};
+            for (const ArchivePart& song : ArchiveParts(effects[3].data))
+            {
+                sounds.songs.push_back(bytes(song.data));
+            }
+
+            cutscenes.effects.push_back(std::move(sounds));
+        }
     }
 
-    return songs;
+    return cutscenes;
 }
 
 // Resident Evil Zero's songs (see MusyXFiles::kResidentEvil). The game's code lists them at `musyx_songs`, 12 bytes
@@ -1597,13 +1660,16 @@ std::map<uint16_t, CutsceneSong> CutsceneSongs(const AnyCaseFiles& files)
 // types "proj", "pool" and "sdir" are MusyX's project, pool and sample directory. The game's disc library matches names
 // in any case. The list names the songs of both discs, and songs that neither disc holds.
 //
-// Some of the songs that bio0/sound/ lacks are the music of a cutscene (CutsceneSongs). A rip lists the songs whose
+// Some of the songs that bio0/sound/ lacks are the music of a cutscene (ReadCutscenes). A rip lists the songs whose
 // files the disc holds, in the list's order.
 //
 // The game pushes a song's group and plays the song through sndSeqPlayEx. A room or a cutscene starts a song at the
-// volume of one of the game's sound options. Each option starts at 127, MusyX's full volume (0x80148F8C). A cutscene
-// raises its music to that volume over 133 ms (0x8016C254). A rip leaves the fade-in out. No room plays bgm_52. The
-// extras play it at 100/127 of the music's option (0x8017B970).
+// volume of one of the game's sound options. Each option starts at 127, MusyX's full volume (0x80148F8C). The game's
+// two functions that start music (0x8014A9C0 and 0x8014AAB8) start a song at a volume of 0. Each then calls
+// sndSeqVolume with the option's volume and its caller's time. The rooms give a time of 0 (0x800183BC and 0x80018478).
+// The cutscenes give 133 ms (0x8016C154 and 0x8016C254). MusyX then raises the music to the option's volume over that
+// time. A rip of a cutscene's song does the same (driver/musyx.c's song_fade_in). No room plays bgm_52. The extras play
+// it at 100/127 of the music's option, at once (0x8017B970).
 //
 // The effects follow the songs. Each archive of bio0/sound/ whose project lists effects holds one group of them. The
 // ripper lists the archives in the order of their names. The game's start-up pushes the group of all.arc and those of
@@ -1613,20 +1679,30 @@ std::map<uint16_t, CutsceneSong> CutsceneSongs(const AnyCaseFiles& files)
 // rows look like the tables' unused rows. The ripper leaves out their effects. Their entries would take the second
 // disc's catalogue past its limit of 65,535 words. The rip names an effect after its archive and its ID, such as
 // "sh00-1467".
+//
+// Some cutscenes play sound effects as songs. 0x8016C06C plays song N of a cutscene's effects (see ReadCutscenes)
+// through 0x8014AAB8, with the 133 ms fade-in of the cutscenes' music. The game's table of the cutscenes' effects, at
+// `musyx_effects`, gives each cutscene 4 bytes: the ID of the effects' group and the song ID of their first song, in
+// big-endian halves. Song N takes the ID that follows the first by N. A group of 0 means that the cutscene plays no
+// effects as songs. A rip lists the effects of each cutscene whose group the table names, in the order of the
+// cutscenes' paths in lower case. It names an effect after the cutscene and the effect's song ID, such as "dd01-0413".
 MusyXCatalogue GatherResidentEvil(const disc::GameFiles& game, const GameProfile& profile)
 {
     // The volume that the game's sound options give a song at start-up.
     constexpr uint8_t kOptionVolume = 0x7f;
+    // The time over which a cutscene raises its song to that volume, in ms.
+    constexpr uint32_t kCutsceneFadeIn = 133;
     // The song that the extras play, and its volume there.
     constexpr uint16_t kExtrasSong = 0x90;
     constexpr uint8_t kExtrasVolume = 100;
-    constexpr std::size_t kEntry = 12;
+    constexpr std::size_t kEntry = 12, kCutsceneEntry = 4;
     constexpr uint16_t kEnd = 0xffff;
     constexpr char kSounds[] = "bio0/sound/";
 
     const ntdlib::Dol dol = ntdlib::Dol::ParseMain(game.dol);
     const AnyCaseFiles files(game);
-    const std::map<uint16_t, CutsceneSong> cutscene_songs = CutsceneSongs(files);
+    const Cutscenes cutscenes = ReadCutscenes(files);
+    const std::map<uint16_t, CutsceneSong>& cutscene_songs = cutscenes.songs;
 
     MusyXCatalogue catalogue;
     std::map<std::string, uint16_t> sets;       // the file set of each archive, by the archive's name
@@ -1676,8 +1752,10 @@ MusyXCatalogue GatherResidentEvil(const disc::GameFiles& game, const GameProfile
         entry.song_group = xsflib::LoadBe16(row.data() + 2);
         const std::string song_path = kSounds + entry.label + ".son";
         const auto cutscene = cutscene_songs.find(entry.song_group);
+        // A song that bio0/sound/ lacks is a cutscene's.
+        const bool from_cutscene = files.Find(song_path) == nullptr;
         std::vector<uint8_t> song;
-        if (files.Find(song_path) != nullptr)
+        if (!from_cutscene)
         {
             const std::string archive = TextBeforeZero(DolBytes(dol, xsflib::LoadBe32(row.data() + 4)));
             entry.groups = {{entry.song_group, archive_set(archive)}};
@@ -1701,6 +1779,11 @@ MusyXCatalogue GatherResidentEvil(const disc::GameFiles& game, const GameProfile
         }
 
         entry.writes = SoundWrites(profile, profile.reverbs[0]);
+        if (from_cutscene)
+        {
+            entry.writes.push_back({MusyXParameter(kMusyXSongFadeIn), kCutsceneFadeIn});
+        }
+
         AddSong(catalogue, std::move(entry), std::move(song));
     }
 
@@ -1746,6 +1829,189 @@ MusyXCatalogue GatherResidentEvil(const disc::GameFiles& game, const GameProfile
 
             entry.writes = SoundWrites(profile, profile.reverbs[0]);
             catalogue.entries.push_back(std::move(entry));
+        }
+    }
+
+    std::map<uint16_t, uint16_t> first_songs; // the song ID of the first song of each group of cutscene effects
+    for (uint32_t i = 0; i < profile.musyx_effect_count; i++)
+    {
+        const std::span<const uint8_t> row =
+            Part(DolBytes(dol, profile.musyx_effects + i * static_cast<uint32_t>(kCutsceneEntry)), 0, kCutsceneEntry,
+                 "the table of the cutscenes' effects");
+        const uint16_t group = xsflib::LoadBe16(row.data());
+        if (group != 0)
+        {
+            first_songs.try_emplace(group, xsflib::LoadBe16(row.data() + 2));
+        }
+    }
+
+    for (const CutsceneEffects& effects : cutscenes.effects)
+    {
+        const auto first = first_songs.find(effects.group);
+        if (first == first_songs.end())
+        {
+            continue;
+        }
+
+        const auto set = static_cast<uint16_t>(catalogue.sets.size());
+        catalogue.sets.push_back(effects.set);
+        for (std::size_t n = 0; n < effects.songs.size(); n++)
+        {
+            MusyXCatalogue::Entry entry;
+            entry.id = static_cast<uint16_t>(first->second + n);
+            entry.label = EffectLabel(effects.name, entry.id);
+            entry.volume = kOptionVolume;
+            entry.song_group = effects.group;
+            entry.groups = {{effects.group, set}};
+            entry.writes = SoundWrites(profile, profile.reverbs[0]);
+            entry.writes.push_back({MusyXParameter(kMusyXSongFadeIn), kCutsceneFadeIn});
+            entry.sound_effect = true;
+            AddSong(catalogue, std::move(entry), effects.songs[n]);
+        }
+    }
+
+    return catalogue;
+}
+
+// A level that a room's code gives a channel of one of Resident Evil's songs: the MIDI channel, its volume (CC7) and
+// its pan (CC10). A pan of -1 leaves the channel's pan as the song sets it.
+struct ResidentEvilLevel
+{
+    uint8_t channel = 0;
+    uint8_t volume = 0;
+    int pan = -1;
+};
+
+// A mix of a song's channels that a room's code sets: the rip's label, MusyX's song ID and the levels.
+struct ResidentEvilMix
+{
+    const char* label;
+    uint16_t song;
+    std::vector<ResidentEvilLevel> levels;
+};
+
+// The mixes of the ambience songs that Resident Evil's rooms set (from a reading of the game's code). A room's code
+// calls 0x80061E6C with a song, a mask of channels, a volume and a pan. That function finds the slot that plays the
+// song and sends the driver's command 55 for each channel in the mask. Command 55 (0x80064524) calls sndSeqCntrl
+// (0x80155BB8) on the slot's sequence: CC7 for the volume and CC10 for the pan. A volume or a pan of -1 leaves that
+// controller alone.
+//
+// sg74's first pattern gives channels 0 to 2 a volume of 80. 0x800AFB68 sets all three to 80: the mix of the file,
+// which the rip sg74 plays. The other rooms that give constant levels play one of the three alone at 80 and the other
+// two at 0: channel 0 in 0x800DB360, channel 1 in 0x800CC938 and channel 2 in 0x800DAFE8. sg7a's first pattern gives
+// its seven channels a volume of 0. Its rip at the file's levels makes no sound. 0x801002A0 gives channels 0 to 3 and 5
+// a volume of 80 and channels 4 and 6 a volume of 0, each at a pan of 64 (0x801002F4 to 0x80100330). 0x800FBF0C plays
+// channel 5 alone at 80 (0x800FC1B8 and 0x800FC1CC). 0x8010D640 plays channel 4 alone at 80 (0x8010D7A8 to
+// 0x8010D820). Both set every pan to 64. Other rooms give channel 5 of sg7a other volumes and pans.
+const std::vector<ResidentEvilMix>& ResidentEvilMixes()
+{
+    static const std::vector<ResidentEvilMix> kMixes = {
+        {"sg74 ch0", 0x74, {{0, 80}, {1, 0}, {2, 0}}},
+        {"sg74 ch1", 0x74, {{0, 0}, {1, 80}, {2, 0}}},
+        {"sg74 ch2", 0x74, {{0, 0}, {1, 0}, {2, 80}}},
+        {"sg7a ch0-3+5",
+         0x7a,
+         {{0, 80, 64}, {1, 80, 64}, {2, 80, 64}, {3, 80, 64}, {4, 0, 64}, {5, 80, 64}, {6, 0, 64}}},
+        {"sg7a ch4", 0x7a, {{0, 0, 64}, {1, 0, 64}, {2, 0, 64}, {3, 0, 64}, {4, 80, 64}, {5, 0, 64}, {6, 0, 64}}},
+        {"sg7a ch5", 0x7a, {{0, 0, 64}, {1, 0, 64}, {2, 0, 64}, {3, 0, 64}, {4, 0, 64}, {5, 80, 64}, {6, 0, 64}}},
+    };
+
+    return kMixes;
+}
+
+// Resident Evil's songs (see MusyXFiles::kResidentEvilSnd). The game loads a song from bgm/sgNN.snd, with NN its number
+// in hexadecimal, 00 to 7f (0x80061BF4). The file starts with 16 big-endian words: the offsets and the sizes of the
+// pool, the project, the sample directory, the game's table of effects, the song and the samples, then the group's ID
+// and the song's ID. Each file holds one song and one group. The game pushes the group and starts the song through
+// sndSeqPlayEx, without parameters (0x80062364). A rip does the same, in the order of the files' names. A file with the
+// song and samples of an earlier file plays the same sound. The ripper leaves it out.
+//
+// After a song's entry come its mixes (ResidentEvilMixes), each with the song's controllers.
+// driver/musyx_song_controls.c sets them after the song's first pattern, as a room's code does once the song plays.
+//
+// The game's se/ holds the effects, in files of the same form. No rip holds them. The game plays each one through a
+// table in its file. The table gives the effect's level and sends.
+MusyXCatalogue GatherResidentEvilSnd(const disc::GameFiles& game, const GameProfile& profile)
+{
+    constexpr std::size_t kHeader = 0x40;
+    // The words of the header that give each part's offset. The word after each gives its size.
+    constexpr std::size_t kPool = 0, kProject = 2, kSdir = 4, kSong = 8, kSamples = 10, kGroup = 12, kSongId = 13;
+    constexpr char kFolder[] = "bgm/", kPrefix[] = "sg", kSuffix[] = ".snd";
+
+    const AnyCaseFiles files(game);
+    const std::string folder = xsflib::AsciiLower(kFolder);
+    MusyXCatalogue catalogue;
+    std::set<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>> seen;
+    for (const auto& [lower, path] : files.Paths())
+    {
+        if (!lower.starts_with(folder) || !lower.ends_with(kSuffix) ||
+            lower.find('/', folder.size()) != std::string::npos)
+        {
+            continue;
+        }
+
+        const std::string name = lower.substr(folder.size(), lower.size() - folder.size() - (std::size(kSuffix) - 1));
+        if (!name.starts_with(kPrefix))
+        {
+            continue;
+        }
+
+        const std::vector<uint8_t> file = files.Read(path);
+        const std::span<const uint8_t> header = Part(file, 0, kHeader, "a sound file's header");
+        const auto word = [&](std::size_t index)
+        {
+            return xsflib::LoadBe32(header.data() + index * 4);
+        };
+        const auto part = [&](std::size_t index, const char* what)
+        {
+            const std::span<const uint8_t> data = Part(file, word(index), word(index + 1), what);
+            return std::vector<uint8_t>(data.begin(), data.end());
+        };
+
+        std::vector<uint8_t> song = part(kSong, "a sound file's song");
+        std::vector<uint8_t> samples = part(kSamples, "a sound file's samples");
+        if (!seen.emplace(song, samples).second)
+        {
+            continue;
+        }
+
+        const auto set = static_cast<uint16_t>(catalogue.sets.size());
+        const auto group = static_cast<uint16_t>(word(kGroup));
+        catalogue.sets.push_back({.project = part(kProject, "a sound file's project"),
+                                  .pool = part(kPool, "a sound file's pool"),
+                                  .sdir = part(kSdir, "a sound file's sample directory"),
+                                  .samples = std::move(samples)});
+
+        MusyXCatalogue::Entry entry;
+        entry.label = name;
+        entry.id = static_cast<uint16_t>(word(kSongId));
+        entry.song_group = group;
+        entry.groups = {{group, set}};
+        entry.writes = SoundWrites(profile, profile.reverbs[0]);
+        const MusyXCatalogue::Entry file_mix = entry;
+        AddSong(catalogue, std::move(entry), std::move(song));
+        for (const ResidentEvilMix& mix : ResidentEvilMixes())
+        {
+            if (mix.song != file_mix.id)
+            {
+                continue;
+            }
+
+            constexpr uint8_t kVolume = 7, kPan = 10;
+            MusyXCatalogue::Entry mixed = file_mix;
+            mixed.label = mix.label;
+            mixed.song = catalogue.entries.back().song;
+            for (const ResidentEvilLevel& level : mix.levels)
+            {
+                mixed.controls.push_back({.controller = kVolume, .value = level.volume, .channel = level.channel});
+                if (level.pan >= 0)
+                {
+                    mixed.controls.push_back(
+                        {.controller = kPan, .value = static_cast<uint16_t>(level.pan), .channel = level.channel});
+                }
+            }
+
+            catalogue.entries.push_back(std::move(mixed));
         }
     }
 
@@ -2325,13 +2591,6 @@ std::string PuzzleLabel(const char* module, std::span<const char* const> names, 
 // The settings of MusyX's chorus (SND_AUX_CHORUS): its base delay, its variation and its period, in ms. The chorus's
 // block holds them from 0x90.
 using PuzzleChorus = std::array<uint32_t, 3>;
-
-// The address of driver/musyx.c's parameter `index` in the driver's block (see kMusyXAuxCallbacks). A sound's words can
-// change the parameter there.
-uint32_t MusyXParameter(uint32_t index)
-{
-    return DriverBlock::kAddress + DriverBlock::kProfileOffset + index * 4;
-}
 
 // The words that make the driver set every group's volume to `volume` after the start-up's sndVolume(127, 0, 0xFF)
 // (driver/musyx.c's group_volume). The start-ups of the menu and Dr. Mario make such a call.
@@ -2973,6 +3232,8 @@ MusyXCatalogue GatherMusyX(const disc::GameFiles& game, const GameProfile& profi
         return GatherColosseum(game, profile);
     case MusyXFiles::kResidentEvil:
         return GatherResidentEvil(game, profile);
+    case MusyXFiles::kResidentEvilSnd:
+        return GatherResidentEvilSnd(game, profile);
     case MusyXFiles::kPaperMario:
         return GatherPaperMario(game, profile);
     case MusyXFiles::kPokemonChannel:
@@ -3138,10 +3399,12 @@ std::vector<uint8_t> CatalogueFile(const MusyXCatalogue& catalogue)
             write++;
         }
 
-        // The controllers follow the words. Bit 8 of the first value picks sndFXCtrl14.
+        // The controllers follow the words. Bit 8 of the first value picks sndFXCtrl14. Bits 16 to 23 give a song's
+        // MIDI channel.
         for (const MusyXCatalogue::Control& c : entry.controls)
         {
-            xsflib::StoreBe32(p + writes_at + write * kWriteSize, c.controller | (c.fine ? 0x100u : 0u));
+            xsflib::StoreBe32(p + writes_at + write * kWriteSize,
+                              c.controller | (c.fine ? 0x100u : 0u) | static_cast<uint32_t>(c.channel) << 16);
             xsflib::StoreBe32(p + writes_at + write * kWriteSize + 4, c.value);
             write++;
         }

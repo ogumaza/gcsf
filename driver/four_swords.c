@@ -17,7 +17,8 @@
  *      sequence archive and initialised the sound library;
  *   6. every wave bank of the sound library's section loaded into ARAM;
  *   7. the sound: the sound manager starts it by its JAudio sound ID. For the piece that the profile names, the driver
- *      then mutes the tracks that the game's music start mutes.
+ *      then mutes the tracks that the game's music start mutes. The profile's ID of the piece's second set starts the
+ *      piece too. The driver then mutes the tracks of that set.
  * Then the game's audio frame process runs once a frame, forever. A step that fails stops the driver with its number in
  * the status word (step 1 is the driver's check of its parameter block). `driver_params.status` reports the driver's
  * progress to the player (see docs/gcsf.md).
@@ -76,9 +77,11 @@ struct Params {
     u32 wave_banks_offset;    /* the data's table of wave banks, and its count after it */
     u32 wave_arc_state_offset; /* a wave archive's state (2 once it is in ARAM), and its disc entry after it */
     /* the game profile: the piece whose tracks the game's music start mutes */
-    u32 track_mute;     /* void JASTrack::mute(bool) */
-    u32 muted_sound;    /* the piece's JAudio sound ID, or 0 for none */
-    u32 muted_children; /* the children of the piece's track 0 that its start mutes, a bit each from bit 0 */
+    u32 track_mute;      /* void JASTrack::mute(bool) */
+    u32 muted_sound;     /* the piece's JAudio sound ID, or 0 for none */
+    u32 muted_children;  /* the children of the piece's track 0 that its start mutes, a bit each from bit 0 */
+    u32 second_sound;    /* the ID that plays the piece with its second set of tracks, or 0 for none */
+    u32 second_children; /* the children of the piece's track 0 that the second set mutes, a bit each from bit 0 */
 };
 
 __attribute__((section(".params"), used)) volatile struct Params driver_params = {
@@ -93,12 +96,12 @@ static volatile u32 setup_state[2];
 #include "frames.h"
 #include "section_waves.h"
 
-/* Mutes the children of the sound's track 0 that the profile names and lets the others play. The game's music start
-   does the same. The sound library has opened the tracks by the time startSound returns. A sound's vtable gives its
-   JAISeq at slot 0x18. A JAISeq's vtable gives getChildTrack(int) at slot 0x24: child n >> 4 of the root track, then
-   that track's child n & 15. The game turns external interrupts off around the loop. No tick of the sound library
-   comes between the calls. */
-static void mute_children(u32 sound) {
+/* Mutes the children of the sound's track 0 whose bits `muted` sets and lets the others play. The game's music start
+   does the same with the first set of tracks. The sound library has opened the tracks by the time startSound returns.
+   A sound's vtable gives its JAISeq at slot 0x18. A JAISeq's vtable gives getChildTrack(int) at slot 0x24: child n >> 4
+   of the root track, then that track's child n & 15. The game turns external interrupts off around the loop. No tick
+   of the sound library comes between the calls. */
+static void mute_children(u32 sound, u32 muted) {
     volatile struct Params* p = &driver_params;
     const u32 sequence = ((fn1)virtual_function(sound, 0x18))(sound);
     if (!sequence)
@@ -107,7 +110,7 @@ static void mute_children(u32 sound) {
     for (u32 i = 0; i < TRACK_CHILDREN; i++) {
         const u32 track = ((fn2)virtual_function(sequence, 0x24))(sequence, i);
         if (track)
-            ((fn2)p->track_mute)(track, (p->muted_children >> i) & 1);
+            ((fn2)p->track_mute)(track, (muted >> i) & 1);
     }
     restore_interrupts(msr);
 }
@@ -169,13 +172,20 @@ __attribute__((noreturn)) void driver_main(void) {
         wait_frame();
     }
 
-    /* The sound. The sound manager's vtable gives startSound(JAISoundID*, JAISoundHandle*, const TVec3*) at 0xc. */
+    /* The sound. The sound manager's vtable gives startSound(JAISoundID*, JAISoundHandle*, const TVec3*) at 0xc. The
+       ID of the piece's second set starts the piece with the other tracks muted. The game switches the piece to that
+       set on some of its screens. */
     const u32 manager = word(audio + p->sound_manager_offset);
-    const u32 id = p->sound_id;
+    u32 id = p->sound_id;
+    u32 muted = p->muted_children;
+    if (p->second_sound && id == p->second_sound) {
+        id = p->muted_sound;
+        muted = p->second_children;
+    }
     if (!(((fn4)virtual_function(manager, 0xc))(manager, (u32)&id, (u32)&p->sound, 0) & 0xff))
         fail(7);
     if (p->muted_sound && id == p->muted_sound && p->sound)
-        mute_children(p->sound);
+        mute_children(p->sound, muted);
     p->status = STATUS_PLAYING;
 
     for (;;) {

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 
 // Unit tests for the .minigcsf's program (rip::BuildMini): the sound's ID, the wave list for a driver that names a
-// sound's waves, a file that replaces one of the library's files, and the ports of a variant of an effect.
+// sound's waves, a file that replaces one of the library's files, the ports of a variant of an effect, and the children
+// of track 0 that Twilight Princess's driver mutes.
 
 #include <algorithm>
 #include <cstddef>
@@ -10,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "ntdlib/flipper/z2_params.h"
 #include "xsflib/bytes.h"
 #include "xsflib/psf/psf.h"
 #include "xsflib/testing/check.h"
@@ -172,6 +174,92 @@ void TestPortVariants()
     }
 }
 
+void TestMusicStates()
+{
+    // Only The Wind Waker's profile lists states of pieces of music. Each state is of a piece, 0x80000000 plus an index
+    // below 128. Its value is the piece's ID with state bits from 16 to 19, or another of the game's IDs from
+    // 0x80000105 to 0x80000152 without them. Bits 20 to 29 stay clear. A piece's states have different names.
+    constexpr uint32_t kStateBits = rip::kSailing | rip::kOnBoard | rip::kSwordOut | rip::kEnemyNear;
+    for (const rip::GameProfile& profile : rip::KnownProfiles())
+    {
+        if (!profile.music_states.empty())
+        {
+            Check(profile.driver == rip::Driver::kWindWaker, std::string(profile.name) + ": a driver with starters");
+        }
+
+        for (std::size_t i = 0; i < profile.music_states.size(); i++)
+        {
+            const rip::MusicState& state = profile.music_states[i];
+            const uint32_t id = state.id & ~kStateBits;
+            const bool by_state = id == state.piece && (state.id & kStateBits) != 0;
+            const bool by_id = state.id == id && id >= 0x80000105 && id <= 0x80000152;
+            Check(state.piece >= 0x80000000 && state.piece < 0x80000080 && (by_state || by_id) &&
+                      (state.id & 0x3ff00000) == 0 && state.name && *state.name,
+                  std::string(profile.name) + ": state " + std::to_string(i));
+            for (std::size_t j = 0; j < i; j++)
+            {
+                Check(profile.music_states[j].piece != state.piece ||
+                          std::string(profile.music_states[j].name) != state.name,
+                      std::string(profile.name) + ": the name of state " + std::to_string(i));
+            }
+        }
+    }
+}
+
+void TestMutedChildren()
+{
+    // A piece whose tracks Twilight Princess mutes as it starts it gets the children after the profile, at 0x1F8 of the
+    // block. A mini with no state has no such chunk.
+    const std::vector<uint32_t> kWaves = {0x00010000};
+    const ntdlib::flipper::z2::PieceState kMuted = {.muted_children = 0x0fe0};
+    const Mini mini = Parse(rip::BuildMini(0x01000000, "game.gcsflib", {}, nullptr, &kWaves, nullptr, &kMuted));
+
+    XSFLIB_CHECK(mini.chunks.memory.size() == 3);
+    XSFLIB_CHECK(mini.chunks.memory[2].address == DriverBlock::kAddress + 0x1fc);
+    XSFLIB_CHECK(Words(mini.chunks.memory[2]) == std::vector<uint32_t>({0x0fe0}));
+    XSFLIB_CHECK(Parse(rip::BuildMini(0x01000000, "game.gcsflib", {}, nullptr, &kWaves)).chunks.memory.size() == 2);
+    const ntdlib::flipper::z2::PieceState kNone;
+    XSFLIB_CHECK(
+        Parse(rip::BuildMini(0x01000000, "game.gcsflib", {}, nullptr, &kWaves, nullptr, &kNone)).chunks.memory.size() ==
+        2);
+
+    // A state with children at a volume between 0 and 1 and a status: the muted children, the partial children, the
+    // 16 volumes as floats' bits, then the status with its flag.
+    const ntdlib::flipper::z2::PieceState kState = {.muted_children = 0x0100,
+                                                    .partial_children = 0x0003,
+                                                    .partial_volumes = {0.5f, 0.25f},
+                                                    .music_status = 0x10001};
+    const Mini state = Parse(rip::BuildMini(0x01000005, "game.gcsflib", {}, nullptr, &kWaves, nullptr, &kState));
+    std::vector<uint32_t> state_words(19, 0);
+    state_words[0] = 0x0100;
+    state_words[1] = 0x0003;
+    state_words[2] = 0x3f000000;
+    state_words[3] = 0x3e800000;
+    state_words[18] = 0x10001;
+    XSFLIB_CHECK(state.chunks.memory.size() == 3);
+    XSFLIB_CHECK(state.chunks.memory[2].address == DriverBlock::kAddress + 0x1fc);
+    XSFLIB_CHECK(Words(state.chunks.memory[2]) == state_words);
+
+    // The profiles that set tracks run Twilight Princess's driver, and name the music manager, setChildTrackVolume
+    // and setPortData. The profiles with states also mute tracks.
+    for (const rip::GameProfile& profile : rip::KnownProfiles())
+    {
+        Check(profile.piece_states.empty() || !profile.muted_starts.empty(),
+              std::string(profile.name) + ": the states and the start mutes");
+        if (profile.muted_starts.empty())
+        {
+            continue;
+        }
+
+        // The four are the profile's last words.
+        const std::size_t words = sizeof(ntdlib::flipper::z2::Profile) / 4;
+        Check(profile.driver == rip::Driver::kTwilightPrincess && profile.params.size() == words &&
+                  profile.params[words - 4] != 0 && profile.params[words - 3] != 0 && profile.params[words - 2] != 0 &&
+                  profile.params[words - 1] != 0,
+              std::string(profile.name) + ": the music manager, setChildTrackVolume, setPortData and getPortData");
+    }
+}
+
 } // namespace
 
 int main()
@@ -182,6 +270,8 @@ int main()
     TestNamesWaves();
     TestPorts();
     TestPortVariants();
+    TestMusicStates();
+    TestMutedChildren();
 
     return xsflib::testing::Summary("mini");
 }

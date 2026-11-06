@@ -21,9 +21,12 @@
 #include "ntdlib/disc/containers.h"
 #include "ntdlib/disc/game.h"
 #include "ntdlib/disc/image.h"
+#include "ntdlib/flipper/z2_params.h"
 #include "ntdlib/jaudio/archive.h"
 #include "ntdlib/jaudio/game_lengths.h"
 #include "ntdlib/jaudio/wave_system.h"
+#include "ntdlib/jaudio/z2_starts.h"
+#include "ntdlib/jaudio/z2_states.h"
 #include "xsflib/rip/length.h"
 
 #include "gcsf/format.h"
@@ -80,6 +83,9 @@ enum class Driver : uint8_t
     // driver/musyx.c: MusyX's functions, not a game's layer over them. It loads the groups that a sound of the rip's
     // catalogue names (see GameProfile::musyx_files).
     kMusyX,
+    // driver/musyx_song_controls.c: driver/musyx.c for a game whose code sets the MIDI controllers of a song's channels
+    // once the song plays. An OS alarm sets the controllers that the song's entry in the catalogue gives.
+    kMusyXSongControls,
     // driver/mario_party.c: Hudson's sound manager over MusyX, in Mario Party 4. It loads the base groups and the group
     // set that a .minigcsf names.
     kMarioParty,
@@ -113,6 +119,9 @@ enum class MusyXFiles : uint8_t
     // song's file and the archive that holds the song's group. The archive holds MusyX's project, pool and sample
     // directory. A file with the archive's name holds the samples. The other archives hold the groups of effects.
     kResidentEvil,
+    // Resident Evil's files in bgm/: each sgNN.snd holds a song, its group and the group's samples. The file's header
+    // gives the parts' places.
+    kResidentEvilSnd,
     // Paper Mario: The Thousand-Year Door's files: one set of MusyX's files, sound/proj/pmario, the songs in
     // sound/proj/pmario.slib with their names in pmario.stbl, and the table of the game's sounds in its code
     // (GameProfile::musyx_effects).
@@ -144,15 +153,16 @@ struct MusyXReverb
 };
 
 // Where some of driver/musyx.c's parameters lie among the profile's words (GameProfile::params): the numbers of voices
-// and of studios that sndInit takes, studio 0's aux effects, the volume of every group after the sound's words, and the
-// call of sndMasterVolume. The aux effects take the callbacks of aux A and aux B, then their blocks, then their
-// preparations. The call takes sndMasterVolume's address, then the volume and the two words that pick the masters that
-// it sets. The parameters start at DriverBlock::kProfileOffset. A sound's words can change the aux effects before the
-// driver sets them up, and the volumes before the driver sets them. Nintendo Puzzle Collection's sounds do both (see
-// MusyXFiles::kPuzzleCollection).
+// and of studios that sndInit takes, studio 0's aux effects, the volume of the groups after the sound's words, the call
+// of sndMasterVolume, and a song's fade-in. The aux effects take the callbacks of aux A and aux B, then their blocks,
+// then their preparations. The call takes sndMasterVolume's address, then the volume and the two words that pick the
+// masters that it sets. The parameters start at DriverBlock::kProfileOffset. A sound's words can change the aux effects
+// before the driver sets them up, and the volumes and the fade-in before the driver uses them. Nintendo Puzzle
+// Collection's sounds change the aux effects and the volumes (see MusyXFiles::kPuzzleCollection). Resident Evil Zero's
+// cutscene songs set the fade-in (see MusyXFiles::kResidentEvil).
 inline constexpr uint32_t kMusyXVoices = 19, kMusyXStudios = 22;
 inline constexpr uint32_t kMusyXAuxCallbacks = 35, kMusyXAuxBlocks = 37, kMusyXAuxPreparations = 39;
-inline constexpr uint32_t kMusyXGroupVolume = 46, kMusyXMasterVolume = 47;
+inline constexpr uint32_t kMusyXGroupVolume = 46, kMusyXMasterVolume = 47, kMusyXSongFadeIn = 51;
 
 // What the length analysis reads of MusyX's voices to follow an effect. Each voice of MusyX has two parts. A
 // synthesizer voice runs the voice's macro. A DSP voice plays the voice's sample. The word at `synth` points at the
@@ -239,20 +249,23 @@ inline constexpr uint32_t kBaacArchiveShift = 28;
 // archive, how the game makes its object, the wave scene that the game loads for it (a group of the wave system,
 // besides group 0), an AutoBgm's conductor, the object's sound information, and the beat interval that the game gives
 // the root track (0 keeps the default). A boss's music then has a start point: the part of the music that the boss
-// starts.
+// starts. A variant of a piece plays it in another state of the game: with another conductor, or from another start
+// point. Its label names its rips. A piece has no label, and its rips are named after its file.
 struct ScenePiece
 {
     // How Pikmin 2's driver makes a piece's object: driver/pikmin2.c's PIECE_ values. Each is a way in which the game
     // makes a piece's object.
     enum class Kind : uint32_t
     {
-        kPlain = 0,    // a BgmSeq that only plays
-        kMain = 1,     // an area's music: a JumpBgmSeq with the scene's directors
-        kDirected = 2, // a boss's music, or the music of 2-player battles
-        kAuto = 3,     // a cave's music: an AutoBgm. Its conductor picks what the tracks play
-        kBattle = 4,   // a DirectedBgm with the 2-player battle directors that the game gives battle_t
-        kFree = 5,     // a DirectedBgm without directors
-        kAutoFree = 6, // an AutoBgm without directors or the arrangement of its melody
+        kPlain = 0,       // a BgmSeq that only plays
+        kMain = 1,        // an area's music: a JumpBgmSeq with the scene's directors
+        kDirected = 2,    // a boss's music, or the music of 2-player battles
+        kAuto = 3,        // a cave's music: an AutoBgm. Its conductor picks what the tracks play
+        kBattle = 4,      // a DirectedBgm with the 2-player battle directors that the game gives battle_t
+        kFree = 5,        // a DirectedBgm without directors
+        kAutoFree = 6,    // an AutoBgm without directors or the arrangement of its melody
+        kBigBoss = 7,     // the final boss's music, with the final boss's sound object in place
+        kBigBossNear = 8, // the same, with the tension director on: a captain stands near the boss
     };
 
     // The JAInter::SoundInfo that the game gives a piece's object, in words: the flags, then the priority and the
@@ -273,10 +286,12 @@ struct ScenePiece
     SoundInfo info = kAreaInfo;
     uint16_t beat_interval = 0;
     uint8_t start_point = 0;
+    const char* label = "";
 };
 
 // An effect that reads a port that the game's code sets when it starts the effect, and the values that the game puts
-// there for it (see GameProfile::port_effects). Each value plays a variant of the effect.
+// there for it (see GameProfile::port_effects). Each value plays a variant of the effect. A piece of music can read a
+// port that the game writes while the piece plays. The driver writes the value once the piece plays.
 struct PortEffect
 {
     uint32_t id; // the effect's sound ID
@@ -296,11 +311,58 @@ struct SingingState
     uint32_t room;       // the room's number
     uint32_t room_sound; // the room's sound information: the room's sound_echo_parameter, sound_room_size << 6 and
                          // sound_room_code << 8
+    bool shrunk = false; // whether a poison mushroom has shrunk Luigi. The tune then plays an octave higher.
 };
 
 // The first bit of a sound ID that gives a singing state, from 1 (GameProfile::singing_states). A JAudio1 game's
 // music ID uses only bit 31 and its low 16 bits.
 inline constexpr uint32_t kSingingStateShift = 16;
+
+// The first bit of a sound's value that gives the random numbers that the driver draws before it starts the sound
+// (GameProfile::random_effects and random_starts). The effect IDs of The Wind Waker and Pikmin 2 leave bits 20 to 29
+// clear.
+inline constexpr uint32_t kRandomDrawsShift = 20;
+
+// An effect that plays a key that a random number picks, and the keys that the number can pick (see
+// GameProfile::random_effects). Each key comes with the draws from the generator's first state that come before the
+// first draw that picks it.
+struct RandomEffect
+{
+    struct Key
+    {
+        int key;
+        uint8_t draws;
+    };
+
+    uint32_t id; // the effect's sound ID
+    std::vector<Key> keys;
+};
+
+// An effect that ends at once on some draws of the sound library's random numbers, and the draws from the generator's
+// first state that come before the first draw on which it plays (see GameProfile::random_starts).
+struct RandomStart
+{
+    uint32_t id; // the effect's sound ID
+    uint8_t draws;
+};
+
+// The game's state that a piece of The Wind Waker's music starts in, in bits 16 to 19 of the piece's ID
+// (GameProfile::music_states): the boat's sail up, Link on board, Link's sword out and an enemy near Link. The driver
+// gives the state to the game's sound layer before it starts the piece (driver/wind_waker.c).
+inline constexpr uint32_t kSailing = 1u << 16;
+inline constexpr uint32_t kOnBoard = 1u << 17;
+inline constexpr uint32_t kSwordOut = 1u << 18;
+inline constexpr uint32_t kEnemyNear = 1u << 19;
+
+// A state of a piece of music that the game's sound layer plays another way (GameProfile::music_states). The sound
+// layer starts some pieces with some of their tracks muted, by the game's state. Other IDs of the game start a piece in
+// another arrangement.
+struct MusicState
+{
+    uint32_t piece;   // the piece's sound ID
+    uint32_t id;      // the value that the driver takes: an ID of the piece, with the state's bits (kSailing and so on)
+    const char* name; // the state's rip is named after the piece, a space and this name
+};
 
 // A game's driver profile. It names the driver that the game's rips contain and gives the driver's parameters. It also
 // says where the game keeps its sound files and what the length analysis reads in the game's code.
@@ -410,11 +472,46 @@ struct GameProfile
     // the port (see Sound::ports).
     std::vector<PortEffect> port_effects = {};
 
+    // The effects that play a key that the sound library's random numbers pick, for a driver that draws numbers before
+    // the start (driver/wind_waker.c). From the generator's first state, the first draw picks a key that makes no
+    // sound. The list of sounds gives an effect's variants in place of the effect: one for each key, with the draws
+    // before it at kRandomDrawsShift of the variant's ID. The ripper skips the variants that make no sound, as it skips
+    // any sound. Which keys sound depends on the banks, and another release's sound files can change it.
+    std::vector<RandomEffect> random_effects = {};
+
+    // The effects that draw a random number and end at once on some draws, for a driver that draws numbers before the
+    // start (driver/pikmin2.c). From the generator's first state, the first draw ends each of them. The list of sounds
+    // gives such an effect with its draws at kRandomDrawsShift of its ID. Its label stays the same.
+    std::vector<RandomStart> random_starts = {};
+
     // Luigi's Mansion's LuigiSings, by its JAudio sound ID, and the game's states for it. The driver takes the states
     // as a table after `params`. A state's sound ID is the piece's, with the state's place in the table, from 1, at
     // kSingingStateShift. The list of sounds gives the states in place of the piece. Other profiles leave the ID 0.
     uint32_t singing_piece = 0;
     std::span<const SingingState> singing_states = {};
+
+    // A piece that the game plays with two sets of tracks, by its JAudio sound ID. Four Swords Adventures mutes some of
+    // JA_BGM_SELECT's tracks and switches between the sets. The driver plays the second set for the ID
+    // `second_set_id`. The list of sounds gives that set after the piece, with the piece's label, a space and
+    // `second_set_name`. Other profiles leave the IDs 0.
+    uint32_t second_set_piece = 0;
+    uint32_t second_set_id = 0;
+    const char* second_set_name = "";
+
+    // The states in which the game's sound layer plays a piece of music another way, for a driver that starts music
+    // through the game's sound layer (driver/wind_waker.c). The list of sounds gives a piece's states after the piece.
+    // Each state shares the piece's number.
+    std::span<const MusicState> music_states = {};
+
+    // The pieces whose tracks the game mutes as it starts them, for a driver that runs ntdlib's start-up of Z2 with the
+    // music manager in its profile. The list of sounds gives each piece the children to mute (Sound::piece_state). A
+    // start with a suffix becomes a sound after its piece, named with the suffix. Other profiles have none.
+    std::span<const ntdlib::jaudio::MutedStart> muted_starts = {};
+
+    // The states in which the game plays a piece once it has started, and the states that its scenes start more pieces
+    // in, for the same driver. A state without a suffix gives its piece the state (Sound::piece_state). A state with a
+    // suffix becomes a sound after its piece, named with the suffix. Other profiles have none.
+    std::span<const ntdlib::jaudio::MusicState> piece_states = {};
 
     // A MusyX game's songs. The game's code holds a table of songs at `song_table` and a table of jingles at
     // `jingle_table`, with `song_count` and `jingle_count` entries. An entry starts with the song's file name, then
@@ -471,11 +568,13 @@ struct GameProfile
     // test lists the songs: `sound_test_count` entries of 16 bytes from offset `sound_test` in the file
     // `sound_test_module`. That file is one of the game's modules. The songs' names are messages in the message file
     // `messages` (see MsmSounds). The game's list of character voices holds `sound_test_voice_count` entries of the
-    // same form from offset `sound_test_voices` in that module. Its entries name effects.
+    // same form from offset `sound_test_voices` in that module. Its entries name effects. With `japanese_messages`, the
+    // messages are in the game's Japanese font, which draws kana in place of most of the English font's marks.
     const char* stream_file = nullptr;
     const char* sound_test_module = nullptr;
     uint32_t sound_test = 0, sound_test_count = 0, sound_test_voices = 0, sound_test_voice_count = 0;
     const char* messages = nullptr;
+    bool japanese_messages = false;
 
     // A game for driver/musyx.c: where it keeps its MusyX files, and the table of songs in its code (see MusyXFiles).
     // A table without an end marker holds `musyx_song_count` entries. A game whose main.dol is a loader for a second
@@ -655,6 +754,10 @@ bool NamesWaves(const GameProfile& profile);
 // finds the groups that hold each sound's waves. The library holds only the archives of those groups.
 bool FindsWaves(const GameProfile& profile);
 
+// Whether the profile's driver plays the sounds of a MusyX catalogue (see GameProfile::musyx_files): driver/musyx.c,
+// driver/musyx_upload.c or driver/musyx_song_controls.c.
+bool UsesMusyXCatalogue(const GameProfile& profile);
+
 // Makes `game` read the profile's sound files from another release of the game: the start-up archive, the sequence
 // archive and the wave archives. The game's other files still come from `game`. `folder` holds the other release's
 // files: an extracted disc, a title's folder, or only the sound files. The start-up archive is found by its file name
@@ -672,9 +775,9 @@ void UnpackSoundArchive(disc::GameFiles& game, const GameProfile& profile);
 // The game's sounds, from its start-up archive. A JAudio1 game's sound table names no sound. `names`, if given, is the
 // game's sound name table (the profile's `sound_names`). It names each sound that it lists, and gives a sequence the
 // game's ID. Otherwise, an effect is named by its category and index ("se4-0123"), and a sequence by its file in the
-// sequence archive, without the extension. Pikmin 2's pieces of music (GameProfile::scene_pieces) come first, each
-// named by its file. Its effects follow. A JAudio2 start-up archive may be compressed with Yaz0. Throws
-// xsflib::FormatError if an archive that the list requires is damaged.
+// sequence archive, without the extension. Pikmin 2's pieces of music and their variants (GameProfile::scene_pieces)
+// come first. A piece is named by its file, and a variant by its label. Its effects follow. A JAudio2 start-up archive
+// may be compressed with Yaz0. Throws xsflib::FormatError if an archive that the list requires is damaged.
 std::vector<jaudio::SoundEntry> ListSounds(const GameProfile& profile, const std::vector<uint8_t>& sound_archive,
                                            const std::vector<uint8_t>& sequence_archive,
                                            const std::vector<uint8_t>* names = nullptr);
@@ -700,9 +803,16 @@ struct Sound
     // holds them, and its label is the effect's, a space and the tag's value. Other sounds have none.
     xsflib::psf::Variables ports = {};
 
-    // Whether the sound's files take the number of the sound before it in the list: a port effect's variant, or a
-    // singing state after the first (GameProfile::singing_states).
+    // Whether the sound's files take the number of the sound before it in the list: a port effect's variant, a
+    // singing state after the first (GameProfile::singing_states), a state of a piece of music
+    // (GameProfile::music_states), a piece's second set of tracks (GameProfile::second_set_piece), a piece's second
+    // start (GameProfile::muted_starts) or another state of a piece (GameProfile::piece_states).
     bool shares_number = false;
+
+    // The state that the driver gives the piece after it starts the sound: the children of track 0 that it mutes or
+    // plays at a volume between 0 and 1, and the status on port 9 (GameProfile::muted_starts and piece_states). The
+    // .minigcsf holds it. Other sounds have none.
+    ntdlib::flipper::z2::PieceState piece_state = {};
 };
 
 // A JAudio2 sound as gcsfrip rips it: its JAudio sound ID, its name in the name table (or the ID in hex when the table
@@ -742,10 +852,10 @@ struct GameSounds
 // for HAL, and N64Sounds for the Nintendo 64's sound library. The songs and the pieces are music. The effects aren't.
 // A JAudio game's start-up archive lists its sounds (ListSounds), with the profile's sound name table if it has one.
 // The variants of the profile's port effects follow their effects. A profile's singing states take the place of their
-// piece. The sequences that no sound plays follow (UnplayedSequences). A JAudio1 game's list requires its sequence
-// archive. Another game's sequence archive that can't be read or is damaged loses only those sequences. A warning then
-// says so.
-// Returns nullopt and sets `error` if a file that the list requires can't be read or is damaged.
+// piece. A piece's second set of tracks follows the piece. The sequences that no sound plays follow
+// (UnplayedSequences). A JAudio1 game's list requires its sequence archive. Another game's sequence archive that can't
+// be read or is damaged loses only those sequences. A warning then says so. Returns nullopt and sets `error` if a file
+// that the list requires can't be read or is damaged.
 std::optional<GameSounds> ListGameSounds(const disc::GameFiles& game, const GameProfile& profile,
                                          std::string* error = nullptr);
 
@@ -773,10 +883,11 @@ bool TrimsLibrary(const GameProfile& profile);
 // same path (an unplayed sequence's start-up archive). `waves`, if given, are the waves that the driver loads for the
 // sound: at most DriverBlock::kMaxWaves, for a driver that NamesWaves. The driver's source says what an entry means.
 // Throws std::invalid_argument if there are too many. `ports`, if given and not empty, go in the gcsf_var tag
-// (Sound::ports).
+// (Sound::ports). `state`, if given, goes in the Z2 start-up's parameters (Sound::piece_state).
 std::vector<uint8_t> BuildMini(uint32_t id, const std::string& lib_name, Tags tags, const FileChunk* file = nullptr,
                                const std::vector<uint32_t>* waves = nullptr,
-                               const xsflib::psf::Variables* ports = nullptr);
+                               const xsflib::psf::Variables* ports = nullptr,
+                               const ntdlib::flipper::z2::PieceState* state = nullptr);
 
 // A library's contents (from BuildLibrary) as a player loads them: the library's chunks and its process descriptor.
 // Throws std::runtime_error if the library can't be read or has no process descriptor. The length analysis reads a
@@ -787,7 +898,8 @@ LoadedSet LibrarySet(const std::vector<uint8_t>& library);
 // `library` with the chunks and the gcsf_var tag that the .minigcsf of sound `id` adds (see BuildMini). A player plays
 // the sound from the set.
 LoadedSet SoundSet(LoadedSet library, uint32_t id, const FileChunk* file = nullptr,
-                   const std::vector<uint32_t>* waves = nullptr, const xsflib::psf::Variables* ports = nullptr);
+                   const std::vector<uint32_t>* waves = nullptr, const xsflib::psf::Variables* ports = nullptr,
+                   const ntdlib::flipper::z2::PieceState* state = nullptr);
 
 // A sound's length and fade in milliseconds, and whether it never makes a sound.
 using xsflib::rip::Timing;
@@ -813,21 +925,23 @@ public:
     // once the sound has started. The game's code may read past the end of a table, for example. A sound that stops
     // the machine before the sound makes a sound is marked silent. `stop`, if given, then gets the error. `file`,
     // `waves` and `ports`, if given, are as in BuildMini. `played`, if given, gets the waves that the sound's notes
-    // looked up, for a profile with wave discovery.
+    // looked up, for a profile with wave discovery. `state`, if given, is as in BuildMini.
     std::optional<Timing> Analyze(uint32_t id, const FileChunk* file = nullptr,
                                   const std::vector<uint32_t>* waves = nullptr,
                                   std::vector<jaudio::WaveUse>* played = nullptr, std::string* stop = nullptr,
-                                  const xsflib::psf::Variables* ports = nullptr) const;
+                                  const xsflib::psf::Variables* ports = nullptr,
+                                  const ntdlib::flipper::z2::PieceState* state = nullptr) const;
 
     // The wave groups that the driver loads for the sound, for a profile with wave discovery, each (system << 16) |
     // group. The profile gives the groups of Pikmin 2's pieces that the game plays. Another sound takes the groups of
     // `systems` that hold the waves that it plays (FindWaves). The driver loads at most DriverBlock::kMaxWaves groups.
     // A longer list keeps its first ones. `group_count`, if given, gets the number of groups before that cut. `ports`
-    // is as in BuildMini. Returns nullopt when the sound's waves can't be found.
+    // and `state` are as in BuildMini. Returns nullopt when the sound's waves can't be found.
     std::optional<std::vector<uint32_t>> FindWaveGroups(uint32_t id, const FileChunk* file,
                                                         const std::vector<jaudio::WaveSystem>& systems,
                                                         std::size_t* group_count = nullptr,
-                                                        const xsflib::psf::Variables* ports = nullptr) const;
+                                                        const xsflib::psf::Variables* ports = nullptr,
+                                                        const ntdlib::flipper::z2::PieceState* state = nullptr) const;
 
 private:
     struct Impl;
@@ -836,14 +950,15 @@ private:
     // loaded or not. A lookup counts as a sound. The play ends where Analyze would end it. Returns nullopt when the
     // sound can't be played, and an empty list when it plays no wave.
     std::optional<std::vector<jaudio::WaveUse>> FindWaves(uint32_t id, const FileChunk* file,
-                                                          const xsflib::psf::Variables* ports) const;
+                                                          const xsflib::psf::Variables* ports,
+                                                          const ntdlib::flipper::z2::PieceState* state) const;
 
     // Plays the sound, with the driver loading `waves` as in Analyze. The waves that the notes look up go in `found`
-    // if it isn't null. For FindWaves, `lookups_sound` makes each lookup count as a sound. `stop` and `ports` are as in
-    // Analyze.
+    // if it isn't null. For FindWaves, `lookups_sound` makes each lookup count as a sound. `stop`, `ports` and `state`
+    // are as in Analyze.
     std::optional<Timing> Play(uint32_t id, const FileChunk* file, const std::vector<uint32_t>* waves,
                                std::set<jaudio::WaveUse>* found, bool lookups_sound, std::string* stop,
-                               const xsflib::psf::Variables* ports) const;
+                               const xsflib::psf::Variables* ports, const ntdlib::flipper::z2::PieceState* state) const;
 
     std::unique_ptr<Impl> impl_;
 };

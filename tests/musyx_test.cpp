@@ -141,6 +141,32 @@ void TestControllers()
           "then the pitch wheel, with bit 8 for sndFXCtrl14");
 }
 
+// A song's controllers (driver/musyx_song_controls.c) give the song's MIDI channel in bits 16 to 23 of the first value.
+void TestSongControllers()
+{
+    rip::MusyXCatalogue catalogue;
+    rip::MusyXCatalogue::Entry song;
+    song.id = 0x7a;
+    song.song = 0;
+    song.groups = {{0x100, 0}};
+    song.controls = {{.controller = 7, .value = 80, .channel = 5}, {.controller = 10, .value = 64, .channel = 5}};
+    catalogue.entries.push_back(song);
+
+    const std::vector<uint8_t> file = rip::CatalogueFile(catalogue);
+    Check(file.size() == 32 + 20 + 4 + 2 * 8, "the file holds one sound, one group entry and two words");
+    if (file.size() != 32 + 20 + 4 + 2 * 8)
+    {
+        return;
+    }
+
+    const uint8_t* entry = file.data() + 32;
+    Check(entry[0] == 0 && xsflib::LoadBe16(entry + 0x10) == 0 && xsflib::LoadBe16(entry + 0x12) == 2,
+          "a song with two controllers and no words");
+    const uint8_t* words = file.data() + xsflib::LoadBe32(file.data() + 0x1c);
+    Check(xsflib::LoadBe32(words) == 0x50007 && xsflib::LoadBe32(words + 4) == 80, "CC7 on channel 5, at 80");
+    Check(xsflib::LoadBe32(words + 8) == 0x5000a && xsflib::LoadBe32(words + 12) == 64, "CC10 on channel 5, at 64");
+}
+
 // A made-up Yay0 file: the header for `size` bytes, then the masks, the table of copies and the table of bytes.
 std::vector<uint8_t> MakeYay0(uint32_t size, const std::vector<uint32_t>& masks, const std::vector<uint16_t>& copies,
                               const std::string& bytes)
@@ -243,6 +269,7 @@ int main()
     TestSections();
     TestDamaged();
     TestControllers();
+    TestSongControllers();
     TestYay0();
     TestDamagedYay0();
     TestFilesInUse();

@@ -18,8 +18,9 @@
  *   6. the waves that the .minigcsf names, one group of a wave bank each. The game loads its waves per stage, and its
  *      waves don't all fit in ARAM;
  *   7. the sound, by its JAudio sound ID. Music starts in the game's BGM player, the way the game starts it. A chord
- *      effect plays over a stage's music with the music's tracks off (see play_over_music). The sound manager starts
- *      other sounds.
+ *      effect plays over a stage's music with the music's tracks off (see play_over_music). An effect that reads a
+ *      value at port 0xb starts with the value that the game's code gives it first (see play_with_count). The sound
+ *      manager starts other sounds.
  * Then the audio manager's frame process runs once a frame, forever. While a chord effect plays, the rhythm's frame
  * process follows it. A step that fails stops the driver with its number in the status word (step 1 is the driver's
  * check of its parameter block). `driver_params.status` reports the driver's progress to the player (see docs/gcsf.md).
@@ -55,6 +56,12 @@
 
 /* The effects that some stages play in place of another effect (Params.swaps). */
 #define SWAPS 2u
+
+/* The effects that the game starts with a count (Params.counts), and those that a game object gives a value at port 0xb
+   after it starts them (Params.ports). A slot without an effect holds NO_EFFECT. */
+#define COUNTS 2u
+#define PORTS 1u
+#define NO_EFFECT 0xffffffffu
 
 /* The stage object holds the stage's number at +4 and its row of the stage table at +0xc. */
 #define STAGE_NUMBER 0x4u
@@ -128,6 +135,14 @@ struct Params {
     u32 swaps[SWAPS * 2];   /* each such other effect, then its stage */
     /* written by the driver */
     u32 music; /* the JAISound of the music that a chord effect plays over, or 0 */
+    /* the game profile: effects whose sequences work out a key from a value that the game writes to port 0xb as it
+       starts them. start_with_count writes its count there for some effects. Some game objects write a value there
+       after they start an effect. Each pair gives the effect, then the value that the game's code gives it first */
+    u32 combo_effect;     /* the effect that plays a tone of the chord for a combo count */
+    u32 start_with_count; /* JAISoundHandle* (manager, JAISoundID*, s32 count): starts a sound with a count */
+    u32 write_port;       /* bool (manager, JAISoundHandle*, u32 port, u16 value): writes a port of a sound */
+    u32 counts[COUNTS * 2]; /* the effects that start with a count */
+    u32 ports[PORTS * 2];   /* the effects that a game object gives a value after the start */
 };
 
 __attribute__((section(".params"), used)) volatile struct Params driver_params = {
@@ -260,12 +275,17 @@ __attribute__((naked)) static u32 call_start_chord(u32 fn, const u32* volume, u3
 static const u32 full_volume = 0x3f800000u;
 
 /* One frame of the game with music, and the music's JAISound copied to `music`. The rhythm gives the chord effects
-   the music's beats. The game's scenes run the rhythm's frame process. The driver runs it after the audio manager's. */
-static void music_frame(u32 manager, u32 music_player) {
+   the music's beats. The game's scenes run the rhythm's frame process. The driver runs it after the audio manager's.
+   music_work does the frame's work, and music_frame waits for the next frame after it. */
+static void music_work(u32 manager, u32 music_player) {
     volatile struct Params* p = &driver_params;
     ((fn1)p->audio_frame)(manager);
     ((fn1)p->rhythm_frame)(manager + p->rhythm_offset);
     p->music = word(music_player + 4);
+}
+
+static void music_frame(u32 manager, u32 music_player) {
+    music_work(manager, music_player);
     wait_frame();
 }
 
@@ -280,8 +300,9 @@ static const u8 tracks_off[MUSIC_TRACKS / 2] = {0x22, 0x22, 0x22, 0x22, 0x22, 0x
    The chord effects' code works out the keys of each step, writes them to ports of the step's sound and starts the
    sound. A step can wait for a beat of the music. The driver reports each step's JAISound, and the last one while the
    next step waits. The effect ends when no step sounds or waits. Later in a combo, the game moves some effects on by
-   more steps. The player stays busy for those. The status turns 1 when the first step sounds. */
-__attribute__((noreturn)) static void play_over_music(u32 manager, u32 record, u32 stage_number) {
+   more steps. The player stays busy for those. The status turns 1 when the first step sounds. The combo effect `id`
+   has no record. It starts through start_with_count with a count of 0, the first count of a combo. */
+__attribute__((noreturn)) static void play_over_music(u32 manager, u32 id, u32 record, u32 stage_number) {
     volatile struct Params* p = &driver_params;
     const u32 stage = word(manager + p->stage_offset);
     if (!stage)
@@ -300,36 +321,75 @@ __attribute__((noreturn)) static void play_over_music(u32 manager, u32 record, u
     /* The effect. The chord effects' code refuses an effect until the music's chords are in. */
     const u32 chords = word(manager + p->chord_offset);
     u32 player = 0;
+    u32 handle = 0;
     for (u32 frames = 0;; frames++) {
-        call_start_chord(p->start_chord_effect, &full_volume, chords, record);
-        player = busy_player(chords);
-        if (player)
-            break;
+        if (record != NO_RECORD) {
+            call_start_chord(p->start_chord_effect, &full_volume, chords, record);
+            player = busy_player(chords);
+            if (player)
+                break;
+        } else {
+            handle = ((fn3)p->start_with_count)(manager, (u32)&id, 0);
+            if (handle && word(handle))
+                break;
+        }
         if (frames > SETUP_FRAMES)
             fail(7);
         music_frame(manager, music_player);
     }
 
-    /* The first step's sound. */
-    u32 sound = 0;
-    for (u32 frames = 0; !(sound = step_sound(player)); frames++) {
+    /* The first step's sound. A step that waits for a beat starts its sound in the rhythm's frame process. The driver
+       reports the sound before the frame's wait. The sound's tracks start their notes after the wait. The ripper
+       watches the notes' waves from the report on. A report after the wait missed the notes of an effect whose tracks
+       all start at once. Its rip then loaded none of its waves and made no sound. */
+    u32 sound = player ? step_sound(player) : word(handle);
+    const int at_once = sound != 0;
+    for (u32 frames = 0; !sound; frames++) {
         if (frames > SETUP_FRAMES)
             fail(7);
-        music_frame(manager, music_player);
+        music_work(manager, music_player);
+        sound = player ? step_sound(player) : word(handle);
+        if (!sound)
+            wait_frame();
     }
     p->sound = sound;
     p->status = STATUS_PLAYING;
+    if (!at_once)
+        wait_frame();
 
     for (;;) {
         music_frame(manager, music_player);
-        const u32 now = step_sound(player);
-        if (now)
-            sound = now;
-        else if (!byte(player + PLAYER_WAITING))
-            sound = 0;
+        if (player) {
+            const u32 now = step_sound(player);
+            if (now)
+                sound = now;
+            else if (!byte(player + PLAYER_WAITING))
+                sound = 0;
+        } else {
+            sound = word(handle);
+        }
         p->sound = sound;
         if (p->status == STATUS_PLAYING && sound == 0)
             p->status = STATUS_FINISHED;
+    }
+}
+
+/* Plays effect `id` the way the game starts it with `count`: through the audio manager's start of a sound with a
+   count, which writes the count to port 0xb of the effect. */
+__attribute__((noreturn)) static void play_with_count(u32 manager, u32 id, u32 count) {
+    volatile struct Params* p = &driver_params;
+    const u32 handle = ((fn3)p->start_with_count)(manager, (u32)&id, count);
+    if (!handle || !word(handle))
+        fail(7);
+    p->sound = word(handle);
+    p->status = STATUS_PLAYING;
+
+    for (;;) {
+        ((fn1)p->audio_frame)(manager);
+        p->sound = word(handle);
+        if (p->status == STATUS_PLAYING && p->sound == 0)
+            p->status = STATUS_FINISHED;
+        wait_frame();
     }
 }
 
@@ -388,7 +448,7 @@ __attribute__((noreturn)) void driver_main(void) {
        the waves load. The work between the last frame process and the start of another sound then stays as it was.
        The timing of a start against the DSP's frames sets the samples of the output. Some stages play another effect
        in place of `swapped_effect`, with the records of `swapped_effect`. Such an effect plays at its stage. Every
-       other chord effect plays at stage 0, the first row of the stage table. */
+       other chord effect plays at stage 0, the first row of the stage table. The combo effect plays there too. */
     const u32 id = p->sound_id;
     u32 effect = id;
     u32 stage_number = 0;
@@ -418,9 +478,14 @@ __attribute__((noreturn)) void driver_main(void) {
        The game turns them on later, or never. A BGM whose first state turns every track off gets its next state at
        once. The game turns that BGM's tracks on later. The sound manager starts other sounds. Its vtable gives
        startSound(JAISoundID*, JAISoundHandle*, const TVec3*) at 0xc. The player holds its sound's handle. The driver
-       copies the handle to `sound` once a frame. */
-    if (record != NO_RECORD)
-        play_over_music(manager, record, stage_number);
+       copies the handle to `sound` once a frame. An effect that reads a value at port 0xb starts with the value that
+       the game's code gives it first. */
+    if (record != NO_RECORD || id == p->combo_effect)
+        play_over_music(manager, id, record, stage_number);
+    for (u32 i = 0; i < COUNTS; i++) {
+        if (p->counts[i * 2] != NO_EFFECT && id == p->counts[i * 2])
+            play_with_count(manager, id, p->counts[i * 2 + 1]);
+    }
 
     const u32 player = (id >> 24) == p->music_section ? manager + p->music_player_offset : 0;
     if (player) {
@@ -432,6 +497,12 @@ __attribute__((noreturn)) void driver_main(void) {
             ((fn3)p->set_music_state)(player, 1, 1);
     } else if (!(((fn4)virtual_function(manager, 0xc))(manager, (u32)&id, (u32)&p->sound, 0) & 0xff)) {
         fail(7);
+    } else {
+        /* A game object writes a value to port 0xb of some effects after it starts them. */
+        for (u32 i = 0; i < PORTS; i++) {
+            if (p->ports[i * 2] != NO_EFFECT && id == p->ports[i * 2])
+                ((fn4)p->write_port)(manager, (u32)&p->sound, 0xb, p->ports[i * 2 + 1] & 0xffff);
+        }
     }
     p->status = STATUS_PLAYING;
 

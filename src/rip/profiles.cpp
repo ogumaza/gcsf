@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -25,7 +26,8 @@ namespace
 // The parameters of Four Swords Adventures' driver (driver/four_swords.c's Params from frame_retraces on): the sizes
 // that the game's start-up gives, the addresses of the game's functions and variables, and the piece whose tracks the
 // game's music start mutes. That start mutes some children of the piece's track 0. `muted_sound` names the piece, or 0
-// for none. Bit n of `muted_children` mutes child n. `track_mute` is JASTrack::mute.
+// for none. Bit n of `muted_children` mutes child n. `track_mute` is JASTrack::mute. `second_sound` is the ID that
+// plays the piece with its second set of tracks, or 0 for none. `second_children` gives that set's muted children.
 struct FourSwordsParams
 {
     // The words in the order of the driver's parameter block.
@@ -40,7 +42,7 @@ struct FourSwordsParams
     uint32_t game_globals = 0, audio_object_ctor = 0, create_disc_thread = 0, audio_setup = 0, audio_frame = 0;
     uint32_t sound_manager_offset = 0, section_offset = 0, load_wave_bank = 0, section_data_offset = 0,
              wave_banks_offset = 0, wave_arc_state_offset = 0;
-    uint32_t track_mute = 0, muted_sound = 0, muted_children = 0;
+    uint32_t track_mute = 0, muted_sound = 0, muted_children = 0, second_sound = 0, second_children = 0;
 };
 
 std::vector<uint32_t> FourSwordsParams::Words() const
@@ -80,8 +82,15 @@ std::vector<uint32_t> FourSwordsParams::Words() const
             wave_arc_state_offset,
             track_mute,
             muted_sound,
-            muted_children};
+            muted_children,
+            second_sound,
+            second_children};
 }
+
+// The ID that plays Four Swords Adventures' JA_BGM_SELECT (0x0100001a) with its second set of tracks. The game's IDs
+// leave bit 31 clear. On the file select and the choice of mode, the piece plays only children 2 and 7 of its track 0.
+// On the screen where the players join and on the map where they pick a stage, it plays every child but 2.
+constexpr uint32_t kSelectSecondSet = 0x8100001a;
 
 // Four Swords Adventures (USA). Its sound library is JAudio2, in the generation of Twilight Princess's.
 const GameProfile kFourSwordsUsa = {
@@ -128,9 +137,12 @@ const GameProfile kFourSwordsUsa = {
             .wave_banks_offset = 0xec,
             .wave_arc_state_offset = 0x4c,
             // The game's music start (0x80459674, 0x80458ff0) mutes every child of JA_BGM_SELECT's track 0 but 2 and 7.
+            // The function at 0x80458408 switches the piece between that set and one that mutes only child 2.
             .track_mute = 0x80037f1c,
             .muted_sound = 0x0100001a,
             .muted_children = 0xffff & ~(1u << 2 | 1u << 7),
+            .second_sound = kSelectSecondSet,
+            .second_children = 1u << 2,
         }
             .Words(),
     .watch =
@@ -144,6 +156,9 @@ const GameProfile kFourSwordsUsa = {
             .wait_offset = 0x40,
             .note_wait_offset = 0x51,
         },
+    .second_set_piece = 0x0100001a,
+    .second_set_id = kSelectSecondSet,
+    .second_set_name = "map",
 };
 
 // Four Swords Adventures' Japanese release, Four Swords+. Its sound library is the same build as the American
@@ -193,9 +208,12 @@ const GameProfile kFourSwordsJpn = {
             .wave_banks_offset = 0xec,
             .wave_arc_state_offset = 0x4c,
             // The game's music start (0x8007abd8, 0x8007a580) mutes every child of JA_BGM_SELECT's track 0 but 2 and 7.
+            // The function at 0x80079998 switches the piece between that set and one that mutes only child 2.
             .track_mute = 0x80037ff4,
             .muted_sound = 0x0100001a,
             .muted_children = 0xffff & ~(1u << 2 | 1u << 7),
+            .second_sound = kSelectSecondSet,
+            .second_children = 1u << 2,
         }
             .Words(),
     .watch =
@@ -209,12 +227,97 @@ const GameProfile kFourSwordsJpn = {
             .wait_offset = 0x40,
             .note_wait_offset = 0x51,
         },
+    .second_set_piece = 0x0100001a,
+    .second_set_id = kSelectSecondSet,
+    .second_set_name = "map",
+};
+
+// Four Swords Adventures' European release. The sound library and the functions that the driver calls are the American
+// code at other addresses. Beyond the fields that the linker fills in, two functions that a rip reaches differ. One is
+// the audio set-up (see below). The other is the disc library's stateReady, which leaves out a store of -1 that the
+// American build makes. The game's main makes one more heap than the American main: 0x142800 bytes from the game heap,
+// for the languages' files. It keeps that heap at +0xC of the game's variables, and the audio object at +0x10. The
+// driver keeps the American places, with the audio object at +0xC. Of the code that the driver reaches, only the audio
+// set-up reads the object from there (0x8043A47C). The rip patches that load to read +0xC, as the American set-up does.
+// The sound files are the American ones byte for byte.
+const GameProfile kFourSwordsEur = {
+    .name = "The Legend of Zelda: Four Swords Adventures",
+    .game_id = "G4SP01",
+    .dol_sha1 = "66dbc77f258a64d8bc8d7b0041c619ed70d0c00b",
+    .main = 0x80138bb8,
+    .sound_archive = "GC4Sword_pal/AudioRes/JaiInit.baa",
+    .sequence_archive = "GC4Sword_pal/AudioRes/Seqs/JaiSeqs.arc",
+    .wave_folder = "GC4Sword_pal/AudioRes/Waves/",
+    .params =
+        FourSwordsParams{
+            .frame_retraces = 1,
+            .max_heaps = 2,
+            .system_heap_size = 0x400000,
+            .aram_audio_size = 0x800000,
+            .aram_graph_size = 0x600000,
+            .aram_priorities = 8 << 16 | 7 << 8 | 6,
+            .audio_heap_size = 0x180000,
+            .disc_heap_size = 0x800,
+            .audio_object_size = 0x90,
+            .vi_init = 0x8004c91c,
+            .vi_wait_for_retrace = 0x8004cdcc,
+            .get_current_thread = 0x80045ea4,
+            .get_thread_priority = 0x80046fbc,
+            .create_root_heap = 0x80081fe0,
+            .create_exp_heap = 0x80082060,
+            .create_solid_heap = 0x80085738,
+            .create_aram = 0x80079c34,
+            .alloc = 0x80084efc,
+            .alloc_from = 0x80084f98,
+            .thread_ctor = 0x80086158,
+            .become_current_heap = 0x800843b8,
+            .system_heap = 0x80557bf8,
+            .game_globals = 0x8054540c,
+            .audio_object_ctor = 0x8047484c,
+            .create_disc_thread = 0x803f9348,
+            .audio_setup = 0x8043a3b4,
+            .audio_frame = 0x80473e40,
+            .sound_manager_offset = 0x30,
+            .section_offset = 0x44,
+            .load_wave_bank = 0x8003e0e4,
+            .section_data_offset = 0x30,
+            .wave_banks_offset = 0xec,
+            .wave_arc_state_offset = 0x4c,
+            // The game's music start (0x80473e40, 0x804737bc) mutes every child of JA_BGM_SELECT's track 0 but 2 and 7.
+            // The function at 0x80472bd4 switches the piece between that set and one that mutes only child 2. Its four
+            // callers pass the American flags.
+            .track_mute = 0x8003807c,
+            .muted_sound = 0x0100001a,
+            .muted_children = 0xffff & ~(1u << 2 | 1u << 7),
+            .second_sound = kSelectSecondSet,
+            .second_children = 1u << 2,
+        }
+            .Words(),
+    .watch =
+        {
+            .parse_command = 0x800352e4, // JASSeqParser::parse
+            .jump_handler = 0x80034028,  // the sequence parser's command 0xC7
+            .sequence_vtable = 0x804ad9bc,
+            .sequence_track_offset = 0xa8,
+            .effect_vtable = 0x804ad928,
+            .effect_track_offset = 0xb8,
+            .wait_offset = 0x40,
+            .note_wait_offset = 0x51,
+        },
+    .second_set_piece = 0x0100001a,
+    .second_set_id = kSelectSecondSet,
+    .second_set_name = "map",
+    .patches = {{0x8043a47c, 0x8064000c}}, // the audio set-up: lwz r3, 0xc(r4), the audio object
 };
 
 // Twilight Princess (USA). Its sound layer, Z2, sits on JAudio2. The game loads its wave groups as its scenes require
 // them. The driver (driver/twilight_princess.c) runs ntdlib's start-up of Z2. Its parameters are ntdlib's z2::Profile.
 // An effect's handle points at the JAISound inside its JAISe, 0x10 bytes in: its vtable is the JAISe's + 8, and its
-// root track is 0xb8 bytes further.
+// root track is 0xb8 bytes further. As the game starts five pieces, Z2SeqMgr::bgmStart (0x802af010) mutes some
+// children of their track 0. The driver mutes the same children through the music manager (ntdlib's
+// kTwilightPrincessStarts). The scenes' starts, changeBgmStatus (0x802aff8c), changeSubBgmStatus (0x802b1df4) and the
+// battle music's functions give 17 pieces more states (ntdlib's kTwilightPrincessStates). The driver sets their volumes
+// the same way and writes their status through Z2SoundStarter::setPortData.
 const GameProfile kTwilightPrincessUsa = {
     .name = "The Legend of Zelda: Twilight Princess",
     .game_id = "GZ2E01",
@@ -267,6 +370,10 @@ const GameProfile kTwilightPrincessUsa = {
             .wave_status = 0x802ba698,          // Z2SceneMgr::getWaveLoadStatus
             .audio_manager = 0x803dbf4c,        // the audio manager, g_mDoAud_zelAudio
             .start_sound = 0x802cdb1c,          // Z2AudioMgr::startSound
+            .music_manager = 0x80450b84,        // JASGlobalInstance<Z2SeqMgr>::sInstance
+            .set_child_volume = 0x802b3fec,     // Z2SeqMgr::setChildTrackVolume
+            .set_port_data = 0x802aaedc,        // Z2SoundStarter::setPortData
+            .get_port_data = 0x802aaf74,        // Z2SoundStarter::getPortData
         }
             .Words(),
     .watch =
@@ -286,6 +393,217 @@ const GameProfile kTwilightPrincessUsa = {
             .wave_bank_table_offset = 0xfc, // its table of wave banks
             .wave_bank_count_offset = 0xf8, // the table's count
         },
+    .muted_starts = ntdlib::jaudio::kTwilightPrincessStarts,
+    .piece_states = ntdlib::jaudio::kTwilightPrincessStates,
+};
+
+// Twilight Princess's European release. The sound library, Z2 and the functions that the driver calls are the American
+// code at other addresses. Only the fields that the linker fills in differ. The structure offsets don't change. The
+// machine set-up (mDoMch_Create) differs only in its choice of video mode. It gives the American heaps. The sound files
+// are the American ones byte for byte.
+const GameProfile kTwilightPrincessEur = {
+    .name = "The Legend of Zelda: Twilight Princess",
+    .game_id = "GZ2P01",
+    .dol_sha1 = "8d06f67da2185bf10d1978125c46fd36de723219",
+    .main = 0x80006454,
+    .driver = Driver::kTwilightPrincess,
+    .sound_archive = "Audiores/Z2Sound.baa",
+    .sequence_archive = "Audiores/Seqs/Z2SoundSeqs.arc",
+    .wave_folder = "Audiores/Waves/",
+    .params =
+        ntdlib::flipper::z2::Profile{
+            .frame_retraces = 2, // the game's frames are a 30th of a second
+            .max_heaps = 1,
+            .system_heap_size = 0x400000,
+            .aram_audio_size = 0xa00000,
+            .aram_graph_size = 0xffffffff, // the rest of ARAM
+            .aram_priorities = 8 << 16 | 7 << 8 | 6,
+            .aram_buffer_size = 0x2000,
+            .command_heap_size = 0x1000,
+            .archive_heap_size = 0x8df400,
+            .zelda_heap_margin = 0x10000,
+            .audio_heap_size = 0x14d800,
+            .vi_init = 0x8034d380,
+            .vi_wait_for_retrace = 0x8034d830,
+            .get_current_thread = 0x80341af0,
+            .get_thread_priority = 0x80342cc8,
+            .create_root_heap = 0x802cfbb4,     // JKRExpHeap::createRoot
+            .create_exp_heap = 0x802cfc2c,      // JKRExpHeap::create
+            .create_solid_heap = 0x802d1824,    // JKRSolidHeap::create
+            .create_aram = 0x802d2da4,          // JKRAram::create
+            .set_aram_buffer = 0x802d4e34,      // JKRAramStream::setTransBuffer
+            .create_thread_switch = 0x802d2814, // JKRThreadSwitch::createManager
+            .create_command_heap = 0x8000ed3c,  // mDoExt_createCommandHeap
+            .create_archive_heap = 0x8000ed6c,  // mDoExt_createArchiveHeap
+            .archive_heap_parent = 0,           // the root heap
+            .create_assert_heap = 0x8000ec74,   // mDoExt_createAssertHeap
+            .create_zelda_heap = 0x8000ed0c,    // mDoExt_createZeldaHeap
+            .get_free_size = 0x802cf52c,        // JKRHeap::getFreeSize
+            .become_current_heap = 0x802cf238,  // JKRHeap::becomeCurrentHeap
+            .system_heap = 0x80453338,          // JKRHeap::sSystemHeap
+            .alloc = 0x802cfa4c,                // operator new
+            .thread_ctor = 0x802d24b8,          // JKRThread's constructor for an OSThread
+            .create_disc_thread = 0x8001580c,   // mDoDvdThd::create
+            .audio_heap = 0x80452b7c,           // g_mDoAud_audioHeap
+            .audio_setup = 0x80006fc0,          // mDoAud_Create
+            .init_flag = 0x80452b78,            // mDoAud_zelAudio_c::mInitFlag
+            .audio_frame = 0x802ce704,          // Z2AudioMgr::gframeProcess
+            .load_se_wave = 0x802bb504,         // Z2SceneMgr::loadSeWave
+            .load_bgm_wave = 0x802bb570,        // Z2SceneMgr::loadBgmWave
+            .wave_status = 0x802bb498,          // Z2SceneMgr::getWaveLoadStatus
+            .audio_manager = 0x803ddeec,        // the audio manager, g_mDoAud_zelAudio
+            .start_sound = 0x802ce91c,          // Z2AudioMgr::startSound
+            .music_manager = 0x80452b44,        // JASGlobalInstance<Z2SeqMgr>::sInstance
+            .set_child_volume = 0x802b4dec,     // Z2SeqMgr::setChildTrackVolume
+            .set_port_data = 0x802abcdc,        // Z2SoundStarter::setPortData
+            .get_port_data = 0x802abd74,        // Z2SoundStarter::getPortData
+        }
+            .Words(),
+    .watch =
+        {
+            .parse_command = 0x802966d4,    // JASSeqParser::parse
+            .jump_handler = 0x80295128,     // the sequence parser's command 0xC7
+            .conditional_jump = 0x8029516c, // its command 0xC8, where it takes the jump
+            .sequence_vtable = 0x803cb894,
+            .sequence_track_offset = 0xa8,
+            .effect_vtable = 0x803cb800,
+            .effect_track_offset = 0xb8,
+            .wait_offset = 0x40,
+            .note_wait_offset = 0x51,
+            // JASBasicWaveBank's and JASSimpleWaveBank's getWaveHandle
+            .wave_handle_functions = {0x802996dc, 0x80299c60},
+            .wave_bank_table = 0x80452c80,  // the section heap's instance
+            .wave_bank_table_offset = 0xfc, // its table of wave banks
+            .wave_bank_count_offset = 0xf8, // the table's count
+        },
+    .muted_starts = ntdlib::jaudio::kTwilightPrincessStarts,
+    .piece_states = ntdlib::jaudio::kTwilightPrincessStates,
+};
+
+// Twilight Princess's Japanese release, Zelda no Densetsu: Twilight Princess. The sound library and the functions that
+// the driver calls are the American code at other addresses. Only the fields that the linker fills in differ. The
+// structure offsets don't change. Of Z2, only Z2SoundObjMgr::searchEnemy differs. Its loop over the enemies near Link
+// never runs in a rip. The machine set-up (mDoMch_Create) gives an archive heap of 0x8E6000 bytes (American 0x8DF400).
+// The sound files are the American ones byte for byte.
+const GameProfile kTwilightPrincessJpn = {
+    .name = "Zelda no Densetsu: Twilight Princess",
+    .game_id = "GZ2J01",
+    .dol_sha1 = "847261078fc157620aed5f2d8ee84d3aa9193021",
+    .main = 0x80006454,
+    .driver = Driver::kTwilightPrincess,
+    .sound_archive = "Audiores/Z2Sound.baa",
+    .sequence_archive = "Audiores/Seqs/Z2SoundSeqs.arc",
+    .wave_folder = "Audiores/Waves/",
+    .params =
+        ntdlib::flipper::z2::Profile{
+            .frame_retraces = 2, // the game's frames are a 30th of a second
+            .max_heaps = 1,
+            .system_heap_size = 0x400000,
+            .aram_audio_size = 0xa00000,
+            .aram_graph_size = 0xffffffff, // the rest of ARAM
+            .aram_priorities = 8 << 16 | 7 << 8 | 6,
+            .aram_buffer_size = 0x2000,
+            .command_heap_size = 0x1000,
+            .archive_heap_size = 0x8e6000,
+            .zelda_heap_margin = 0x10000,
+            .audio_heap_size = 0x14d800,
+            .vi_init = 0x8034e9b0,
+            .vi_wait_for_retrace = 0x8034ee60,
+            .get_current_thread = 0x80343120,
+            .get_thread_priority = 0x803442f8,
+            .create_root_heap = 0x802d1250,     // JKRExpHeap::createRoot
+            .create_exp_heap = 0x802d12c8,      // JKRExpHeap::create
+            .create_solid_heap = 0x802d2ec0,    // JKRSolidHeap::create
+            .create_aram = 0x802d4440,          // JKRAram::create
+            .set_aram_buffer = 0x802d64d0,      // JKRAramStream::setTransBuffer
+            .create_thread_switch = 0x802d3eb0, // JKRThreadSwitch::createManager
+            .create_command_heap = 0x8000ed88,  // mDoExt_createCommandHeap
+            .create_archive_heap = 0x8000edb8,  // mDoExt_createArchiveHeap
+            .archive_heap_parent = 0,           // the root heap
+            .create_assert_heap = 0x8000ecc0,   // mDoExt_createAssertHeap
+            .create_zelda_heap = 0x8000ed58,    // mDoExt_createZeldaHeap
+            .get_free_size = 0x802d0bc8,        // JKRHeap::getFreeSize
+            .become_current_heap = 0x802d08d4,  // JKRHeap::becomeCurrentHeap
+            .system_heap = 0x8044b4b0,          // JKRHeap::sSystemHeap
+            .alloc = 0x802d10e8,                // operator new
+            .thread_ctor = 0x802d3b54,          // JKRThread's constructor for an OSThread
+            .create_disc_thread = 0x80015858,   // mDoDvdThd::create
+            .audio_heap = 0x8044acfc,           // g_mDoAud_audioHeap
+            .audio_setup = 0x80006fc0,          // mDoAud_Create
+            .init_flag = 0x8044acf8,            // mDoAud_zelAudio_c::mInitFlag
+            .audio_frame = 0x802cfda0,          // Z2AudioMgr::gframeProcess
+            .load_se_wave = 0x802bcb44,         // Z2SceneMgr::loadSeWave
+            .load_bgm_wave = 0x802bcbb0,        // Z2SceneMgr::loadBgmWave
+            .wave_status = 0x802bcad8,          // Z2SceneMgr::getWaveLoadStatus
+            .audio_manager = 0x803d608c,        // the audio manager, g_mDoAud_zelAudio
+            .start_sound = 0x802cffb8,          // Z2AudioMgr::startSound
+            .music_manager = 0x8044acc4,        // JASGlobalInstance<Z2SeqMgr>::sInstance
+            .set_child_volume = 0x802b642c,     // Z2SeqMgr::setChildTrackVolume
+            .set_port_data = 0x802ad31c,        // Z2SoundStarter::setPortData
+            .get_port_data = 0x802ad3b4,        // Z2SoundStarter::getPortData
+        }
+            .Words(),
+    .watch =
+        {
+            .parse_command = 0x80297d04,    // JASSeqParser::parse
+            .jump_handler = 0x80296758,     // the sequence parser's command 0xC7
+            .conditional_jump = 0x8029679c, // its command 0xC8, where it takes the jump
+            .sequence_vtable = 0x803c3a34,
+            .sequence_track_offset = 0xa8,
+            .effect_vtable = 0x803c39a0,
+            .effect_track_offset = 0xb8,
+            .wait_offset = 0x40,
+            .note_wait_offset = 0x51,
+            // JASBasicWaveBank's and JASSimpleWaveBank's getWaveHandle
+            .wave_handle_functions = {0x8029ad0c, 0x8029b290},
+            .wave_bank_table = 0x8044ae00,  // the section heap's instance
+            .wave_bank_table_offset = 0xfc, // its table of wave banks
+            .wave_bank_count_offset = 0xf8, // the table's count
+        },
+    .muted_starts = ntdlib::jaudio::kTwilightPrincessStarts,
+    .piece_states = ntdlib::jaudio::kTwilightPrincessStates,
+};
+
+// The states in which The Wind Waker's sound layer plays a piece of music another way. The addresses are in the USA
+// release's main.dol. JAIZelBasic::bgmStart (0x802a34a4) mutes some of the root track's 16 children as it starts 13
+// pieces, with bgmMute (0x802abb18). The mask comes from the table m_bgm_mute_state (0x8039b630): the piece's row and
+// the column of a state. The IDs from 0x80000105 to 0x80000152 start a piece in another column. A state that plays what
+// another plays is left out. 0x80000125 also sets the tempo to 1.3143 times its speed. JA_BGM_SEA and JA_BGM_SEA_STORM
+// play every track with the boat's sail up, and leave some out while the sail is down and the boat is still.
+// subBgmStart (0x802a47b8) starts JA_BGM_SEA_ENEMY with some tracks muted unless Link is on board, and the minibosses'
+// pieces JA_BGM_MBOSS and JA_BGM_MBOSS_S with some tracks muted. bgmNowBattle (0x802a4eb8) starts JA_BGM_BATTLE_NORM in
+// the same way. It brings in a layer of the battle music, or of a miniboss's, while an enemy is within 30 units of Link
+// (mbossBgmNearByProcess, 0x802a591c). The sound layer brings in another layer while Link's sword is out
+// (bgmSetSwordUsing, 0x802a579c, read by bgmNowBattle and mbossBgmMuteProcess at 0x802a5818).
+constexpr MusicState kWindWakerMusicStates[] = {
+    {0x80000004, 0x80000004 | kEnemyNear, "near"}, // JA_BGM_BATTLE_NORM
+    {0x80000004, 0x80000004 | kSwordOut, "sword"},
+    {0x80000004, 0x80000004 | kSwordOut | kEnemyNear, "near sword"},
+    {0x80000005, 0x80000105, "80000105"},          // JA_BGM_KINDAN_BOSS
+    {0x80000014, 0x80000110, "80000110"},          // JA_BGM_DK_BATTLE
+    {0x80000015, 0x80000115, "80000115"},          // JA_BGM_MJ_TOWER_BATTLE
+    {0x80000019, 0x80000019 | kEnemyNear, "near"}, // JA_BGM_MBOSS
+    {0x80000019, 0x80000019 | kSwordOut, "sword"},
+    {0x80000019, 0x80000019 | kSwordOut | kEnemyNear, "near sword"},
+    {0x8000001a, 0x8000001a | kEnemyNear, "near"}, // JA_BGM_MBOSS_S
+    {0x8000001a, 0x8000001a | kSwordOut, "sword"},
+    {0x8000001a, 0x8000001a | kSwordOut | kEnemyNear, "near sword"},
+    {0x8000001c, 0x8000001c | kOnBoard, "on board"}, // JA_BGM_SEA_ENEMY
+    {0x80000023, 0x80000120, "80000120"},            // JA_BGM_BST_BATTLE
+    {0x80000023, 0x80000121, "80000121"},
+    {0x80000023, 0x80000122, "80000122"},
+    {0x80000023, 0x80000123, "80000123"}, // column 3 of the row before
+    {0x80000028, 0x80000125, "80000125"}, // JA_BGM_KAMI_TOWER
+    {0x80000028, 0x80000126, "80000126"},
+    {0x8000002e, 0x8000002e | kSailing, "sailing"}, // JA_BGM_SEA
+    {0x8000003c, 0x8000003c | kSailing, "sailing"}, // JA_BGM_SEA_STORM
+    {0x80000042, 0x80000130, "80000130"},           // JA_BGM_D_GANON_1
+    {0x80000042, 0x80000131, "80000131"},
+    {0x80000042, 0x80000132, "80000132"},
+    {0x80000042, 0x80000133, "80000133"}, // column 3 of the row after
+    {0x80000048, 0x80000140, "80000140"}, // JA_BGM_BIG_POW
+    {0x80000049, 0x80000150, "80000150"}, // JA_BGM_PAST_BIG_POW
+    {0x8000004a, 0x80000151, "80000151"}, // JA_BGM_PAST_BKM
 };
 
 // The Wind Waker (USA). Its sound library is JAudio1, with its start-up archive in AAF. Its waves don't all fit in
@@ -349,6 +667,24 @@ const GameProfile kWindWakerUsa = {
             0x8028fff8,           // set_camera
             0x803ed050,           // default_camera
             0x80298b74,           // set_port_data
+            0x8027e250,           // get_random: JASystem::Player::getRandomS32
+            0x802a34a4,           // bgm_start: JAIZelBasic::bgmStart
+            0x802a47b8,           // sub_bgm_start: JAIZelBasic::subBgmStart
+            0x802a4eb8,           // battle_bgm_start: JAIZelBasic::bgmNowBattle
+            0x802a965c,           // set_ship_sail_state
+            0x802aba9c,           // set_link_on_board
+            0x802a579c,           // set_sword_using: JAIZelBasic::bgmSetSwordUsing
+            0x802a5a40,           // change_bgm_status
+            0x802a5a78,           // change_sub_bgm_status
+            // sub_bgm: JA_BGM_MBOSS (0x19), JA_BGM_MBOSS_S (0x1a), JA_BGM_SEA_ENEMY (0x1c), JA_BGM_P_GANON_1 (0x41) and
+            // JA_BGM_P_GANON_2 (0x47)
+            0x16000000,
+            0,
+            0x00000082,
+            0,
+            0x80000004, // battle_bgm: JA_BGM_BATTLE_NORM
+            0x68,       // bgm_handle
+            0x22d,      // scene_started
         },
     .watch =
         {
@@ -414,7 +750,147 @@ const GameProfile kWindWakerUsa = {
             {0x3830, 6, {1, 2, 3, 4, 5, 6, 7, 9, 12, 19, 20, 21, 22, 26}},
             {0x3832, 9, {40, 80, 100, 110, 120, 127}},
             {0x592d, 6, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 18, 19, 20, 21, 22, 23, 26, 27}},
+            // The music's port 9 holds the status that the game's actors give a piece. changeBgmStatus (0x802a5a40)
+            // writes it on the main music, and changeSubBgmStatus (0x802a5a78) on the music over it. onEnemyDamage
+            // (0x802a57a4) writes 1 to port 9 of sea_enemy and to port 11 of enemy2 when Link hits an enemy. A list
+            // holds the values that the actors write and that change what the piece plays. The GameCube's actors are
+            // in the game's modules (RELs), which weren't read. The Wind Waker HD links the same actors into its
+            // executable. There changeBgmStatus gets 1, 2 and 9, and changeSubBgmStatus 2 to 8 and 10 (the calls at
+            // 0x021554ac to 0x02255df0 and 0x02136258 to 0x02136efc). house_t is JA_BGM_JI_TRAINING,
+            // e_ganon JA_BGM_GANON_BATTLE, p_ganon1 and p_ganon2 the phantom Ganon's fights, sea_enemy
+            // JA_BGM_SEA_ENEMY and enemy2 JA_BGM_BATTLE_NORM. The GameCube's sequences of these six pieces, and of
+            // mboss and mboss_s, are HD's, byte for byte.
+            {0x80000011, 9, {1, 2, 9}},
+            {0x8000004d, 9, {1}},
+            {0x80000041, 9, {2, 3, 4, 5, 6, 7, 8, 10}},
+            {0x80000047, 9, {2, 3, 4, 5, 6, 7, 8, 10}},
+            {0x8000001c, 9, {1}},
+            {0x80000004, 11, {1}},
         },
+    // The effects that play a key that a random number picks: se3-0049 48 plus a number below 3, se4-0254 48 plus one
+    // below 8, se4-0255 36 plus one below 8 and se4-0327 24 plus one below 4. The number is the draw modulo the count
+    // (JASystem::Player::getRandomS32, 0x8027e250). The banks give some of those keys a velocity region of volume 0.
+    // With the game's sound files, the keys that make a sound are 48, 48 to 50, 36 to 38 and 24 to 25. From the
+    // generator's first state, the first draw picks 49, 51, 39 and 27, and all four play nothing. Each key lists the
+    // draws before the first draw that picks it.
+    .random_effects =
+        {
+            {0x3831, {{48, 1}, {49, 0}, {50, 4}}},
+            {0x48fe, {{48, 8}, {49, 5}, {50, 1}, {51, 0}, {52, 3}, {53, 6}, {54, 13}, {55, 10}}},
+            {0x48ff, {{36, 8}, {37, 5}, {38, 1}, {39, 0}, {40, 3}, {41, 6}, {42, 13}, {43, 10}}},
+            {0x4947, {{24, 3}, {25, 5}, {26, 1}, {27, 0}}},
+        },
+    .music_states = kWindWakerMusicStates,
+};
+
+// The Wind Waker's Japanese release, Zelda no Densetsu: Kaze no Takuto. The sound library and the functions that the
+// driver calls are the same code as the American release's, at other addresses. Only the fields that the linker fills
+// in and the line numbers of assertions differ. The sound library's structure offsets don't change. The game's machine
+// set-up (mDoMch_Create) gives smaller archive and game heaps. The music sequences are the American ones byte for byte.
+// The effects sequence holds the same code for the effects that read a port and for the effects that play a random key.
+// Their variants are the American ones. The sound layer (JAIZelBasic) lacks three of the American layer's fields: a
+// word at +0x28 and bytes at +0x62 and +0xbf. The fields after them lie 4 or 5 bytes lower. The main music's handle is
+// at +0x64 (American +0x68). The byte that the game sets once a scene has started is at +0x229 (American +0x22d). The
+// starters, the setters and the table m_bgm_mute_state are the American ones. bgmStart also clears the byte at +0xb7
+// (the American +0xbb) as it returns. subBgmStart and seStart set that byte, and the sound layer's constructor clears
+// it. The driver calls bgmStart only for the main music. Nothing that the driver starts before it sets the byte.
+const GameProfile kWindWakerJpn = {
+    .name = "Zelda no Densetsu: Kaze no Takuto",
+    .game_id = "GZLJ01",
+    .dol_sha1 = "995406d914da8cd1aee4ce58f4c75217c9ec01bc",
+    .main = 0x80006464,
+    .driver = Driver::kWindWaker,
+    .library = SoundLibrary::kJAudio1,
+    .sound_archive = "Audiores/JaiInit.aaf",
+    .sequence_archive = "Audiores/Seqs/JaiSeqs.arc",
+    .wave_folder = "Audiores/Banks/",
+    .params =
+        {
+            2,                    // frame_retraces: the game runs at 30 frames a second
+            1,                    // max_heaps
+            0xa3f000,             // archive_heap_size
+            0x2ce000,             // game_heap_size
+            0x1000,               // command_heap_size
+            0xfbe000,             // aram_audio_size: the game's 0xa00000 and most of its 0x5ce000 for graphics
+            0x10000,              // aram_graph_size
+            8 << 16 | 7 << 8 | 6, // aram_priorities
+            0x2000,               // aram_buffer_size
+            0x166800,             // audio_heap_size
+            0x68,                 // thread_size
+            0x8031129c,           // vi_init
+            0x8031174c,           // vi_wait_for_retrace
+            0x8030577c,           // get_current_thread
+            0x80306a94,           // get_thread_priority
+            0x80300b40,           // get_arena_lo
+            0x80300b38,           // get_arena_hi
+            0x802aebd4,           // create_root_heap
+            0x802aec4c,           // create_exp_heap
+            0x802b090c,           // create_solid_heap
+            0x802adee4,           // get_free_size
+            0x802ada74,           // become_current_heap
+            0x802b1940,           // create_aram
+            0x802b3d34,           // set_aram_buffer
+            0x802ae2b4,           // alloc
+            0x802b14b4,           // thread_ctor
+            0x800115a4,           // create_command_heap
+            0x80011680,           // create_archive_heap
+            0x800113e0,           // create_game_heap
+            0x800114c8,           // create_zelda_heap
+            0x80017bd0,           // create_disc_thread
+            0x803e9d5c,           // audio_heap
+            0x800071e0,           // audio_process
+            0x803e9d58,           // audio_ready
+            0x803eaa18,           // sound_library
+            0x8028dc54,           // start_sound
+            0x803eaa24,           // wave_systems
+            0x803eaa2c,           // wave_status
+            0x8028edfc,           // load_wave_group
+            0x803eaa9c,           // effects_sequence
+            5,                    // sound_state_offset
+            0x8028d798,           // set_camera
+            0x803e0530,           // default_camera
+            0x80296314,           // set_port_data
+            0x8027b9f8,           // get_random: JASystem::Player::getRandomS32
+            0x802a0c2c,           // bgm_start: JAIZelBasic::bgmStart
+            0x802a1f44,           // sub_bgm_start: JAIZelBasic::subBgmStart
+            0x802a2644,           // battle_bgm_start: JAIZelBasic::bgmNowBattle
+            0x802a6d88,           // set_ship_sail_state
+            0x802a91e8,           // set_link_on_board
+            0x802a2f28,           // set_sword_using: JAIZelBasic::bgmSetSwordUsing
+            0x802a31cc,           // change_bgm_status
+            0x802a3204,           // change_sub_bgm_status
+            // sub_bgm: JA_BGM_MBOSS (0x19), JA_BGM_MBOSS_S (0x1a), JA_BGM_SEA_ENEMY (0x1c), JA_BGM_P_GANON_1 (0x41) and
+            // JA_BGM_P_GANON_2 (0x47)
+            0x16000000,
+            0,
+            0x00000082,
+            0,
+            0x80000004, // battle_bgm: JA_BGM_BATTLE_NORM
+            0x64,       // bgm_handle
+            0x229,      // scene_started
+        },
+    .watch =
+        {
+            .parse_command = 0x8027da10, // the loop over a track's commands in JASystem::TSeqParser::parseSeq
+            .jump_handler = 0x8027c274,  // the sequence parser's command 0xC8, where it takes the jump
+            .command_track_register = 31,
+            .jump_track_register = 28,
+            .jump_target_register = 26,
+            .depth_offset = 0xc,
+            .wait_offset = 8,
+            .note_wait_offset = 0,
+            .wave_handle_functions = {0x802835d0, 0x80283eb4}, // TBasicWaveBank's and TSimpleWaveBank's getWaveHandle
+            .wave_bank_table = 0x803ea974,                     // JASystem::WaveBankMgr::sWaveBank
+            .parameters_offset = 0x3c,
+            .parameters_track_offset = 0x1360,
+            .effects_sequence = 0x803eaa9c,
+            .effect_slot_offset = 4,
+            .parent_offset = 0x31c,
+            .children_offset = 0x320,
+        },
+    .port_effects = kWindWakerUsa.port_effects,
+    .random_effects = kWindWakerUsa.random_effects,
+    .music_states = kWindWakerMusicStates,
 };
 
 // The parameters of Mario Golf's driver (driver/mario_golf.c's Params from arena_lo on): the OS's arena, the sizes of
@@ -772,7 +1248,12 @@ constexpr uint32_t RoomSound(uint32_t echo, uint32_t size, uint32_t code)
 // room 35 while it's dark, child 9 in a room whose sound_room_size is 2, and children 8 and 10 in the other rooms.
 // Rooms 19, 32 and 65 get no accompaniment. The frame also sets the piece's tempo: 0.6 + 0.4 x the health / 100. With
 // the lights on, it scales that by the time between Luigi's steps, to 0.9 while he stands still. A state's rip takes
-// the most health of its band and the first room of the room table that gives its tracks.
+// the most health of its band and the first room of the room table that gives its tracks. A poison mushroom
+// (EnNegativeItem) shrinks Luigi for a time. It puts Luigi in state 56 (0x800d0e4c). That state starts effect 0x847
+// and calls 0x80189468 with 1 (0x800b13e0 to 0x800b1424). The call sets the float at 0x804d783c to 2.0. The frame gives
+// children 4 to 6 the float through 0x801991b4, and the tune plays an octave higher. Child 7 doesn't take it. Once the
+// state's timer runs out, the game calls 0x80189468 with 0 (0x800b4848 to 0x800b48a0). The shrunk states take 100 HP in
+// each place but the lit room.
 constexpr SingingState kLuigiSingsStates[] = {
     {"hallway 100 HP", 100, false, 6, RoomSound(10, 0, 7)},
     {"hallway 70 HP", 70, false, 6, RoomSound(10, 0, 7)},
@@ -787,11 +1268,15 @@ constexpr SingingState kLuigiSingsStates[] = {
     {"unaccompanied 70 HP", 70, false, 19, RoomSound(10, 0, 6)},
     {"unaccompanied 40 HP", 40, false, 19, RoomSound(10, 0, 6)},
     {"lit room", 100, true, 0, RoomSound(10, 1, 0)},
+    {"hallway 100 HP shrunk", 100, false, 6, RoomSound(10, 0, 7), true},
+    {"room 100 HP shrunk", 100, false, 0, RoomSound(10, 1, 0), true},
+    {"outdoors 100 HP shrunk", 100, false, 11, RoomSound(0, 2, 1), true},
+    {"unaccompanied 100 HP shrunk", 100, false, 19, RoomSound(10, 0, 6), true},
 };
 
 // Luigi's Mansion (USA). Its sound library is an early JAudio1. The start-up archive is an AAF. The sequences are one
 // file, and a table in the AAF divides it. The sound library loads all four wave systems at start-up. The parameters
-// follow driver/luigis_mansion.c's Params from frame_retraces to room_sound. The table of LuigiSings's states
+// follow driver/luigis_mansion.c's Params from frame_retraces to set_shrunk. The table of LuigiSings's states
 // (kLuigiSingsStates) follows them.
 const GameProfile kLuigisMansionUsa = {
     .name = "Luigi's Mansion",
@@ -838,6 +1323,7 @@ const GameProfile kLuigisMansionUsa = {
             0x80188cec,           // set_room_lights
             0x804d91d0,           // room
             0x804d7830,           // room_sound
+            0x80189468,           // set_shrunk
         },
     .watch =
         {
@@ -1143,6 +1629,26 @@ const GameProfile kJungleBeatUsa = {
             0x50062,              // the other such effect
             0x35,                 //   and its stage
             0,                    // music: written by the driver
+            0x70,                 // combo_effect: JA_SE_EAT_BIND_COMBO
+            0x8023f98c,           // start_with_count: the audio manager's start of a sound with a count
+            0x802405ac,           // write_port: writes a port of a sound that plays
+            // counts and ports: effects whose sequences add a value at port 0xb to a key, each with the value that
+            // the game's code gives it first. The game starts the first two with a count, and start_with_count writes
+            // the count there. A game object writes the third's value after the start (0x8024658c, from 0x80244aec).
+            // JA_SE_PAUSE_MENU_CLAP_PARAM: the pause menu's setting of the microphone + 1, after a step of the setting
+            // (0x801c89e4). The setting starts from the microphone's threshold (0x801c87f4): 6 from a new save's 75
+            // (0x8021ddf4). The menu checks a step down first (0x801c8de4), to 5.
+            0x8e,
+            6,
+            // JA_SE_BEAT_POINT_ADD: the points added + 60 (0x802400c8), while they stay below a limit (0x80240090).
+            // Both start at 0 (0x80240064). No code sets the limit. The game therefore never reaches the start.
+            0x37,
+            60,
+            // JA_SE_OBJ_SOUND_BLOCK_DISAPPEAR: the entry of the table at 0x803f09a0 (8, 4, 1, 0) for the block's step
+            // (0x80244aec). The step starts at 0 (0x802438cc) and goes on by 1 after each block (0x80243998). It goes
+            // back to 0 after 90 frames without one (0x80243940).
+            0x4000f,
+            8,
         },
     .watch =
         {
@@ -1228,6 +1734,9 @@ const GameProfile kDoubleDashUsa = {
             .parse_command = 0x8009d090,    // JASSeqParser::parse
             .jump_handler = 0x8009bd84,     // the sequence parser's command 0xC7
             .conditional_jump = 0x8009be80, // its command 0xC8, where it takes the jump
+            // The game and the driver start a level sound again each frame. Six level sounds end each pass, and the
+            // start runs the finished track again from its first command.
+            .restarts_as_passes = true,
             .sequence_vtable = 0x80341754,
             .sequence_track_offset = 0xa8,
             .effect_vtable = 0x803416c0,
@@ -1243,16 +1752,32 @@ constexpr ScenePiece::SoundInfo kBossInfo = {0, 127u << 24 | 2u << 16, 0x3f80000
 constexpr ScenePiece::SoundInfo kExtraInfo = {0, 127u << 24 | 1u << 16, 0x3f800000, 50u << 24};
 constexpr ScenePiece::SoundInfo kKeyInfo = {0x1f00, 127u << 24 | 4u << 16, 0x3f800000, 35u << 24};
 
-// Pikmin 2's music: every file of the sequence archive but the effects sequence, se.bms, in the archive's order. A
-// piece's sound ID is 0x80000000 and its place here.
+// Pikmin 2's music: every file of the sequence archive but the effects sequence, se.bms, in the archive's order, then
+// the variants. A piece's sound ID is 0x80000000 and its place here.
 //
 // The game makes most pieces' objects in PikSceneMgr::initMainBgm, initBossBgm and initAdditionalBgm. A piece's scene
 // loads one of the wave system's 49 groups (wScene_*.aw) besides group 0. A cave floor's conductor comes from a list
-// for each area (BgmList_*.txt). The conductor picks the phrases that the cave music's tracks play. Its name gives the
-// floor's wave group. A rip plays one conductor: the first of each family, such as caveconc_00_0.cnd and new_00_0.cnd.
-// The game's code names caveconc_00_0.cnd itself, for a boss's floor. A boss starts its music when it appears, at a
-// part of the music: the start point. The middle bosses start m_boss at their appearance (9). The final boss starts
-// l_boss at its part for four weapons (1). At start point 0, a track of l_boss jumps to itself without end.
+// for each area (BgmList_*.txt) or from the challenge mode's list (ChallengeBgmList.txt). The conductor picks the
+// phrases that the cave music's tracks play. Its name gives the floor's piece and wave group
+// (ConductorList::getSeqAndWaveFromConductor). A piece plays with the first conductor of its family, such as
+// caveconc_00_0.cnd and new_00_0.cnd. The game's code names caveconc_00_0.cnd itself, for a boss's floor. A boss
+// starts its music when it appears, at a part of the music: the start point. The middle bosses start m_boss at their
+// appearance (9). The final boss starts l_boss at its part for four weapons (1). A start point of 0 leaves the start to
+// the scene. The music then starts at part 0, where JumpBgmSeq's constructor sets the part. The Waterwraith's chase
+// starts m_boss there. At part 0, a track of l_boss jumps to itself without end.
+//
+// The variants. Each other conductor that the lists name gets a variant of its piece, with the wave group that its
+// name gives. The bosses' actions jump to the other parts of their music (JumpBgmSeq::requestJumpBgmOnBeat). Each
+// other part of m_boss and l_boss gets a variant that starts there and plays what follows. m_boss's parts 5 to 7 play
+// in turn with part 3 for an attack. Nobody has found code in the game that asks for part 12 of l_boss. Its variant
+// rips it, as the pieces that the game never plays rip. l_boss has no variant at part 0. The attacks (parts 3 and 5 to
+// 7 of both pieces, and m_boss's long attack, 8) write to the boss's object. driver/pikmin2.c gives them a stand-in.
+//
+// The game makes l_boss only while the final boss's sound object exists (initBossBgm, 0x8033606c). Its directors then
+// take tracks 14 and 15 (0x80470240) and mute them. Tracks 10 and 11 play in full. tentionD turns track 15 on while a
+// captain stands within 300 units of the boss (0x8046cc70), and only parts 4 and 11 hold notes on that track. Those two
+// parts therefore get one more variant each, labelled with "-near". pikatkD turns track 14 on as Pikmin attack. That
+// track holds one note, in parts 1 and 12, and gets no variant.
 //
 // Neither the game's code nor its lists of music start 14 of the files: 2pbattle, a_iron, a_zawinul01, caveboss,
 // c_result, the six ff_ pieces, id_test, result and u_result. The game plays streams of the same names in place of
@@ -1292,7 +1817,7 @@ const ScenePiece kPikmin2Pieces[] = {
     {"kuro_post.bms", ScenePiece::Kind::kPlain, 48, "", kExtraInfo},
     {"kuro_pre.bms", ScenePiece::Kind::kPlain, 48},
     {"last.bms", ScenePiece::Kind::kMain, 4, "", ScenePiece::kAreaInfo, 30},
-    {"l_boss.bms", ScenePiece::Kind::kDirected, 35, "", kBossInfo, 60, 1},
+    {"l_boss.bms", ScenePiece::Kind::kBigBoss, 35, "", kBossInfo, 60, 1},
     {"m_boss.bms", ScenePiece::Kind::kDirected, 0, "", kBossInfo, 60, 9},
     {"new_00.bms", ScenePiece::Kind::kAuto, 37, "new_00_0.cnd"},
     {"new_01.bms", ScenePiece::Kind::kAuto, 38, "new_01_0.cnd"},
@@ -1310,13 +1835,54 @@ const ScenePiece kPikmin2Pieces[] = {
     {"worldmap.bms", ScenePiece::Kind::kPlain, 16},
     {"worldmap_intro.bms", ScenePiece::Kind::kPlain, 16},
     {"yakushima.bms", ScenePiece::Kind::kMain, 3, "", ScenePiece::kAreaInfo, 30},
+    {"caveconc.bms", ScenePiece::Kind::kAuto, 31, "caveconc_05_0.cnd", ScenePiece::kAreaInfo, 0, 0, "caveconc_05_0"},
+    {"caveconc.bms", ScenePiece::Kind::kAuto, 32, "caveconc_10_0.cnd", ScenePiece::kAreaInfo, 0, 0, "caveconc_10_0"},
+    {"cavemetal.bms", ScenePiece::Kind::kAuto, 29, "cavemetal_05_0.cnd", ScenePiece::kAreaInfo, 0, 0, "cavemetal_05_0"},
+    {"cavemetal.bms", ScenePiece::Kind::kAuto, 29, "cavemetal_05_4.cnd", ScenePiece::kAreaInfo, 0, 0, "cavemetal_05_4"},
+    {"cavemetal.bms", ScenePiece::Kind::kAuto, 30, "cavemetal_10_0.cnd", ScenePiece::kAreaInfo, 0, 0, "cavemetal_10_0"},
+    {"cavemetal.bms", ScenePiece::Kind::kAuto, 30, "cavemetal_10_4.cnd", ScenePiece::kAreaInfo, 0, 0, "cavemetal_10_4"},
+    {"cavesoil.bms", ScenePiece::Kind::kAuto, 33, "cavesoil_05_0.cnd", ScenePiece::kAreaInfo, 0, 0, "cavesoil_05_0"},
+    {"cavesoil.bms", ScenePiece::Kind::kAuto, 34, "cavesoil_10_0.cnd", ScenePiece::kAreaInfo, 0, 0, "cavesoil_10_0"},
+    {"cavesoil.bms", ScenePiece::Kind::kAuto, 34, "cavesoil_10_3.cnd", ScenePiece::kAreaInfo, 0, 0, "cavesoil_10_3"},
+    {"new_00.bms", ScenePiece::Kind::kAuto, 37, "new_00_1.cnd", ScenePiece::kAreaInfo, 0, 0, "new_00_1"},
+    {"new_08.bms", ScenePiece::Kind::kAuto, 45, "new_08_1.cnd", ScenePiece::kAreaInfo, 0, 0, "new_08_1"},
+    {"m_boss.bms", ScenePiece::Kind::kDirected, 0, "", kBossInfo, 60, 0, "m_boss-0"},
+    {"m_boss.bms", ScenePiece::Kind::kDirected, 0, "", kBossInfo, 60, 1, "m_boss-1"},
+    {"m_boss.bms", ScenePiece::Kind::kDirected, 0, "", kBossInfo, 60, 2, "m_boss-2"},
+    {"m_boss.bms", ScenePiece::Kind::kDirected, 0, "", kBossInfo, 60, 3, "m_boss-3"},
+    {"m_boss.bms", ScenePiece::Kind::kDirected, 0, "", kBossInfo, 60, 4, "m_boss-4"},
+    {"m_boss.bms", ScenePiece::Kind::kDirected, 0, "", kBossInfo, 60, 5, "m_boss-5"},
+    {"m_boss.bms", ScenePiece::Kind::kDirected, 0, "", kBossInfo, 60, 6, "m_boss-6"},
+    {"m_boss.bms", ScenePiece::Kind::kDirected, 0, "", kBossInfo, 60, 7, "m_boss-7"},
+    {"m_boss.bms", ScenePiece::Kind::kDirected, 0, "", kBossInfo, 60, 8, "m_boss-8"},
+    {"m_boss.bms", ScenePiece::Kind::kDirected, 0, "", kBossInfo, 60, 10, "m_boss-10"},
+    {"m_boss.bms", ScenePiece::Kind::kDirected, 0, "", kBossInfo, 60, 11, "m_boss-11"},
+    {"m_boss.bms", ScenePiece::Kind::kDirected, 0, "", kBossInfo, 60, 12, "m_boss-12"},
+    {"l_boss.bms", ScenePiece::Kind::kBigBoss, 35, "", kBossInfo, 60, 2, "l_boss-2"},
+    {"l_boss.bms", ScenePiece::Kind::kBigBoss, 35, "", kBossInfo, 60, 3, "l_boss-3"},
+    {"l_boss.bms", ScenePiece::Kind::kBigBoss, 35, "", kBossInfo, 60, 4, "l_boss-4"},
+    {"l_boss.bms", ScenePiece::Kind::kBigBoss, 35, "", kBossInfo, 60, 5, "l_boss-5"},
+    {"l_boss.bms", ScenePiece::Kind::kBigBoss, 35, "", kBossInfo, 60, 6, "l_boss-6"},
+    {"l_boss.bms", ScenePiece::Kind::kBigBoss, 35, "", kBossInfo, 60, 7, "l_boss-7"},
+    {"l_boss.bms", ScenePiece::Kind::kBigBoss, 35, "", kBossInfo, 60, 8, "l_boss-8"},
+    {"l_boss.bms", ScenePiece::Kind::kBigBoss, 35, "", kBossInfo, 60, 9, "l_boss-9"},
+    {"l_boss.bms", ScenePiece::Kind::kBigBoss, 35, "", kBossInfo, 60, 10, "l_boss-10"},
+    {"l_boss.bms", ScenePiece::Kind::kBigBoss, 35, "", kBossInfo, 60, 11, "l_boss-11"},
+    {"l_boss.bms", ScenePiece::Kind::kBigBoss, 35, "", kBossInfo, 60, 12, "l_boss-12"},
+    {"l_boss.bms", ScenePiece::Kind::kBigBoss, 35, "", kBossInfo, 60, 13, "l_boss-13"},
+    {"l_boss.bms", ScenePiece::Kind::kBigBossNear, 35, "", kBossInfo, 60, 4, "l_boss-4-near"},
+    {"l_boss.bms", ScenePiece::Kind::kBigBossNear, 35, "", kBossInfo, 60, 11, "l_boss-11-near"},
 };
+
+// The most pieces that driver/pikmin2.c's table holds (MAX_PIECES).
+constexpr std::size_t kMaxPikmin2Pieces = 96;
+static_assert(std::size(kPikmin2Pieces) <= kMaxPikmin2Pieces);
 
 // Pikmin 2 (USA). Its sound library is a later JAudio1, under the game's sound layer (PSSystem, PSGame and PSM). The
 // start-up archive is an AAF. The game starts its music by file name, through the objects of its sound scenes
 // (driver/pikmin2.c). The sound table lists its effects, and PSound.asn names them. Its one wave system has 49 groups,
 // one .aw each: wScene_0.aw holds most effects and stays loaded, and a scene loads at most two others. The parameters
-// follow driver/pikmin2.c's Params from frame_retraces to rappas. The table of pieces (kPikmin2Pieces) follows them.
+// follow driver/pikmin2.c's Params from frame_retraces to big_boss. The table of pieces (kPikmin2Pieces) follows them.
 const GameProfile kPikmin2Usa = {
     .name = "Pikmin 2",
     .game_id = "GPVE01",
@@ -1390,6 +1956,8 @@ const GameProfile kPikmin2Usa = {
             0x80338670,           // play_system_se
             0x80515b10,           // play_data
             0x80514bc0,           // rappas
+            0x8009c6a4,           // get_random: JASPlayer::getRandomS32
+            0x80516310,           // big_boss
         },
     .scene_pieces = kPikmin2Pieces,
     .watch =
@@ -1415,6 +1983,15 @@ const GameProfile kPikmin2Usa = {
             .effect_slot_offset = 0x14,     // JAISound's track number, after its JSULink and its vtable
             .parent_offset = 0x2f8,
             .children_offset = 0x2fc,
+        },
+    // Three effects draw a random number from JASPlayer::getRandomS32 (0x8009c6a4) and end at once on some draws. From
+    // the generator's first state, the first draw ends all three. Each one lists the draws before the first draw on
+    // which it plays. Each plays the same sound on every draw that doesn't end it.
+    .random_starts =
+        {
+            {0x5829, 3}, // PSSE_EN_FROG_VOICE
+            {0x58fc, 1}, // PSSE_EN_OOPAN_BOUND2
+            {0x58fe, 1}, // PSSE_EN_OOPAN_VOICE_DOWN
         },
 };
 
@@ -1846,6 +2423,78 @@ const GameProfile kDoubutsuNoMoriPlusJpn = {
     .n64_flow_returns = {0x800284a8, 0x80027618, 0x80026614},
 };
 
+// Doubutsu no Mori+ (Japan), disc version 0. The disc's link map of main.dol (static.map) gives each address. Of the
+// 805 functions of the game's sound code, 794 are disc version 1's code at other addresses. The driver calls two of the
+// others. Na_GameFrame also counts down a byte that the game sets elsewhere. Na_MDPlayerPos lacks disc version 1's
+// test of a flag. The sequences are disc version 1's, but for the release of one envelope in the effects sequence.
+// Sequence 240 differs too. No piece plays it.
+const GameProfile kDoubutsuNoMoriPlusJpnV0 = {
+    .name = "Doubutsu no Mori+",
+    .game_id = "GAFJ01",
+    .dol_sha1 = "afb54e84f33c77165b3b7672ab098b88bbdefd09",
+    .main = 0x80005dec,
+    .driver = Driver::kAnimalCrossing,
+    .library = SoundLibrary::kNintendo64,
+    .sound_archive = "audiorom.img",
+    .params =
+        AnimalCrossingParams{
+            .frame_retraces = 2,
+            .aram_block_count = 3,
+            .start_up_sound = 0x800bb5e0,  // nintendo_hi_0
+            .start_up_sound_size = 0x9900, // as the game's main gives it
+            .players = 0x80211458,         // AG + 0x3780
+            .player_size = 0x160,
+            .music_player = 0x80217070,        // sou_now_bgm_handle
+            .music_request = 0x802176c9,       // sou_bgm_call_buffer
+            .os_init = 0x8007a2f0,             // OSInit
+            .os_init_alarm = 0x8007aa48,       // OSInitAlarm
+            .dvd_init = 0x80086b78,            // DVDInit
+            .vi_init = 0x80089bf8,             // VIInit
+            .vi_wait_for_retrace = 0x8008a070, // VIWaitForRetrace
+            .ar_init = 0x8008de10,             // ARInit
+            .arq_init = 0x8008f028,            // ARQInit
+            .init_audio = 0x8000e300,          // Na_InitAudio
+            .game_frame = 0x8000e40c,          // Na_GameFrame
+            .check_boot = 0x80011a78,          // Na_CheckNeosBoot
+            .set_weather = 0x8000eab0,         // Na_Tenki
+            .start_music = 0x8000eac8,         // Na_BgmStart
+            .first_disc = 128,                 // from Sou_SpecialRoutine06
+            .last_disc = 182,
+            .disc_stereo = 9,
+            .place_stereo = 0x8001057c, // Na_MDPlayerPos
+            .set_room = 0x80011a98,     // Na_Museum
+            .effects_player = 0,
+            .player_channels = 0x38,
+            .effect_slots = 0x800e4390, // sou_trg_se
+            .effect_slot_count = 6,
+            .effect_slot_size = 0x20,
+            .start_effect = 0x8000bf84, // Sou_TrgStart
+            .music_table = 0x800a60c8,  // SEQ_TABLE
+            .first_song = 92,
+            .last_song = 111,
+            .first_second_part = 112,
+            .last_second_part = 121,
+            .empty_piece = 126, // its sequence (241) ends at once
+            .player_ports = 0x158,
+        }
+            .Words(),
+    .library_name = "DoubutsuNoMoriPlus",
+    .patches = {{0x8000b7d0, 0x4e800020},  // __OK: blr (see Animal Crossing's profile)
+                {0x8000c0f0, 0x7f83e378},  // Sou_TrgStart: mr r3, r28 in place of the add of Nap_GetRandom() & 1
+                {0x8000c100, 0x7f83e378}}, // Sou_TrgStart: mr r3, r28 in place of the add of Nap_GetRandom() & 3
+    .music_table = 0x800a60c8,             // SEQ_TABLE
+    .sequence_table = 0x800c4ee0,          // AudioseqHeaderStart
+    .n64_effects = 236,
+    .n64_effect_banks = 0x188,
+    .n64_players = 0x80211458,
+    .n64_player_count = 5,
+    .n64_player_size = 0x160,
+    .n64_read_byte = 0x80026080,                               // Nas_ReadByteData
+    .n64_command_reads = {0x800282b4, 0x800273c8, 0x80026410}, // in Nas_GroupSeq, Nas_SubSeq and __Command_Seq
+    .n64_flow = 0x80025580,                                    // Common_Com
+    .n64_flow_returns = {0x800282e8, 0x80027458, 0x80026454},
+};
+
 // Doubutsu no Mori e+ (Japan), disc version 1. The sound library is a later build of the one in Animal Crossing. The
 // build numbers the pieces and their sequences with 16 bits. SEQ_TABLE holds 384 entries of 16 bits, and the table of
 // sequences holds 353 sequences. Na_InitAudio takes the start-up screen's sound, the sound's size and the ARAM for the
@@ -1933,6 +2582,87 @@ const GameProfile kDoubutsuNoMoriEPlusJpn = {
     .n64_player_fields = {0x7c, 0x1c, 0x12},
 };
 
+// Doubutsu no Mori e+ (Japan), disc version 0. The disc's link map of main.dol (static.map) gives each address. The
+// disc holds disc version 1's audiorom.img. The game's sound driver (game64.c) and its start-up code are disc version
+// 1's code at other addresses, with the same constants. Their data differs only in two words of the start-up voice's
+// wave table. Of the 873 functions of the sound library, 771 are disc version 1's code. Nas_GroupSeq and Nas_SubSeq
+// are among the others. They differ only in their registers and in the order of a few instructions. Their reads of a
+// command and their returns from Common_Com lie at disc version 1's offsets.
+const GameProfile kDoubutsuNoMoriEPlusJpnV0 = {
+    .name = "Doubutsu no Mori e+",
+    .game_id = "GAEJ01",
+    .dol_sha1 = "25d65de224306e90b12e89613c5658e4214c63b2",
+    .main = 0x800064e8,
+    .driver = Driver::kAnimalCrossing,
+    .library = SoundLibrary::kNintendo64,
+    .sound_archive = "audiorom.img",
+    .params =
+        AnimalCrossingParams{
+            .frame_retraces = 2,
+            .aram_block_count = 3,
+            .start_up_sound = 0x800e6e00,  // nintendo_hi_0
+            .start_up_sound_size = 0x66a0, // as the game's sound_initial gives it
+            .players = 0x8028aee0,         // AG + 0x3800
+            .player_size = 0x164,
+            .music_player = 0x80290b22,        // sou_now_bgm_handle
+            .music_request = 0x802913e9,       // sou_bgm_call_buffer
+            .os_init = 0x8009ddf0,             // OSInit
+            .os_init_alarm = 0x8009e628,       // OSInitAlarm
+            .dvd_init = 0x800a9c34,            // DVDInit
+            .vi_init = 0x800ad208,             // VIInit
+            .vi_wait_for_retrace = 0x800ad6b8, // VIWaitForRetrace
+            .ar_init = 0x800b196c,             // ARInit
+            .arq_init = 0x800b347c,            // ARQInit
+            .init_audio = 0x8001556c,          // Na_InitAudio
+            .game_frame = 0x80015604,          // Na_GameFrame
+            .check_boot = 0x80019420,          // Na_CheckNeosBoot
+            .set_weather = 0x80015a64,         // Na_Tenki
+            .start_music = 0x80015a7c,         // Na_BgmStart
+            .first_disc = 208,                 // from Sou_Na_BgmStart
+            .last_disc = 367,
+            .disc_stereo = 9,
+            .place_stereo = 0x80017f34, // Na_MDPlayerPos
+            .set_room = 0x80019450,     // Na_Museum
+            .effects_player = 0,
+            .player_channels = 0x3c,
+            .effect_slots = 0x80110550, // sou_trg_se
+            .effect_slot_count = 6,
+            .effect_slot_size = 0x20,
+            .start_effect = 0x80010fcc, // Sou_TrgStart
+            .music_table = 0x800d04c0,  // SEQ_TABLE
+            .first_song = 92,
+            .last_song = 111,
+            .first_second_part = 112,
+            .last_second_part = 121,
+            .empty_piece = 90, // its sequence (87) ends after a tick, without a sound
+            .player_ports = 0x15c,
+            .aram_size = 0x81b640, // as the game's main works it out
+            .wide_numbers = 1,
+            .set_island = 0x800195a8, // Na_PrivateIslandStatus
+        }
+            .Words(),
+    .library_name = "DoubutsuNoMoriEPlus",
+    .patches = {{0x80010380, 0x4e800020},  // __OK: blr (see Animal Crossing's profile)
+                {0x80011184, 0x7c601b78},  // Sou_TrgStart: mr r0, r3 in place of the add of Nap_GetRandom() & 1
+                {0x800111a0, 0x7c601b78}}, // Sou_TrgStart: mr r0, r3 in place of the add of Nap_GetRandom() & 3
+    .music_table = 0x800d04c0,             // SEQ_TABLE
+    .sequence_table = 0x800f0700,          // AudioseqHeaderStart
+    .n64_pieces = 384,
+    .n64_wide_numbers = true,
+    .n64_island_piece = 376,
+    .n64_effect_numbers = {83, 87}, // Sou_BgmStart plays them through Na_SysTrgStart
+    .n64_effects = 346,
+    .n64_effect_banks = 0x188,
+    .n64_players = 0x8028aee0,
+    .n64_player_count = 5,
+    .n64_player_size = 0x164,
+    .n64_read_byte = 0x8002db80,                               // Nas_ReadByteData
+    .n64_command_reads = {0x8002fd1c, 0x8002ee4c, 0x8002def0}, // in Nas_GroupSeq, Nas_SubSeq and __Command_Seq
+    .n64_flow = 0x8002cfe0,                                    // Common_Com
+    .n64_flow_returns = {0x8002fd50, 0x8002eee0, 0x8002df34},
+    .n64_player_fields = {0x7c, 0x1c, 0x12},
+};
+
 // The Pokémon Colosseum Bonus Disc's download program (USA). The Bonus Disc's menu runs it from a TGC,
 // tgc/pokedownload.tgc. The program sends Jirachi to a Game Boy Advance. Its sound library is HAL Laboratory's: a
 // synthesizer on the SDK's AX, and a driver above it that runs a script for each effect. The program streams its
@@ -2002,6 +2732,7 @@ struct MusyXParams
     std::array<uint32_t, 2> aux_callback = {}, aux_user = {}, aux_prepare = {}, aux_midi = {};
     uint32_t snd_volume = 0, snd_fx_ctrl = 0, snd_fx_ctrl14 = 0, group_volume = 0;
     uint32_t snd_master_volume = 0, master_volume = 0, master_music = 0, master_fx = 0;
+    uint32_t song_fade_in = 0, volume_group = 0xff;
 };
 
 std::vector<uint32_t> MusyXParams::Words() const
@@ -2056,7 +2787,9 @@ std::vector<uint32_t> MusyXParams::Words() const
             snd_master_volume,
             master_volume,
             master_music,
-            master_fx};
+            master_fx,
+            song_fade_in,
+            volume_group};
 }
 
 // The places of some of the parameters among the words (kMusyXAuxCallbacks). Words() lists the fields in their order.
@@ -2067,6 +2800,7 @@ static_assert(offsetof(MusyXParams, aux_user) == kMusyXAuxBlocks * 4);
 static_assert(offsetof(MusyXParams, aux_prepare) == kMusyXAuxPreparations * 4);
 static_assert(offsetof(MusyXParams, group_volume) == kMusyXGroupVolume * 4);
 static_assert(offsetof(MusyXParams, snd_master_volume) == kMusyXMasterVolume * 4);
+static_assert(offsetof(MusyXParams, song_fade_in) == kMusyXSongFadeIn * 4);
 
 // Metroid Prime (USA, disc version 2). Its sound library is MusyX 2.0, under Retro Studios' audio system. Its music
 // streams from the disc, apart from the four songs in MidiData.pak.
@@ -2233,6 +2967,11 @@ const GameProfile kTalesOfSymphoniaUsa = {
 // call gives the volume groups of the songs and the effects their full volume. A call of sndMasterVolume(127, 100, 1,
 // 1) follows. MusyX's master volumes start at 127. The call leaves them there.
 //
+// The game starts every song through 0x8000B390, from a trigger in Music.bin. The function starts the song through
+// sndSeqPlayEx at a volume of 0 (0x8000B470 to 0x8000B49C). It then calls sndSeqVolume(the trigger's volume, 500, the
+// song, 0) at 0x8000B4B4. MusyX raises the song's volume over 500 ms. A rip does the same (song_fade_in). The trigger's
+// speed of 256 is MusyX's normal speed (seqStartPlay, 0x8026D054 and 0x8026D0E4).
+//
 // The game starts an effect through 0x8000C4D8. That function calls sndFXStartEx with the volume of the effect's row in
 // Sfx.bin, a pan of 0x40 and studio 0. In some places of the game's world, 0x8000BB64 sets a level for the effects'
 // sends to aux A. 0x8000C4D8 then sends each effect there with controller 0x5B. Everywhere else, and in a rip, the
@@ -2284,6 +3023,7 @@ const GameProfile kStarFoxAdventuresUsa = {
             .aux_prepare = {0x80285380, 0},  // sndAuxCallbackPrepareReverbSTD for aux A
             .aux_midi = {0xff, 0xff},        // no MIDI channel controls aux A or aux B
             .snd_volume = 0x802730d4,
+            .song_fade_in = 500, // every song (0x8000B4B4)
         }
             .Words(),
     .library_name = "StarFoxAdventures",
@@ -2509,6 +3249,132 @@ const GameProfile kColosseumUsa = {
                      .loop_handler = 0x801529a4},
 };
 
+// The parameters of driver/musyx_song_controls.c: driver/musyx.c's, then sndSeqCntrl, OSCreateAlarm and OSSetAlarm,
+// and the time from a song's start to the settings of its controllers in ticks of the time base.
+struct MusyXSongControlParams
+{
+    // The words in the order of the driver's parameter block.
+    std::vector<uint32_t> Words() const;
+
+    MusyXParams musyx;
+    uint32_t snd_seq_cntrl = 0, os_create_alarm = 0, os_set_alarm = 0, song_control_delay = 0;
+};
+
+std::vector<uint32_t> MusyXSongControlParams::Words() const
+{
+    std::vector<uint32_t> words = musyx.Words();
+    words.insert(words.end(), {snd_seq_cntrl, os_create_alarm, os_set_alarm, song_control_delay});
+
+    return words;
+}
+
+// Resident Evil (USA, disc 1). The game's sound library is an early build of MusyX under Capcom's sound driver
+// (0x800671B8 takes the driver's commands). The game's sound set-up (0x80063990) takes the driver's command 2
+// (0x80066458): 16 blocks of ARAM, 8 MiB of ARAM for MusyX, 48 voices, 32 for music and 32 for effects, with one
+// studio. The game allocates the ARAM's blocks from its heap. A rip puts them in the driver's state at 0x80225080. No
+// code of a rip uses that state. The output is in stereo unless the console is set to mono (0x80063888). Command 45
+// (0x800662C4) gives studio 0's aux A MusyX's high-quality reverb of 4.2 s and aux B its standard reverb of 0.9 s. It
+// ends with sndVolume(100, 0, 0xFF). A song's start gives the song's group its full volume. That call therefore reaches
+// only effects. The game's options start at 100 (0x8001ADAC). The music's option gives sndMasterVolume(110, time, 1, 0)
+// (0x800620B4, 0x80066064).
+//
+// A room's table names up to four songs that play at once (0x80061B1C). The code of a room or an event changes the
+// levels of channels through 0x80061E6C, above all in the ambience of songs 0x6E to 0x7C. A rip plays each song alone.
+// The rips of songs 0x74 and 0x7A that GatherResidentEvilSnd lists as mixes play the levels that rooms give their
+// channels. driver/musyx_song_controls.c sets them through sndSeqCntrl (0x80155BB8), as the game's driver does. An OS
+// alarm (OSCreateAlarm at 0x801117AC, OSSetAlarm at 0x80111A08) sets them 250 ms after the song's start: after the
+// song's first pattern, whose controllers end at tick 64 (83 ms at sg7a's 120 beats a minute, 104 ms at sg74's 96), and
+// before its first note, at tick 496 (646 ms and 807 ms). Song 0x7A starts with all seven channels at level 0. The rip
+// of the file's mix makes no sound, and the ripper leaves it out.
+//
+// The length analysis reads the first of MusyX's song instances, at 0x80238868. Resident Evil Zero's analysis does the
+// same. It reads MusyX's 48 voices for an effect.
+const GameProfile kResidentEvilUsa = {
+    .name = "Resident Evil",
+    .game_id = "GBIE08",
+    .dol_sha1 = "7e514a94826c672605a4f484367ec511fd27933f",
+    .main = 0x8001aeac,
+    .driver = Driver::kMusyXSongControls,
+    .library = SoundLibrary::kMusyX,
+    .params =
+        MusyXSongControlParams{
+            .musyx =
+                MusyXParams{
+                    .os_sleep_thread = 0x80116de0,
+                    .os_get_arena_lo = 0x801121b0,
+                    .os_get_arena_hi = 0x801121a8,
+                    .startup = {0x80119a84}, // DVDInit
+                    .dvd_open = 0x80119428,
+                    .dvd_read_async_prio = 0x80119738,
+                    .dvd_get_command_block_status = 0x8011bddc,
+                    .dvd_close = 0x801194f0,
+                    .ar_init = 0x80120f20,
+                    .aram_blocks = 0x80225080,
+                    .aram_block_count = 16,
+                    .arq_init = 0x80121b54,
+                    .ai_init = 0x80120858,
+                    .snd_set_hooks = 0x8016937c,
+                    .snd_init = 0x801664fc,
+                    .init_form = 1, // sndInit takes the number of studios
+                    .voices = 48,
+                    .music = 32,
+                    .sfx = 32,
+                    .studios = 1,
+                    .init_flags = 0, // SND_FLAGS_DEFAULT
+                    .aram_size = 0x800000,
+                    .snd_output_mode = 0x80156118,
+                    .output_mode = 1, // SND_OUTPUTMODE_STEREO
+                    .snd_push_group = 0x80160944,
+                    .snd_seq_play = 0x80160d34, // sndSeqPlayEx
+                    .seq_play_form = 1,         // sndSeqPlayEx takes a studio
+                    .snd_seq_volume = 0x80155a48,
+                    .snd_fx_start_ex = 0x80155dc0,
+                    .snd_set_aux_processing_callbacks = 0x80156198,
+                    .aux_callback = {0x8016a914, 0x8016a0b0}, // sndAuxCallbackReverbHI, sndAuxCallbackReverbSTD
+                    .aux_user = {0x8022737c, 0x80227228},     // their reverbs
+                    .aux_prepare = {0x8016a970, 0x8016a10c},  // sndAuxCallbackPrepareReverbHI and STD
+                    .aux_midi = {0xff, 0xff},                 // no MIDI channel controls aux A or aux B
+                    .snd_volume = 0x80156024,
+                    .group_volume = 100,
+                    .snd_master_volume = 0x80156084,
+                    .master_volume = 110,
+                    .master_music = 1,
+                    .master_fx = 0,
+                },
+            .snd_seq_cntrl = 0x80155bb8,
+            .os_create_alarm = 0x801117ac,
+            .os_set_alarm = 0x80111a08,
+            .song_control_delay = 10125000, // 250 ms at 40.5 MHz. The time base counts the bus clock / 4.
+        }
+            .Words(),
+    .library_name = "ResidentEvil",
+    .musyx_files = MusyXFiles::kResidentEvilSnd,
+    .reverbs = {{{.block = 0x8022737c,
+                  .coloration = 0.5f,
+                  .mix = 0.8f,
+                  .time = 4.2f,
+                  .damping = 0.5f,
+                  .pre_delay = 0.0f,
+                  .high = true,
+                  .crosstalk = 0.0f},
+                 {.block = 0x80227228,
+                  .coloration = 0.5f,
+                  .mix = 0.8f,
+                  .time = 0.9f,
+                  .damping = 0.5f,
+                  .pre_delay = 0.03f}}},
+    .song_lists = {0x80260f3c, 0x80260f38}, // seqActiveRoot and seqPausedRoot
+    .section_loops = 0x80239d84,            // in seqInstance
+    .section_loop_size = 0x38,
+    .musyx_voices = {.count = 48,
+                     .synth = 0x80260f68, // synthVoice
+                     .synth_size = 0x404,
+                     .dsp = 0x80261044, // dspVoice
+                     .dsp_size = 0xf4,
+                     .state_offset = 0xec,
+                     .loop_handler = 0x8015a34c}, // mcmdLoop
+};
+
 // Resident Evil Zero (USA). Both discs hold the same code. Each disc holds the songs of its part of the game, and the
 // songs that both parts play. A rip's library therefore takes the disc's number. The game's sound library is MusyX,
 // under Capcom's sound layer.
@@ -2609,6 +3475,8 @@ const GameProfile kResidentEvilZeroUsa = {
                      .dsp_size = 0xf4,
                      .state_offset = 0xec,
                      .loop_handler = 0x801d553c},
+    .musyx_effects = 0x80258be4, // the cutscenes' effects that the game plays as songs (see GatherResidentEvil)
+    .musyx_effect_count = 135,   // the cutscenes 0 to 134 (the next table starts at 0x80258E00)
 };
 
 // Nintendo Puzzle Collection (Japan). Its sound library is MusyX 2.0. The disc holds a menu and three games: Dr. Mario,
@@ -3110,6 +3978,122 @@ const GameProfile kMarioParty4Usa = {
     .musyx_effect_bit = 0x8000,
 };
 
+// Mario Party 4 (USA, disc version 0). Its main.dol differs from disc version 1's only in three of the debugger's
+// functions (DBRead, DBQueryData and DBInitComm). Every other function and variable keeps its address. The options
+// module, the messages and the sound files are disc version 1's byte for byte.
+const GameProfile kMarioParty4UsaRev0 = []
+{
+    GameProfile profile = kMarioParty4Usa;
+    profile.dol_sha1 = "ff8d894776d37167e454ae3f0c9e644407c1e6b1";
+    return profile;
+}();
+
+// Mario Party 4's European release, disc versions 0 and 2. Both hold the same main.dol and the same sound files. The
+// sound manager, MusyX and the game's audio set-up are the American code at other addresses. The options module holds
+// the American sound test 0x68 bytes lower. The English messages give the American names, apart from five: four call
+// Koopa Kid Mini Bowser, and one has an accent. The sound manager's file is the American one byte for byte.
+const GameProfile kMarioParty4Eur = {
+    .name = "Mario Party 4",
+    .game_id = "GMPP01",
+    .dol_sha1 = "65ef91650e9201047f50a3c39c7693a21fff2b29",
+    .main = 0x800057c0,
+    .driver = Driver::kMarioParty,
+    .library = SoundLibrary::kMusyX,
+    .params =
+        {
+            0x800bab68, // os_sleep_thread: OSSleepThread
+            0x800b5cc4, // os_get_arena_lo: OSGetArenaLo
+            0x800b5cbc, // os_get_arena_hi: OSGetArenaHi
+            0x800be0a4, // dvd_init: DVDInit
+            0x80117084, // msm_sys_init: msmSysInit
+            0x8012e7d8, // msm_path: "/sound/mpgcsnd.msm"
+            0x8012e7eb, // pdt_path: "/sound/mpgcstr.pdt"
+            0x13fc00,   // heap_size: the sound manager's heap
+            0x808000,   // aram_end: the end of the sound manager's ARAM
+            0x80115dd0, // msm_sys_set_output_mode: msmSysSetOutputMode
+            2,          // output_mode: SND_OUTPUTMODE_SURROUND
+            0x80115fbc, // msm_sys_get_samp_size: msmSysGetSampSize
+            0x80116dec, // msm_sys_load_group: msmSysLoadGroup
+            0x80116648, // msm_sys_load_group_set: msmSysLoadGroupSet
+            0x80118414, // msm_mus_play: msmMusPlay
+            0x801198c4, // msm_se_play: msmSePlay
+        },
+    .bank_files = {"sound/mpgcsnd.msm"},
+    .library_name = "MarioParty4",
+    .stream_file = "sound/mpgcstr.pdt",
+    .sound_test_module = "dll/option.rel",
+    .sound_test = 0xabf0,
+    .sound_test_count = 140,
+    .sound_test_voices = 0xb4b0,
+    .sound_test_voice_count = 123,
+    .messages = "mess/board_e.dat",
+    .song_lists = {0x801f1b64, 0x801f1b60}, // seqActiveRoot and seqPausedRoot
+    .section_loops = 0x801cb5b4,            // in seqInstance
+    .section_loop_size = 0x38,
+    .musyx_voices = {.count = 50,
+                     .synth = 0x801f1b98, // synthVoice
+                     .synth_size = 0x404,
+                     .dsp = 0x801f1c74, // dspVoice
+                     .dsp_size = 0xf4,
+                     .state_offset = 0xec,
+                     .loop_handler = 0x80100038}, // mcmdLoop
+    .musyx_effect_bit = 0x8000,
+};
+
+// Mario Party 4's Japanese release. The sound manager, MusyX and the game's audio set-up are the American code at other
+// addresses. The options module holds the American sound test at the American offsets. The Japanese messages name the
+// sounds in the game's Japanese font. The sound manager's file leaves out two macros and two samples of group 0x5A,
+// which holds se-2066 to se-2071. Its se-2068 plays se-2067's macro. Its se-2069 plays the macro of the game's silent
+// effects. The other groups hold the American samples.
+const GameProfile kMarioParty4Jpn = {
+    .name = "Mario Party 4",
+    .game_id = "GMPJ01",
+    .dol_sha1 = "abe951fa239e7cb5de67e1ac091cfbc14010d6e0",
+    .main = 0x800057c0,
+    .driver = Driver::kMarioParty,
+    .library = SoundLibrary::kMusyX,
+    .params =
+        {
+            0x800ba7cc, // os_sleep_thread: OSSleepThread
+            0x800b5994, // os_get_arena_lo: OSGetArenaLo
+            0x800b598c, // os_get_arena_hi: OSGetArenaHi
+            0x800bdd08, // dvd_init: DVDInit
+            0x80116e44, // msm_sys_init: msmSysInit
+            0x8012e598, // msm_path: "/sound/mpgcsnd.msm"
+            0x8012e5ab, // pdt_path: "/sound/mpgcstr.pdt"
+            0x13fc00,   // heap_size: the sound manager's heap
+            0x808000,   // aram_end: the end of the sound manager's ARAM
+            0x80115b90, // msm_sys_set_output_mode: msmSysSetOutputMode
+            2,          // output_mode: SND_OUTPUTMODE_SURROUND
+            0x80115d7c, // msm_sys_get_samp_size: msmSysGetSampSize
+            0x80116bac, // msm_sys_load_group: msmSysLoadGroup
+            0x80116408, // msm_sys_load_group_set: msmSysLoadGroupSet
+            0x801181d4, // msm_mus_play: msmMusPlay
+            0x80119684, // msm_se_play: msmSePlay
+        },
+    .bank_files = {"sound/mpgcsnd.msm"},
+    .library_name = "MarioParty4",
+    .stream_file = "sound/mpgcstr.pdt",
+    .sound_test_module = "dll/option.rel",
+    .sound_test = 0xac58,
+    .sound_test_count = 140,
+    .sound_test_voices = 0xb518,
+    .sound_test_voice_count = 123,
+    .messages = "mess/board.dat",
+    .japanese_messages = true,
+    .song_lists = {0x801d4464, 0x801d4460}, // seqActiveRoot and seqPausedRoot
+    .section_loops = 0x801adeb4,            // in seqInstance
+    .section_loop_size = 0x38,
+    .musyx_voices = {.count = 50,
+                     .synth = 0x801d4498, // synthVoice
+                     .synth_size = 0x404,
+                     .dsp = 0x801d4574, // dspVoice
+                     .dsp_size = 0xf4,
+                     .state_offset = 0xec,
+                     .loop_handler = 0x800ffdf8}, // mcmdLoop
+    .musyx_effect_bit = 0x8000,
+};
+
 // The NDDEMO tech demo. Its disc ID is 00\0E01: a game code of two zeros and a NUL, then E, and the maker code 01. Its
 // disc header leaves out the GameCube's magic word. Its sound library is an early MusyX. That library's sndInit takes
 // no number of studios.
@@ -3200,8 +4184,12 @@ const GameProfile kNdDemoDisc = {
 
 const std::vector<GameProfile> kProfiles = {kFourSwordsUsa,
                                             kFourSwordsJpn,
+                                            kFourSwordsEur,
                                             kTwilightPrincessUsa,
+                                            kTwilightPrincessEur,
+                                            kTwilightPrincessJpn,
                                             kWindWakerUsa,
+                                            kWindWakerJpn,
                                             kMarioGolfUsa,
                                             kMarioPowerTennisUsa,
                                             kWarioWareUsa,
@@ -3216,7 +4204,9 @@ const std::vector<GameProfile> kProfiles = {kFourSwordsUsa,
                                             kCrystalChroniclesUsa,
                                             kAnimalCrossingUsa,
                                             kDoubutsuNoMoriPlusJpn,
+                                            kDoubutsuNoMoriPlusJpnV0,
                                             kDoubutsuNoMoriEPlusJpn,
+                                            kDoubutsuNoMoriEPlusJpnV0,
                                             kColosseumBonusUsa,
                                             kMetroidPrimeUsa,
                                             kTalesOfSymphoniaUsa,
@@ -3224,11 +4214,15 @@ const std::vector<GameProfile> kProfiles = {kFourSwordsUsa,
                                             kRogueLeaderUsa,
                                             kColosseumUsa,
                                             kResidentEvilZeroUsa,
+                                            kResidentEvilUsa,
                                             kMetroidPrime2Usa,
                                             kPaperMarioUsa,
                                             kRebelStrikeUsa,
                                             kPokemonChannelUsa,
                                             kMarioParty4Usa,
+                                            kMarioParty4UsaRev0,
+                                            kMarioParty4Eur,
+                                            kMarioParty4Jpn,
                                             kPuzzleCollectionJpn,
                                             kNdDemoDisc};
 

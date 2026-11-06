@@ -19,8 +19,9 @@
  *      The game starts LuigiSings through a function of its own instead. That function reads the game's state: Luigi's
  *      health, the room's lights, the room and the room's sound information. It then picks the tracks that play and
  *      sets the piece's tempo. A sound ID with a state in bits 16 to 23 gives the game that state, then calls that
- *      function. The function puts the piece's JAISound in a word of the game's, and the driver copies that word to the
- *      sound's handle once a frame.
+ *      function. A state in which Luigi is shrunk then gets the game's call that raises the tune by an octave. The
+ *      function puts the piece's JAISound in a word of the game's, and the driver copies that word to the sound's handle
+ *      once a frame.
  * Then the game's sound frame runs once a frame, forever. A step that fails stops the driver with its number in the
  * status word (step 1 is the driver's check of its parameter block). `driver_params.status` reports the driver's
  * progress to the player (see docs/gcsf.md).
@@ -38,7 +39,7 @@
 #define WAVES_FOR_SCENE 2u
 
 /* The most states of LuigiSings in the profile's table. */
-#define MAX_STATES 16u
+#define MAX_STATES 24u
 
 /* Where a sound ID gives a state of LuigiSings, from 1. A music ID uses only bit 31 and its low 16 bits. */
 #define STATE_SHIFT 16u
@@ -51,6 +52,7 @@ struct State {
     u32 room;       /* the room's number */
     u32 room_sound; /* the room's sound information: its sound_echo_parameter, sound_room_size from bit 6 and
                        sound_room_code from bit 8 */
+    u32 shrunk;     /* 1 if Luigi is shrunk, or 0 */
 };
 
 struct Params {
@@ -97,6 +99,8 @@ struct Params {
     u32 set_room_lights; /* the game's call that says whether the room's lights are on: (u8) */
     u32 room;            /* the game's word for the room's number */
     u32 room_sound;      /* the game's word for the room's sound information */
+    u32 set_shrunk;      /* the game's call that says whether Luigi is shrunk: (u8). It sets the float that LuigiSings's
+                            frame gives the tune's track: 2.0 for 1, an octave up, and 1.0 for 0 */
     /* the game profile: LuigiSings's states */
     u32 state_count;
     struct State states[MAX_STATES];
@@ -169,7 +173,9 @@ __attribute__((noreturn)) void driver_main(void) {
 
     /* The sound, from no position, as the game starts its music. A state of LuigiSings goes to the game first. The
        game's calls set Luigi's health and the lights. The game's calls that set the room can start other sounds. The
-       driver writes the room's words itself. */
+       driver writes the room's words itself. A poison mushroom shrinks Luigi. The game then starts its effect 0x847
+       and calls the setter with 1 (0x800b13e0 to 0x800b1424). The driver makes only the call, after the start. The
+       piece's frame gives the tune the float from then on. */
     const u32 state = p->sound_id >> STATE_SHIFT & STATE_MASK;
     if (state) {
         if (!p->singing_start || state > p->state_count || state > MAX_STATES)
@@ -181,6 +187,8 @@ __attribute__((noreturn)) void driver_main(void) {
         *(volatile u32*)p->room = s->room;
         *(volatile u32*)p->room_sound = s->room_sound;
         ((fn1)p->singing_start)(p->sound_id & ~(STATE_MASK << STATE_SHIFT));
+        if (s->shrunk)
+            ((fn1)p->set_shrunk)(1);
         p->sound = word(p->music);
     } else {
         ((fn6)p->start_sound)(word(p->sound_library), p->sound_id, (u32)&p->sound, 0, 0, 4);

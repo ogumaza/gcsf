@@ -20,7 +20,8 @@
  *      pushed with sndPushGroup. Groups in a row from one set of files share the files. MusyX moves the samples to
  *      ARAM;
  *   7. the sound's kind: a song that has a file, or an effect;
- *   8. a song: its file, then sndSeqPlayEx and the song's volume;
+ *   8. a song: its file, then sndSeqPlayEx and the song's volume, with the song's fade-in for some games. With
+ *      MUSYX_SONG_CONTROLS, an OS alarm then sets the song's MIDI controllers;
  *   9. an effect: sndFXStartEx and the effect's MIDI controllers.
  * The driver's thread then sleeps for good. The sound plays from the audio and DSP interrupts. The OS's idle loop runs
  * while no thread can. A step that fails stops the driver with its number in the status word (step 1 is the driver's
@@ -40,9 +41,15 @@
  * code that only that driver runs stays under MUSYX_UPLOAD. driver/musyx.c's blob, and with it every other game's
  * rips, then stays as it was.
  *
- * Build with `driver/build.py musyx` and `driver/build.py musyx_upload` (clang). The results are committed as
- * src/rip/driver_musyx_blob.h and src/rip/driver_musyx_upload_blob.h. Building GCSF itself requires no PowerPC
- * toolchain.
+ * driver/musyx_song_controls.c builds this file with MUSYX_SONG_CONTROLS defined. That driver is for a game whose code
+ * sets the MIDI controllers of a song's channels once the song plays, such as Resident Evil's rooms. A song's entry in
+ * the catalogue can then hold controller settings too. The driver sets an OS alarm as the song starts. The alarm's
+ * handler sets each controller through sndSeqCntrl, as the game's code does. That driver's parameter block holds four
+ * more words. The code that only that driver runs stays under MUSYX_SONG_CONTROLS.
+ *
+ * Build with `driver/build.py musyx`, `driver/build.py musyx_upload` and `driver/build.py musyx_song_controls`
+ * (clang). The results are committed as src/rip/driver_musyx_blob.h, src/rip/driver_musyx_upload_blob.h and
+ * src/rip/driver_musyx_song_controls_blob.h. Building GCSF itself requires no PowerPC toolchain.
  */
 
 #include "driver.h"
@@ -71,9 +78,17 @@
 /* sndSeqPlayEx's and sndFXStartEx's failure. */
 #define INVALID_ID 0xffffffffu
 
+/* MusyX's full volume. sndSeqPlayEx starts a song at it unless its parameters give another volume. */
+#define FULL_VOLUME 127u
+
+/* The flag of SND_PLAYPARA that makes sndSeqPlayEx start the song at the volume that the parameters give. The flags are
+ * the parameters' first word. The volume's time is the half at +14, and the volume itself the byte at +16. */
+#define PLAYPARA_VOLUME 4u
+
 /* A controller setting's first word holds the controller in its low byte. This bit sends a 14-bit value through
- * sndFXCtrl14. Without it, sndFXCtrl sends a 7-bit value. */
+ * sndFXCtrl14. Without it, sndFXCtrl sends a 7-bit value. A song's setting holds the MIDI channel in bits 16 to 23. */
 #define CONTROLLER_14_BIT 0x100u
+#define CONTROLLER_CHANNEL_SHIFT 16u
 
 /* The DVD library's states of a read. */
 #define DVD_STATE_END 0
@@ -141,9 +156,9 @@ struct Params {
      * 0 for a game whose catalogue sets no controllers */
     u32 snd_fx_ctrl;
     u32 snd_fx_ctrl14;
-    /* A volume for every group after the sound's words: 0 for none. The driver then calls sndVolume(group_volume, 0,
-     * 0xff). A sound's words set it for that sound alone. Two of Nintendo Puzzle Collection's modules set their groups
-     * to 110 after the call of 127. */
+    /* A volume for the groups after the sound's words: 0 for none. The driver then calls sndVolume(group_volume, 0,
+     * volume_group). A sound's words set it for that sound alone. Two of Nintendo Puzzle Collection's modules set every
+     * group to 110 after the call of 127. */
     u32 group_volume;
     /* void sndMasterVolume(u8 volume, u16 time, u8 music, u8 fx): 0 for no call. The driver calls it after the sound's
      * words and group_volume's call, with master_volume and a time of 0. master_music and master_fx say whether the
@@ -151,11 +166,28 @@ struct Params {
      * sound's words can set the three values for that sound alone. */
     u32 snd_master_volume;
     u32 master_volume, master_music, master_fx;
+    /* A song's fade-in in ms, or 0 for none. With a fade-in, the driver starts the song at a volume of 0 through
+     * sndSeqPlayEx's parameters (fade_in_para). It then calls sndSeqVolume(volume, song_fade_in, seq, 0). MusyX then
+     * raises the song's volume over that time. Star Fox Adventures starts every song that way, over 500 ms. Resident
+     * Evil Zero's cutscenes start their songs over 133 ms. A sound's words can set it for that sound alone. */
+    u32 song_fade_in;
+    /* The volume group that group_volume's call of sndVolume sets: 0xff for every group. */
+    u32 volume_group;
 #ifdef MUSYX_UPLOAD
     /* void sndSetSampleDataUploadCallback(void* (*callback)(u32 offset, u32 bytes), u32 chunk) */
     u32 snd_set_upload_callback;
     /* void aramSyncTransferQueue(void): waits until MusyX's queue of copies to ARAM is empty */
     u32 aram_sync;
+#endif
+#ifdef MUSYX_SONG_CONTROLS
+    /* bool sndSeqCntrl(u32 seq, u8 channel, u8 controller, u8 value) */
+    u32 snd_seq_cntrl;
+    /* void OSCreateAlarm(OSAlarm*) and void OSSetAlarm(OSAlarm*, OSTime ticks, handler). The handler takes the
+     * alarm and the OSContext. */
+    u32 os_create_alarm;
+    u32 os_set_alarm;
+    /* The time from a song's start to the settings of its controllers, in ticks of the time base */
+    u32 song_control_delay;
 #endif
 };
 
@@ -173,6 +205,10 @@ static u32 hooks[2];
 
 /* A DVDFileInfo: the command block (0x30 bytes), the file's start and length, and the callback. */
 static u32 file_info[16] __attribute__((aligned(32)));
+
+/* sndSeqPlayEx's parameters (SND_PLAYPARA) for a song with a fade-in: the volume's flag, then zeros. The song then
+ * starts at a volume of 0, at once. The parameters of Star Fox Adventures and Resident Evil Zero take 32 bytes. */
+static u32 fade_in_para[8];
 
 #include "sleep.h"
 
@@ -245,6 +281,27 @@ static u32 load_file(const char* path, u32* size, u32 step) {
     *size = length;
     return data;
 }
+
+#ifdef MUSYX_SONG_CONTROLS
+/* The song's alarm (an OSAlarm takes 0x28 bytes), its sequence and its controller settings. */
+static u32 control_alarm[10] __attribute__((aligned(8)));
+static u32 control_seq;
+static const u8* controls;
+static u32 controls_left;
+
+/* The alarm's handler. It sets the song's controllers through sndSeqCntrl. The OS runs it with external interrupts
+ * off. No audio frame plays between two settings. */
+static void set_song_controls(u32 alarm, u32 context) {
+    (void)alarm;
+    (void)context;
+    volatile struct Params* p = &driver_params;
+    for (u32 c = 0; c < controls_left; c++) {
+        const u8* control = controls + c * WRITE_SIZE;
+        const u32 word = be32(control), value = be32(control + 4);
+        ((fn4)p->snd_seq_cntrl)(control_seq, (word >> CONTROLLER_CHANNEL_SHIFT) & 0xff, word & 0xff, value & 0xff);
+    }
+}
+#endif
 
 #ifdef MUSYX_UPLOAD
 /* The bytes of each chunk that MusyX asks for. The game asks for chunks of that size too. */
@@ -321,8 +378,14 @@ __attribute__((noreturn)) void driver_main(void) {
     const u32 first_write = be16(sound + 14), write_count = be16(sound + 16), control_count = be16(sound + 18);
     if (first_group + group_count > groups || first_write + write_count + control_count > writes)
         fail(5);
+#ifdef MUSYX_SONG_CONTROLS
+    if (control_count && (kind == KIND_SONG ? !p->snd_seq_cntrl || !p->os_create_alarm || !p->os_set_alarm
+                                             : kind != KIND_EFFECT || !p->snd_fx_ctrl || !p->snd_fx_ctrl14))
+        fail(5);
+#else
     if (control_count && (kind != KIND_EFFECT || !p->snd_fx_ctrl || !p->snd_fx_ctrl14))
         fail(5);
+#endif
 
     /* The sound's words, its volumes, then the aux effects. */
     for (u32 w = 0; w < write_count; w++) {
@@ -330,7 +393,7 @@ __attribute__((noreturn)) void driver_main(void) {
         *(volatile u32*)be32(write) = be32(write + 4);
     }
     if (p->snd_volume && p->group_volume)
-        ((fn3)p->snd_volume)(p->group_volume, 0, 0xff);
+        ((fn3)p->snd_volume)(p->group_volume, 0, p->volume_group);
     if (p->snd_master_volume && (p->master_music || p->master_fx))
         ((fn4)p->snd_master_volume)(p->master_volume, 0, p->master_music, p->master_fx);
     if (p->snd_set_aux_processing_callbacks) {
@@ -389,13 +452,30 @@ __attribute__((noreturn)) void driver_main(void) {
             fail(7);
         file_path(path, song, ".sng");
         const u32 arr = load_file(path, &size, 60);
+        const u32 fade = p->song_fade_in;
+        if (fade)
+            fade_in_para[0] = PLAYPARA_VOLUME;
+        const u32 para = fade ? (u32)fade_in_para : 0;
         const u32 seq = p->seq_play_form == SEQ_PLAY_WITH_STUDIO
-                            ? ((fn5)p->snd_seq_play)(song_group, id, arr, 0, studio)
-                            : ((fn4)p->snd_seq_play)(song_group, id, arr, 0);
+                            ? ((fn5)p->snd_seq_play)(song_group, id, arr, para, studio)
+                            : ((fn4)p->snd_seq_play)(song_group, id, arr, para);
         if (seq == INVALID_ID)
             fail(8);
-        if (volume != DEFAULT_VOLUME)
+        if (fade)
+            ((fn4)p->snd_seq_volume)(volume == DEFAULT_VOLUME ? FULL_VOLUME : volume, fade, seq, 0);
+        else if (volume != DEFAULT_VOLUME)
             ((fn4)p->snd_seq_volume)(volume, 0, seq, 0);
+#ifdef MUSYX_SONG_CONTROLS
+        /* The song's first events can set its controllers. The alarm comes after them. */
+        if (control_count) {
+            control_seq = seq;
+            controls = catalogue + writes_at + (first_write + write_count) * WRITE_SIZE;
+            controls_left = control_count;
+            ((fn1)p->os_create_alarm)((u32)control_alarm);
+            /* OSTime is 64 bits wide. It takes r5 and r6, and the handler r7. */
+            ((fn5)p->os_set_alarm)((u32)control_alarm, 0, 0, p->song_control_delay, (u32)set_song_controls);
+        }
+#endif
     } else if (kind == KIND_EFFECT) {
         /* No audio frame runs between the effect's start and its controllers' settings. */
         const u32 msr = disable_interrupts();

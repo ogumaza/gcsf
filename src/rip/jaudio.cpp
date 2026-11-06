@@ -59,8 +59,9 @@ const ScenePiece* PieceOf(const GameProfile& profile, uint32_t id)
     return &profile.scene_pieces[index];
 }
 
-// The sounds of the profile's scene pieces, each named by its file in the sequence archive, without the extension. The
-// archive may be compressed with Yaz0. Throws xsflib::FormatError if the archive is damaged or lacks a piece's file.
+// The sounds of the profile's scene pieces. A piece is named by its file in the sequence archive, without the
+// extension, and a variant by its label. The archive may be compressed with Yaz0. Throws xsflib::FormatError if the
+// archive is damaged or lacks a piece's file.
 std::vector<jaudio::SoundEntry> PieceSounds(const GameProfile& profile, const std::vector<uint8_t>& sequence_archive)
 {
     std::vector<uint8_t> decoded;
@@ -80,7 +81,7 @@ std::vector<jaudio::SoundEntry> PieceSounds(const GameProfile& profile, const st
         }
 
         jaudio::SoundEntry sound;
-        sound.name = name.substr(0, name.rfind('.'));
+        sound.name = *piece.label ? std::string_view(piece.label) : name.substr(0, name.rfind('.'));
         sound.section = 0x80; // JAudio1's section of sequences
         sound.index = static_cast<uint16_t>(sounds.size());
         sound.section_name = "BGM";
@@ -1377,11 +1378,11 @@ public:
         }
 
         cpu_.Watch(std::move(pcs),
-                   [this, on_watch = std::move(on_watch)](uint32_t pc)
+                   [this, callback = std::move(on_watch)](uint32_t pc)
                    {
                        if (!skip_(pc))
                        {
-                           on_watch(pc);
+                           callback(pc);
                        }
                    });
     }

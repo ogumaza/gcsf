@@ -12,11 +12,13 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 #include "ntdlib/disc/game.h"
 #include "xsflib/binary.h"
+#include "xsflib/utf8.h"
 
 #include "gcsf/format.h"
 #include "rip/rip.h"
@@ -45,24 +47,93 @@ constexpr std::size_t kSampleOffset = 0x1c;
 // and the effect's number (driver/mario_party.c).
 constexpr uint32_t kNoGroupSet = 0xffff, kOneGroup = 0x8000, kEffectBit = 0x8000;
 
-// The character that the font draws for a byte of a message from 0x30 on. Digits and Latin letters keep their ASCII
-// codes. A few punctuation marks have other codes. A byte without a glyph here becomes an underscore.
-char Glyph(uint8_t c)
+// The character that the English font draws for a byte of a message from 0x30 on, or 0 for none. Digits and Latin
+// letters keep their ASCII codes. A few punctuation marks have other codes. The accented letters from 0x91 and 0xD1
+// are those of the European release's languages. The American release's font draws them at the same codes.
+uint32_t EnglishGlyph(uint8_t c)
 {
     if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
     {
-        return static_cast<char>(c);
+        return c;
+    }
+
+    static constexpr std::u32string_view kCapitals = U"ÄÖÜßÀÁÈÉÌÍÒÓÙÚÑ";
+    static constexpr std::u32string_view kSmall = U"àâäçèéêëîïôöûùüáìíòóúñŒœ";
+    if (c >= 0x91 && c < 0x91 + kCapitals.size())
+    {
+        return kCapitals[c - 0x91];
+    }
+
+    if (c >= 0xd1 && c < 0xd1 + kSmall.size())
+    {
+        return kSmall[c - 0xd1];
     }
 
     struct Mark
     {
         uint8_t code;
-        char mark;
+        char32_t mark;
     };
-    static constexpr Mark kMarks[] = {{0x3d, '-'}, {0x5c, '\''}, {0x7e, '&'}, {0x82, ','},
-                                      {0x85, '.'}, {0xc2, '!'},  {0xc3, '?'}};
+    static constexpr Mark kMarks[] = {{0x3d, U'-'}, {0x5c, U'\''}, {0x7e, U'&'}, {0x82, U','},
+                                      {0x85, U'.'}, {0xc2, U'!'},  {0xc3, U'?'}, {0xc4, U'⁉'},
+                                      {0xc5, U'‼'}, {0xc6, U'¿'},  {0xc7, U'¡'}, {0xfe, U'…'}};
     const auto found = std::find_if(std::begin(kMarks), std::end(kMarks), [c](const Mark& m) { return m.code == c; });
-    return found != std::end(kMarks) ? found->mark : '_';
+    return found != std::end(kMarks) ? static_cast<uint32_t>(found->mark) : 0;
+}
+
+// The character that the Japanese font draws for a byte of a message from 0x30 on, or 0 for none. The font's texture
+// holds 16 glyphs a row from code 0x30 on. Digits and Latin letters keep their ASCII codes. 0x80 and 0x81 are the
+// voiced and semi-voiced marks, drawn after the kana that they mark. Hiragana run from 0x91 and katakana from 0xD1, in
+// the order of the syllabary without wo, which is 0x86 and 0xC6. The small kana come before each run.
+uint32_t JapaneseGlyph(uint8_t c)
+{
+    if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
+    {
+        return c;
+    }
+
+    static constexpr char32_t kHigh[] =
+        U"\u3099\u309a、。ー・をぁぃぅぇぉゃゅょっ"
+        U"\0あいうえおかきくけこさしすせそ"
+        U"たちつてとなにぬねのはひふへほま"
+        U"みむめもやゆよらりるれろわん\0\0"
+        U"『』!?⁉‼ヲァィゥェォャュョッ"
+        U"\0アイウエオカキクケコサシスセソ"
+        U"タチツテトナニヌネノハヒフヘホマ"
+        U"ミムメモヤユヨラリルレロワン…▼";
+    static_assert(std::size(kHigh) == 0x81);
+    if (c >= 0x80)
+    {
+        return kHigh[c - 0x80];
+    }
+
+    struct Mark
+    {
+        uint8_t code;
+        char32_t mark;
+    };
+    static constexpr Mark kMarks[] = {{0x3b, U'☆'}, {0x3c, U'+'},  {0x3d, U'-'},  {0x3e, U'×'}, {0x3f, U'→'},
+                                      {0x5b, U'”'}, {0x5c, U'\''}, {0x5d, U'('},  {0x5e, U')'}, {0x5f, U'/'},
+                                      {0x7b, U':'}, {0x7c, U'%'},  {0x7d, U'・'}, {0x7e, U'~'}};
+    const auto found = std::find_if(std::begin(kMarks), std::end(kMarks), [c](const Mark& m) { return m.code == c; });
+    return found != std::end(kMarks) ? static_cast<uint32_t>(found->mark) : 0;
+}
+
+// The kana that the voiced mark (U+3099) or the semi-voiced mark (U+309A) makes of kana `c`, or 0 if it makes none.
+// Unicode puts each voiced kana one after its kana, and each semi-voiced kana two after.
+uint32_t MarkedKana(uint32_t c, uint32_t mark)
+{
+    static constexpr std::u32string_view kVoiced =
+        U"かきくけこさしすせそたちつてとはひふへほ"
+        U"カキクケコサシスセソタチツテトハヒフヘホ";
+    static constexpr std::u32string_view kHalfVoiced = U"はひふへほハヒフヘホ";
+    if (mark == 0x3099 && (c == U'ウ' || c == U'う'))
+    {
+        return c == U'ウ' ? U'ヴ' : U'ゔ';
+    }
+
+    const std::u32string_view& kana = mark == 0x3099 ? kVoiced : kHalfVoiced;
+    return kana.find(static_cast<char32_t>(c)) != std::u32string_view::npos ? c + (mark == 0x3099 ? 1 : 2) : 0;
 }
 
 // The text of the message `id` in the message file at `path`. The ID holds the bank in its top 16 bits and the
@@ -73,9 +144,11 @@ char Glyph(uint8_t c)
 //
 // Below 0x30 the bytes are control codes. Four of them become a space: 0x0A (a new line), 0x0C (the next tab stop),
 // 0x10 and 0x20 (spaces). 0x0E, 0x1C, 0x1E and 0x1F take the byte after them: a symbol, a voice, a colour, or another
-// message to insert. They're left out with that byte. The other control codes are left out too. The text has no spaces
-// at either end. Throws xsflib::FormatError if the file has no such message or the message runs past the file's end.
-std::string MessageText(std::span<const uint8_t> file, uint32_t id, const char* path)
+// message to insert. They're left out with that byte. The other control codes are left out too. A byte from 0x30 on is
+// a glyph of the English font, or of the Japanese font with `japanese`. A voiced or semi-voiced mark joins the kana
+// before it. A byte without a glyph becomes an underscore. The text is UTF-8, with no spaces at either end. Throws
+// xsflib::FormatError if the file has no such message or the message runs past the file's end.
+std::string MessageText(std::span<const uint8_t> file, uint32_t id, const char* path, bool japanese)
 {
     const std::string where =
         std::string(path) + "'s message " + std::to_string(id >> 16) + "-" + std::to_string(id & 0xffff);
@@ -99,13 +172,13 @@ std::string MessageText(std::span<const uint8_t> file, uint32_t id, const char* 
         throw xsflib::FormatError(where + " is missing");
     }
 
-    std::string text;
+    std::u32string chars;
     std::size_t at = *bank + std::size_t{r.U32(*bank + 4 + std::size_t{4} * (id & 0xffff))};
     for (uint8_t c = r.U8(at); c != 0; c = r.U8(++at))
     {
         if (c == 0x0a || c == 0x0c || c == 0x10 || c == 0x20)
         {
-            text += ' ';
+            chars += U' ';
         }
         else if (c == 0x0e || c == 0x1c || c == 0x1e || c == 0x1f)
         {
@@ -113,17 +186,33 @@ std::string MessageText(std::span<const uint8_t> file, uint32_t id, const char* 
         }
         else if (c >= 0x30)
         {
-            text += Glyph(c);
+            const uint32_t glyph = japanese ? JapaneseGlyph(c) : EnglishGlyph(c);
+            const bool mark = glyph == 0x3099 || glyph == 0x309a;
+            const uint32_t marked = mark && !chars.empty() ? MarkedKana(chars.back(), glyph) : 0;
+            if (marked)
+            {
+                chars.back() = static_cast<char32_t>(marked);
+            }
+            else
+            {
+                chars += glyph ? static_cast<char32_t>(glyph) : U'_';
+            }
         }
     }
 
-    const std::size_t first = text.find_first_not_of(' ');
-    if (first == std::string::npos)
+    const std::size_t first = chars.find_first_not_of(U' ');
+    if (first == std::u32string::npos)
     {
         return {};
     }
 
-    return text.substr(first, text.find_last_not_of(' ') + 1 - first);
+    std::string text;
+    for (const char32_t c : chars.substr(first, chars.find_last_not_of(U' ') + 1 - first))
+    {
+        xsflib::AppendUtf8(text, c);
+    }
+
+    return text;
 }
 
 // The effects of the sound manager's file `msm`, in the order of its table of effects (see MsmSounds). `names` gives
@@ -200,6 +289,7 @@ std::vector<Sound> MsmSounds(const disc::GameFiles& game, const GameProfile& pro
 {
     const std::vector<uint8_t> module = ReadGameFile(game, profile.sound_test_module);
     const std::vector<uint8_t> messages = ReadGameFile(game, profile.messages);
+    const bool japanese = profile.japanese_messages;
     const std::string where = std::string(profile.sound_test_module) + "'s sound test runs past the file's end";
     const xsflib::Reader r(module, true, {.bounds_message = xsflib::BoundsMessage::kFixed, .fixed_message = where});
 
@@ -214,7 +304,7 @@ std::vector<Sound> MsmSounds(const disc::GameFiles& game, const GameProfile& pro
         }
 
         const uint32_t number = r.U32(entry + 12);
-        std::string label = MessageText(messages, r.U32(entry + 4), profile.messages);
+        std::string label = MessageText(messages, r.U32(entry + 4), profile.messages, japanese);
         if (kind == kStreamKind)
         {
             sounds.push_back({kStreamBit | number, std::move(label), true, true});
@@ -232,7 +322,7 @@ std::vector<Sound> MsmSounds(const disc::GameFiles& game, const GameProfile& pro
         const std::size_t entry = profile.sound_test_voices + std::size_t{kEntrySize} * i;
         if (r.U32(entry) != 0 && r.U16(entry + 8) == kEffectKind)
         {
-            names[r.U32(entry + 12)] = MessageText(messages, r.U32(entry + 4), profile.messages);
+            names[r.U32(entry + 12)] = MessageText(messages, r.U32(entry + 4), profile.messages, japanese);
         }
     }
 

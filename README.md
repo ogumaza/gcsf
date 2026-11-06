@@ -18,10 +18,11 @@ A GCSF rip contains the game's code. The player runs that code on an emulated Ga
 library and its DSP program. The game plays the sound itself. The mixing, filtering and resampling therefore match the
 game. A rip requires a driver profile for the game.
 
-`docs/gcsf.md` specifies the format. Version 1 supports The Legend of Zelda: Four Swords Adventures (USA) and its
-Japanese release, The Legend of Zelda: Four Swords Plus, The Legend of Zelda: Twilight Princess (USA), The Legend of
-Zelda: The Wind Waker (USA), Luigi's Mansion (USA), Super Mario Sunshine (USA), Pikmin (USA), Donkey Kong Jungle Beat
-(USA) and Mario Kart: Double Dash!! (USA). It also supports the 38 songs, 9 jingles and 737 sound effects of Mario Golf:
+`docs/gcsf.md` specifies the format. Version 1 supports The Legend of Zelda: Four Swords Adventures (USA), its European
+release and its Japanese release, The Legend of Zelda: Four Swords Plus, The Legend of Zelda: Twilight Princess (USA)
+and its European and Japanese releases, The Legend of Zelda: The Wind Waker (USA) and its Japanese release, Zelda no
+Densetsu: Kaze no Takuto, Luigi's Mansion (USA), Super Mario Sunshine (USA), Pikmin (USA), Donkey Kong Jungle Beat (USA)
+and Mario Kart: Double Dash!! (USA). It also supports the 38 songs, 9 jingles and 737 sound effects of Mario Golf:
 Toadstool Tour (USA), the 111 songs and jingles and the 980 sound effects of Mario Power Tennis (USA), the 231 pieces in
 the Sound Room of WarioWare, Inc.: Mega
 Party Game$! (USA), the sequenced music and sound effects of Pikmin 2 (USA) and those of Final Fantasy Crystal
@@ -30,22 +31,48 @@ sequenced sound effects of Pac-Man Vs. and of the menu of Collector's Edition. T
 sequenced piece of music, `JA_BGM_DUMMY`. The menu's code never starts it. GCSF rips it too. Navi Trackers, a mode that
 only Four Swords Plus has, plays its music from streams. So does Mario Kart: Double Dash!! on its courses. GCSF doesn't
 rip streams. The Wind Waker, Luigi's Mansion and Pac-Man Vs. name none of their sounds. A rip names an effect after its
-category and index, for example `se4-0123`, and a piece of music after its file. Some of The Wind Waker's effects play
-one of several variants by a value that the game gives them, such as the material of the ground under a footstep. A
-rip holds each variant, named after the effect and the value, for example `se3-0000 6=4`. The `gcsf_var` tag holds the
-value. A player plays another variant when the tag holds another value. Luigi's Mansion picks the tracks of its piece
-`LuigiSings` by Luigi's health and by the room. Luigi's health also sets the piece's tempo. A rip holds the piece once
-for each state, named after the piece, the place and Luigi's health. Donkey Kong Jungle Beat
-plays many of its effects in the chords of the music. A rip plays such an effect over the music of one stage, with the
-music silent. Super Mario Sunshine keeps a table of its sounds' names. A rip of it takes its names from that table,
-for example `MSD_BGM_DOLPIC`. Pikmin's code lists its
-pieces of music by their files' names. A rip of Pikmin names a piece after its file, for example `select`. The game
-plays the music of its cutscenes as parts of one piece. A rip names a part after the piece and the part's number, for
-example `demobgm-5`. The rip includes the sound effects of the game's catalogue. An effect takes its name from the
+category and index, for example `se4-0123`, and a piece of music after its file. Four of The Wind Waker's effects pick
+the key of their note at random. A rip holds each of them once for each key that makes a sound, for example `se4-0254
+key 48`. Some of The Wind Waker's effects play one of several variants by a value that the game gives them, such as the
+material of the ground under a footstep. A rip holds each variant, named after the effect and the value, for example
+`se3-0000 6=4`. The `gcsf_var` tag holds the value. A player plays another variant when the tag holds another value. The
+Wind Waker's sound layer mutes some tracks of 14 pieces as it starts them. The game's state picks the tracks, such as
+the boat's sail or an enemy near Link. Some of the game's IDs start a piece in another arrangement. A rip starts each
+piece as the game starts it. It also holds each other arrangement, named after the piece and the game's ID or the state,
+for example `kaminoto 80000125` or `sea sailing`. The battle music and three other pieces fade in over two seconds. The
+game fades them in too. While some pieces play, the game writes a status to their port 9, such as the phase of a boss
+fight. A rip holds such a piece once more for each value that the game writes and that changes what it plays, for
+example `p_ganon1 9=2`. The battle music also comes with 1 on port 11, as when Link hits an enemy. The Japanese
+release's rips start the music in the same way and hold the same arrangements. Four Swords Adventures plays
+`JA_BGM_SELECT` with two sets of its tracks: one on the file select and one on the map where the players pick a stage. A
+rip holds both: `JA_BGM_SELECT` and `JA_BGM_SELECT map`. Luigi's Mansion picks the tracks of its piece `LuigiSings` by
+Luigi's health and by the room. Luigi's health also sets the piece's tempo. A rip holds the piece once for each state,
+named after the piece, the place and Luigi's health. A poison mushroom shrinks Luigi, and the tune then plays an octave
+higher. A rip holds that state too, with "shrunk" at the end of its name. Twilight Princess mutes some tracks of five
+pieces as it starts them. A rip mutes the same tracks. Hyrule Field's day music plays one arrangement while Link walks
+and another while he rides. A rip holds both: `Z2BGM_FIELD_LINK_DAY` and `Z2BGM_FIELD_LINK_DAY_riding`. The game's
+scenes, its fights and its
+other starters give 17 pieces more states. Some states play a track at a volume between 0 and 1. A rip starts a piece in
+the state that the game starts it in, such as Castle Town's music in its first room. It holds each other state too,
+named after the piece and the state, for example `Z2BGM_TOAL_VILLEGE_status1`. Hyrule Field's day music also follows the
+field's code: what Link does, the enemies near him and the time of day. A rip holds each way through the piece, in each
+arrangement. `_status12` plays the sections of a long walk or ride, `_status4` to `_status7` a fight's sections by their
+four entries, `_status10` and `_status11` the two endings of a day, `_status8` and `_status9` the starts that the
+field's code makes once no music plays, and `_riding_status3` the section of Link standing on his horse. Donkey Kong
+Jungle Beat plays many of its effects in the chords of the music. A rip plays such an effect over the music of one
+stage, with the music silent. Super Mario Sunshine keeps a table of its sounds' names. A rip of it takes its names from
+that table, for example `MSD_BGM_DOLPIC`. Pikmin's code lists its pieces of music by their files' names. A rip of Pikmin
+names a piece after its file, for example `select`. The game plays the music of its cutscenes as parts of one piece. A
+rip names a part after the piece and the part's number, for example `demobgm-5`. The rip includes the sound effects of
+the game's catalogue. An effect takes its name from the
 catalogue, for example `SE_FLOG_JUMP`. The sound of the formation plays a full move of the formation straight ahead. Its
-`gcsf_var` tag holds the move. The rip leaves out the game's streamed music. Pikmin 2's pieces of
-music are named after their files too. The game keeps a table of its effects' names. A rip of an effect takes its name
-from that table, for example `PSSE_SY_MENU_CURSOR`. A rip of Final Fantasy Crystal Chronicles names a piece or an effect
+`gcsf_var` tag holds the move. The rip leaves out the game's streamed music. Pikmin 2's pieces of music are named after
+their files too. A cave's music changes with the floor, and a boss's music with the boss's actions. `gcsfrip` rips a
+variant of the piece for each other floor's conductor, named after the conductor, for example `caveconc_05_0`. It also
+rips a variant for each other part of a boss's music, named after the piece and the part, for example `m_boss-3`. Two
+parts of the final boss's music have a layer that plays only while a captain stands near the boss. They get one more
+variant each, labelled `-near`. The game keeps a table of its effects' names. A rip of an effect takes its name from
+that table, for example `PSSE_SY_MENU_CURSOR`. A rip of Final Fantasy Crystal Chronicles names a piece or an effect
 after its file, for example `music100` or `se010001`. An effect in one of the game's blocks of effects takes the block's
 name and its place in the block, for example `se000-001`. The game's streamed music isn't ripped. Metroid Prime (USA,
 disc version 2) streams most of its music. GCSF rips its four sequenced songs. A rip names a song after its resource in
@@ -56,54 +83,57 @@ Paper Mario: The Thousand-Year Door (USA) streams its music too. GCSF rips its s
 game plays as sounds. A rip names a sound as the game's table of sounds does, for example `SFX_PRESS_START1` or
 `SFX_SE2_EVT_STARSTONE_GET1`. An effect that the table doesn't list is named after its set and its ID, for example
 `pmario-0051`. A song that the table doesn't list takes its name from the game's list of songs, for example `SE1_TEST`.
-GCSF also rips the 111 songs that the code of Tales of Symphonia (USA)
-lists. Both of its discs hold them. A rip names a song after its file, for example `bgm_t000`. GCSF rips the game's
-sound effects and voices too. A rip names an effect after its file and its ID, for example `se-0012`.
-The code of Star Fox
-Adventures (USA, disc version 1) lists 99 songs. GCSF rips them all. A rip names a song as that list does, for example
-`starfox_map`. GCSF rips the game's sound effects too. A rip names an effect after its set and its ID, for example
-`starfoxs-0420`. Star Wars Rogue Squadron II: Rogue Leader (USA) holds 124 songs. Sixty of them play only streams. Eight
-more play a stream along with their notes. A rip leaves out all 68. GCSF rips the other 56. A rip names a song as the
-game's music hall does, for example `Dogfight_Action`. A song that the hall doesn't list is named after its group and
-ID, for example `Song_0x45-0x0A`. GCSF rips the game's sound effects too. A rip names an effect after its ID, for
-example `RogueLeader-0048`.
-GCSF rips the sound effects of Star Wars Rogue Squadron III: Rebel Strike (USA). The
-game streams all of its music. Its rips therefore hold only its sound effects. A rip names an effect after its ID, for
-example `RebelStrike-0048`. Pokémon Colosseum (USA) lists 78 songs in its table of sounds. GCSF rips 77 of them. The
-other, `null_bgm_song`, holds no notes. The game plays it to silence its music. A rip names a song after its file, for
-example `title_song`. GCSF rips the game's sound effects too. A rip names an effect after its set and its ID, for
-example `snd_se_battle-0202`.
-Resident Evil Zero (USA) comes on two discs. Each disc holds the songs of its part of the game.
-The first holds 87 and the second 137. 59 songs are on both discs. The songs include the music of 16 cutscenes and the
-ambiences of the game's areas. One song makes no sound. GCSF rips the others. A rip names a song as the game's code
-does, for example `bgm_00`. A rip's library takes the disc's number, for example `ResidentEvilZeroDisc1.gcsflib`. Many
-of the game's cutscenes stream their music. GCSF doesn't rip streams. GCSF rips the game's sound effects too, but not
-those of its cutscenes. A rip names an effect after its archive and its ID, for example `sh00-1467`.
-The NDDEMO tech demo is a GameCube disc that never
-went on sale. GCSF rips its nine songs and its four sound effects. A rip names a song after its file, for example
-`coins`. An effect takes the name that the disc's header gives it, for example `SFXcoin_oneshot`. GCSF also
-supports the music and the sound effects of Animal Crossing (USA) and of its Japanese releases, Doubutsu no Mori+ and
-Doubutsu no Mori e+ (disc version 1 of each). The games keep no names for them. A rip names a piece after the game's
-number for it, for example `bgm046`. A piece that plays the hour is ripped once for each weather that changes it, for
-example `bgm001-snow`. The museum's piece is ripped once for each room, for example `bgm088-fish`. Doubutsu no Mori e+
-has two rips of the island's piece: `bgm376-islander` with the islander on the island, and `bgm376-no-islander` without.
-An effect takes the numbers of its bank and its place in the bank, for example `se2-017`. For the Pokémon Colosseum
-Bonus Disc (USA), GCSF rips the sound effects. They play in the disc's program that sends Jirachi to a Game Boy Advance.
-That program is a disc image inside the disc. A rip takes each effect's name from the program's list of names, for
-example `SFX_cancel`. Pokémon Channel (USA) plays each of its 38 pieces of music as a MusyX effect that plays a stereo
-recording. GCSF rips them as music. GCSF also rips the game's other sound effects. A rip names a sound as the game's
-sound viewer does, for example `SND_SUOU`. A sound that the viewer doesn't name is named after its set and its ID, for
-example `pchsound-1064`. The TV programmes' themes play as sound effects. A rip lists them with the effects. GCSF rips
-the 76 songs that the sound test of Mario Party 4 (USA, disc version 1) lists. A rip names a song as the sound test
-does, for example `Try Everything`. The sound test's 14 streams aren't ripped. GCSF rips the game's sound effects and
-voices too. A rip names an effect after its number in the game's table of effects, for example `se-0042`. The Option
-Room names some of the voices. A rip adds such a name, for example `se-0054 Toad Happy`. WarioWare, Inc.: Mega Party
-Game$! plays most of its sound effects as MusyX songs. GCSF rips them and the game's other effects. A rip names an
-effect after the game's number for it, for example `se-0013`. A rip of Mario Golf or Mario Power Tennis names an effect
-after its voice bank and its ID, for example `mario-0154`. An effect of the bank that the game loads at start-up is
-named `se`, for example `se-0413`. So is an effect of Mario Power Tennis's other groups, for example `se-0151`. A
-narration's name starts with `narration`, for example `narration-0362`. A court's effect in Mario Power Tennis is named
-`court`, for example `court-0018`.
+GCSF also rips the 111 songs that the code of Tales of Symphonia (USA) lists. Both of its discs hold them. A rip names a
+song after its file, for example `bgm_t000`. GCSF rips the game's sound effects and voices too. A rip names an effect
+after its file and its ID, for example `se-0012`. The code of Star Fox Adventures (USA, disc version 1) lists 99 songs.
+GCSF rips them all. A rip names a song as that list does, for example `starfox_map`. GCSF rips the game's sound effects
+too. A rip names an effect after its set and its ID, for example `starfoxs-0420`. Star Wars Rogue Squadron II: Rogue
+Leader (USA) holds 124 songs. Sixty of them play only streams. Eight more play a stream along with their notes. A rip
+leaves out all 68. GCSF rips the other 56. A rip names a song as the game's music hall does, for example
+`Dogfight_Action`. A song that the hall doesn't list is named after its group and ID, for example `Song_0x45-0x0A`. GCSF
+rips the game's sound effects too. A rip names an effect after its ID, for example `RogueLeader-0048`. GCSF rips the
+sound effects of Star Wars Rogue Squadron III: Rebel Strike (USA). The game streams all of its music. Its rips therefore
+hold only its sound effects. A rip names an effect after its ID, for example `RebelStrike-0048`. Pokémon Colosseum (USA)
+lists 78 songs in its table of sounds. GCSF rips 77 of them. The other, `null_bgm_song`, holds no notes. The game plays
+it to silence its music. A rip names a song after its file, for example `title_song`. GCSF rips the game's sound effects
+too. A rip names an effect after its set and its ID, for example `snd_se_battle-0202`. Resident Evil (USA) comes on two
+discs. GCSF rips the songs of the first disc. The second disc holds the same sound files. The first holds 128 song files
+in `bgm/`, and five of them repeat another file. 16 of the others make no sound: 14 blank songs, a song without notes
+and a room's ambience whose channels all start at a level of 0. GCSF rips the other 107. A rip names a song after its
+file, for example `sg00`. A room's code changes the levels of some songs' channels while they play. A rip plays each
+song alone, at the levels of the song's file. Six more rips play the mixes that rooms give two of the ambiences, such as
+`sg74 ch1` and `sg7a ch0-3+5`. GCSF doesn't rip the game's sound effects. Resident Evil Zero (USA) comes
+on two discs. Each disc holds the songs of its part of the game. The first holds 87 and the second 137. 59 songs are on
+both discs. The songs include the music of 16 cutscenes and the ambiences of the game's areas. One song makes no sound.
+GCSF rips the others. A rip names a song as the game's code does, for example `bgm_00`. A rip's library takes the disc's
+number, for example `ResidentEvilZeroDisc1.gcsflib`. Many of the game's cutscenes stream their music. GCSF doesn't rip
+streams. GCSF rips the game's sound effects too. A rip names an effect after its archive and its ID, for example
+`sh00-1467`. 18 cutscenes play their sound effects as songs. A rip names one of those after its cutscene and its song
+ID, for example `dd01-0413`. The NDDEMO tech demo is a GameCube disc that never went on sale. GCSF rips its nine songs
+and its four sound effects. A rip names a song after its file, for example `coins`. An effect takes the name that the
+disc's header gives it, for example `SFXcoin_oneshot`. GCSF also supports the music and the sound effects of Animal
+Crossing (USA) and of its Japanese releases, Doubutsu no Mori+ and Doubutsu no Mori e+ (disc versions 0 and 1 of each).
+The games keep no names for them. A rip names a piece after the game's number for it, for example `bgm046`. A piece that
+plays the hour is ripped once for each weather that changes it, for example `bgm001-snow`. The museum's piece is ripped
+once for each room, for example `bgm088-fish`. Doubutsu no Mori e+ has two rips of the island's piece: `bgm376-islander`
+with the islander on the island, and `bgm376-no-islander` without. An effect takes the numbers of its bank and its place
+in the bank, for example `se2-017`. For the Pokémon Colosseum Bonus Disc (USA), GCSF rips the sound effects. They play
+in the disc's program that sends Jirachi to a Game Boy Advance. That program is a disc image inside the disc. A rip
+takes each effect's name from the program's list of names, for example `SFX_cancel`. Pokémon Channel (USA) plays each of
+its 38 pieces of music as a MusyX effect that plays a stereo recording. GCSF rips them as music. GCSF also rips the
+game's other sound effects. A rip names a sound as the game's sound viewer does, for example `SND_SUOU`. A sound that
+the viewer doesn't name is named after its set and its ID, for example `pchsound-1064`. The TV programmes' themes play
+as sound effects. A rip lists them with the effects. GCSF rips the 76 songs that the sound test of Mario Party 4 lists,
+in the American, European and Japanese releases. A rip names a song as the sound test does, for example `Try
+Everything`, or `いろいろためそう` in the Japanese release. The sound test's 14 streams aren't ripped. GCSF rips the game's
+sound effects and voices too. A rip names an effect after its number in the game's table of effects, for example
+`se-0042`. The Option Room names some of the voices. A rip adds such a name, for example `se-0054 Toad Happy`.
+WarioWare, Inc.: Mega Party Game$! plays most of its sound effects as MusyX songs. GCSF rips them and the game's other
+effects. A rip names an effect after the game's number for it, for example `se-0013`. A rip of Mario Golf or Mario Power
+Tennis names an effect after its voice bank and its ID, for example `mario-0154`. An effect of the bank that the game
+loads at start-up is named `se`, for example `se-0413`. So is an effect of Mario Power Tennis's other groups, for
+example `se-0151`. A narration's name starts with `narration`, for example `narration-0362`. A court's effect in Mario
+Power Tennis is named `court`, for example `court-0018`.
 
 Nintendo Puzzle Collection (Japan) holds a menu and three games: Dr. Mario, Panel de Pon and Yoshi's Cookie. GCSF rips
 their 118 songs: 9 of the menu, 24 of Dr. Mario, 59 of Panel de Pon and 26 of Yoshi's Cookie. A song's name starts with
@@ -243,7 +273,7 @@ WarioWare, Inc.: Mega Party Game$!, `driver_pikmin2_blob.h` for Pikmin 2, `drive
 Final Fantasy Crystal Chronicles, `driver_animal_crossing_blob.h` for Animal Crossing, Doubutsu no Mori+ and Doubutsu no
 Mori e+, `driver_colosseum_bonus_blob.h` for the Pokémon Colosseum Bonus Disc, `driver_musyx_blob.h` for Metroid Prime,
 Metroid Prime 2: Echoes, Paper Mario: The Thousand-Year Door, Tales of Symphonia, Star Fox Adventures, Rogue Leader,
-Rebel Strike, Pokémon Colosseum, Resident Evil Zero, Nintendo Puzzle Collection and the NDDEMO tech demo,
+Rebel Strike, Pokémon Colosseum, Resident Evil, Resident Evil Zero, Nintendo Puzzle Collection and the NDDEMO tech demo,
 `driver_musyx_upload_blob.h` for Pokémon Channel, and `driver_mario_party_blob.h` for Mario Party 4. Building GCSF
 itself requires no PowerPC toolchain.
 

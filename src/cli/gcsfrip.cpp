@@ -101,6 +101,7 @@ struct Job
     std::optional<FileChunk> archive;
     std::vector<uint32_t> waves;  // the waves that the driver loads, for a profile whose driver NamesWaves
     xsflib::psf::Variables ports; // the ports that the driver sets (rip::Sound::ports)
+    ntdlib::flipper::z2::PieceState piece_state; // the state that the driver gives a piece (rip::Sound::piece_state)
 };
 
 // The number of each of the game's sounds in the file names: its place in the list without the sounds that share the
@@ -183,7 +184,7 @@ void FindWaveGroups(std::vector<Job>& jobs, const std::vector<uint8_t>& library,
     {
         std::size_t group_count = 0;
         std::optional<std::vector<uint32_t>> groups = analyzer.FindWaveGroups(
-            job.sound_id, job.archive ? &*job.archive : nullptr, systems, &group_count, &job.ports);
+            job.sound_id, job.archive ? &*job.archive : nullptr, systems, &group_count, &job.ports, &job.piece_state);
         if (!groups)
         {
             std::fprintf(stderr, "warning: the waves of %s can't be found; it plays without them\n", job.label.c_str());
@@ -334,8 +335,11 @@ std::vector<Job> PickJobs(const std::vector<rip::Sound>& sounds, std::vector<rip
                 continue;
             }
 
-            jobs.push_back(
-                {.index = numbers[i], .sound_id = sounds[i].id, .label = sounds[i].label, .ports = sounds[i].ports});
+            jobs.push_back({.index = numbers[i],
+                            .sound_id = sounds[i].id,
+                            .label = sounds[i].label,
+                            .ports = sounds[i].ports,
+                            .piece_state = sounds[i].piece_state});
         }
     }
 
@@ -439,7 +443,7 @@ std::size_t MeasureJobs(std::vector<Job>& jobs, const GameLibrary& library, cons
         std::vector<jaudio::WaveUse> played;
         job.timing =
             analyzer.Analyze(job.sound_id, job.archive ? &*job.archive : nullptr, names_waves ? &job.waves : nullptr,
-                             finds_waves ? &played : nullptr, &job.stop, &job.ports);
+                             finds_waves ? &played : nullptr, &job.stop, &job.ports, &job.piece_state);
         if (const std::size_t outside = jaudio::MissingWaves(library.systems, job.waves, played))
         {
             std::fprintf(stderr, "warning: %s looked up %zu waves outside its wave groups\n", job.label.c_str(),
@@ -505,19 +509,22 @@ int WriteRip(const std::string& input, const Options& o, xsflib::cli::FileNameRe
     }
 
     // A sequence that no sound plays gives its file's name in gcsf_sound. A driver that NamesWaves gets the sound's
-    // waves. A variant of a port effect gets its ports in gcsf_var.
+    // waves. A variant of a port effect gets its ports in gcsf_var. A piece whose tracks the game mutes as it starts it
+    // gets the children to mute.
     const bool names_waves = rip::NamesWaves(profile);
     const auto build = [&lib_name, names_waves](const Job& job, Tags tags)
     {
         const std::vector<uint32_t>* waves = names_waves ? &job.waves : nullptr;
         if (!job.archive)
         {
-            return rip::BuildMini(job.sound_id, lib_name, std::move(tags), nullptr, waves, &job.ports);
+            return rip::BuildMini(job.sound_id, lib_name, std::move(tags), nullptr, waves, &job.ports,
+                                  &job.piece_state);
         }
 
         tags["gcsf_sound"] = job.file_name;
 
-        return rip::BuildMini(job.sound_id, lib_name, std::move(tags), &*job.archive, waves, &job.ports);
+        return rip::BuildMini(job.sound_id, lib_name, std::move(tags), &*job.archive, waves, &job.ports,
+                              &job.piece_state);
     };
     if (xsflib::cli::WriteMinis(out_dir, names, jobs, common, "gcsf_sound", build) < 0)
     {

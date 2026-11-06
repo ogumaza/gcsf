@@ -388,7 +388,8 @@ std::vector<Sound> CatalogueSounds(const disc::GameFiles& game, const GameProfil
         const uint32_t key = uint32_t{entry.song_group} << 16 | entry.id;
         const std::vector<uint32_t>& streamed = profile.musyx_streamed_songs;
         const bool stream = song && std::find(streamed.begin(), streamed.end(), key) != streamed.end();
-        sounds.push_back({static_cast<uint32_t>(i), entry.label, song || entry.music, stream});
+        const bool music = song ? !entry.sound_effect : entry.music;
+        sounds.push_back({static_cast<uint32_t>(i), entry.label, music, stream});
     }
 
     return sounds;

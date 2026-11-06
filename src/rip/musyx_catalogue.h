@@ -44,12 +44,14 @@ struct MusyXCatalogue
     };
 
     // A MIDI controller that the driver sets on an effect once the effect starts: through sndFXCtrl, or with `fine`
-    // through sndFXCtrl14. That one takes a 14-bit value, such as the pitch wheel's.
+    // through sndFXCtrl14. That one takes a 14-bit value, such as the pitch wheel's. driver/musyx_song_controls.c also
+    // sets a song's controllers, through sndSeqCntrl, on the song's MIDI channel `channel`.
     struct Control
     {
         uint8_t controller = 0;
         bool fine = false;
         uint16_t value = 0;
+        uint8_t channel = 0;
     };
 
     enum class Kind : uint8_t
@@ -58,8 +60,9 @@ struct MusyXCatalogue
         kEffect = 1,
     };
 
-    // A sound: its label, what MusyX plays, the groups that it pushes first, its words, and an effect's controllers.
-    // The rip lists a song as music, and an effect whose `music` is set. The game plays such an effect as its music.
+    // A sound: its label, what MusyX plays, the groups that it pushes first, its words, and its controllers.
+    // The rip lists a song as music, and an effect whose `music` is set. The game plays such an effect as its music. A
+    // song whose `sound_effect` is set isn't music: the game plays it as a sound effect.
     struct Entry
     {
         std::string label;
@@ -74,6 +77,7 @@ struct MusyXCatalogue
         std::vector<Write> writes;
         std::vector<Control> controls;
         bool music = false;
+        bool sound_effect = false;
     };
 
     // The volume and the pan that leave a sound at MusyX's defaults, and a song number that means no song.

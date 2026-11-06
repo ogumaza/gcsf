@@ -209,7 +209,7 @@ static void TestLoadingOrder()
 
 static void TestPortList()
 {
-    // The gcsf_var tag takes the form of 3SF's 3sf_var, with ports 0 to 15 (docs/gcsf.md, "Tags").
+    // The gcsf_var tag holds assignments N=V of ports 0 to 15 (docs/gcsf.md, "Tags").
     const auto ports = PortList::Parse("9=0x7f, 6=4\n6=-1");
 
     XSFLIB_CHECK(ports && *ports == xsflib::psf::Variables({{6, -1}, {9, 127}}));
