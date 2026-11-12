@@ -151,7 +151,7 @@ static_assert(DriverBlock::kListedProfileOffset - DriverBlock::kSoundOffset == n
 
 // The profile's driver parameters, in the order of the driver's parameter block: `params`, then for a profile with
 // singing states their number and the states (driver/luigis_mansion.c's State), and for Pikmin 2 the table of its
-// pieces (driver/pikmin2.c's Piece).
+// pieces (driver/pikmin2.c's Piece), and for Donkey Kong Jungle Beat the table of its chord layers.
 std::vector<uint32_t> DriverParameters(const GameProfile& p)
 {
     std::vector<uint32_t> words = p.params;
@@ -168,6 +168,11 @@ std::vector<uint32_t> DriverParameters(const GameProfile& p)
     if (p.pikmin2_pieces)
     {
         jaudio::AppendPikmin2Pieces(words);
+    }
+
+    if (p.driver == Driver::kJungleBeat)
+    {
+        jaudio::AppendChordLayers(p.chord_layers, words);
     }
 
     return words;

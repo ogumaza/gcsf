@@ -819,6 +819,43 @@ A variant plays its state from the piece's start. In the game, a state comes par
 to 180 frames. The rips leave out the change from one state to the next. The profile lists the variants
 (`GameProfile::layer_states`). Bits 16 to 23 of a variant's sound ID contain its states.
 
+Some objects of a stage also play a chord effect beside the stage's music while they're near DK (see "Chord effects"):
+a sleeping enemy, an angry one, an enemy that waits for DK's attack, the attack chance of a stunned enemy, the coconut
+pigs' battle, an armadillo's rush and others. These effects repeat their steps until the object stops them. Some of them
+replace a part of the music. A rip also contains each pair of a piece and such an effect that a stage plays: 129
+variants of 25 pieces. A variant's label is the piece's label, "_" and the effect's name without `JA_SE_IST_`, in lower
+case, for example `JA_BGM_MAIN_01_enemy_sleeping`. The variants follow the piece's states and have the piece's number.
+The effects:
+
+- `enemy_sleeping` (record 134): PigPoppoSleep and KobuPakkun.
+- `enemy_angry` (135): Garigari, KobuPakkunAngry, NoFin, NoMouth, PigPoppoFire, PigPoppoKiba, RollingFrog and BigBee.
+- `dk_wait_attack` (136): most enemies while they wait for DK's attack.
+- `dk_has_wait` (138) and `dk_has_weight_damage` (143): MiniIga and its fire and ice kinds.
+- `enemy_wait_pig` (140) and `enemy_blow_wind` (141): PigPoppo, and BigBee and PigPoppoFire for the second.
+- `attack_chance` (157 and 158 together): a stunned enemy.
+- `enemy_battle` (159): BigBee, NeedlePoppo and CocoPig.
+- `garigari_rush` (34), `garigari_spin` (37) and `garigari_ball_roll` (44): Garigari.
+- `only_head_move` (46), `bubble_flower_rotate` (47) and `lect_kikki_run` (132): OnlyHead, BubbleFlower and
+  LectureKikki.
+
+The names are those of the game's object factory (0x8034e000). Most objects ask for their record once a frame through
+0x80256fcc (record, object), from 0x802301b4 and the helpers at 0x80230264 to 0x802302f4. 0x80256fcc starts the record
+through `startChordSe` while its effect doesn't play (0x8024cba4), and keeps the effect playing otherwise. The coconut
+pigs' battle and the attack chance start once instead, through the audio manager's list of shared effects at +0x1040
+(0x802570f0 and 0x8025751c). For a variant, the driver writes the stage's number to the stage object's number and row
+and starts the row's music through 0x8025049c, as the stage does. Each frame it then asks for the records through
+0x80256fcc, or starts the records that start once through 0x80256f48 while they don't play. The music's tracks play as
+the stage starts them. The length analysis leaves out the effects' tracks: a track belongs to an effect if its root
+track belongs to a JAISe. Each variant has the music's length.
+
+The pairs come from the objects that each stage places (the `objinfo` files of its `world/*.arc`) and the records that
+each object's class plays. The Wii release's main.dol names the classes of the objects' states. A piece that several
+stages play gets each effect once, at the first stage by number that places such an object. At the castle stages, 0x43
+and 0x44, `startChordSe` refuses records 134, 135, 138, 140, 141, 143 and 157 to 159 (0x8024c590). The driver's table
+holds 256 variants. The profile lists the variants (`GameProfile::chord_layers`, ntdlib's `kJungleBeatChordLayers`).
+Bit 23 of a variant's sound ID marks it. Bits 16 to 22 contain bits 0 to 6 of its index in the list, and bit 15
+contains bit 7.
+
 Some of The Wind Waker's effects make no sound in a rip, and the ripper skips them. Most are empty: their code
 returns at once, and the game plays nothing for them either. 30 others read a port that the game sets when it starts
 the effect. They play nothing while the port holds 0. A rip holds their variants instead. Each variant plays the

@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "ntdlib/jaudio/game_lengths.h"
+#include "ntdlib/jaudio/jungle_beat_states.h"
 #include "ntdlib/jaudio/pikmin2_pieces.h"
 #include "ntdlib/jaudio/wave_system.h"
 
@@ -51,7 +52,7 @@ ntdlib::jaudio::GameWatch WatchOf(const GameProfile& profile, uint32_t id)
 }
 
 // The most levels of parents that the test of a track's sound climbs.
-constexpr int kMaxTrackDepth = 16;
+constexpr uint32_t kMaxTrackDepth = 16;
 
 // The CPU as ntdlib's analysis reads it: the registers, and the watch of the game's code. The watch leaves out the
 // events at the places for which `skip` returns true. The registers keep the name that ppc::Cpu gives them. The
@@ -90,13 +91,14 @@ private:
 };
 
 // GCSF's player as ntdlib's analysis reads it, without the tracks of the sound that the driver plays beside the ripped
-// one (GameProfile::background_sound).
+// one (GameProfile::background_sound), and without the effects of a chord layer (GameProfile::chord_layers).
 class JAudioMachine
 {
 public:
-    JAudioMachine(Player& player, const GameProfile& profile)
+    JAudioMachine(Player& player, const GameProfile& profile, uint32_t id)
         : machine_(player),
           profile_(profile),
+          chord_layer_(!profile.chord_layers.empty() && (id & jaudio::kChordLayer) != 0),
           cpu_(player.System()->Cpu(), [this](uint32_t pc) { return OnBackgroundTrack(pc); })
     {
     }
@@ -122,9 +124,9 @@ public:
     }
 
 private:
-    // Whether the watched instruction at `pc` parses a track of the sound that the driver plays beside the ripped one.
-    // A track belongs to that sound if it or one of its parents is the sound's root track. The register that holds the
-    // track is the one that ntdlib's analysis reads.
+    // Whether the watched instruction at `pc` parses a track of the sound that the driver plays beside the ripped one,
+    // or of a chord layer's effect. A track belongs to that sound if it or one of its parents is the sound's root
+    // track. The register that holds the track is the one that ntdlib's analysis reads.
     bool OnBackgroundTrack(uint32_t pc) const
     {
         const ntdlib::jaudio::GameWatch& watch = profile_.watch;
@@ -134,33 +136,60 @@ private:
             return false;
         }
 
+        const uint32_t reg = pc == watch.parse_command ? watch.command_track_register
+                             : conditional             ? watch.conditional_track_register
+                                                       : watch.jump_track_register;
+        const uint32_t track = cpu_.state_.gpr[reg];
         const uint32_t sound = Word(DriverBlock::kAddress + DriverBlock::kListedProfileOffset +
                                     4 * static_cast<uint32_t>(profile_.background_sound));
         if (sound == 0 || Word(sound + watch.vtable_offset) != watch.sequence_vtable)
         {
-            return false;
+            return chord_layer_ && OnEffect(track);
         }
 
         const uint32_t root = sound + watch.sequence_track_offset;
-        const uint32_t reg = pc == watch.parse_command ? watch.command_track_register
-                             : conditional             ? watch.conditional_track_register
-                                                       : watch.jump_track_register;
-        uint32_t track = cpu_.state_.gpr[reg];
-        for (int level = 0; track != 0 && level < kMaxTrackDepth; level++)
+        for (uint32_t t = track, level = 0; t != 0 && level < kMaxTrackDepth; level++)
         {
-            if (track == root)
+            if (t == root)
             {
                 return true;
             }
 
-            track = Word(track + profile_.track_parent_offset);
+            t = Word(t + profile_.track_parent_offset);
         }
 
         return false;
     }
 
+    // The root of `track`: the track that its parents lead to.
+    uint32_t RootOf(uint32_t track) const
+    {
+        for (uint32_t level = 0; track != 0 && level < kMaxTrackDepth; level++)
+        {
+            const uint32_t parent = Word(track + profile_.track_parent_offset);
+            if (parent == 0)
+            {
+                return track;
+            }
+
+            track = parent;
+        }
+
+        return 0;
+    }
+
+    // Whether `track` belongs to an effect. A chord layer's effects play beside the music that the driver reports. The
+    // analysis follows the music alone.
+    bool OnEffect(uint32_t track) const
+    {
+        const ntdlib::jaudio::GameWatch& watch = profile_.watch;
+        const uint32_t root = RootOf(track);
+        return root != 0 && Word(root - watch.effect_track_offset + watch.vtable_offset) == watch.effect_vtable;
+    }
+
     AnalysisMachine machine_;
     const GameProfile& profile_;
+    bool chord_layer_;
     SkippingCpu cpu_;
 };
 
@@ -190,7 +219,7 @@ std::optional<Timing> MeasureJAudioSound(Player& player, const GameProfile& prof
     const uint32_t handle = DriverBlock::kAddress + DriverBlock::kHandleOffset;
     if (profile.background_sound >= 0)
     {
-        JAudioMachine machine(player, profile);
+        JAudioMachine machine(player, profile, id);
         return ntdlib::jaudio::AnalyzeGameSound(machine, handle, WatchOf(profile, id), kLengthRules, found,
                                                 lookups_sound, id);
     }

@@ -3,9 +3,9 @@
 foobar2000 input component for GCSF rips (`.minigcsf`). It uses the same player core as `gcsfplay`. The player core runs
 the game's code on an emulated GameCube: the game's OS, its sound library and its DSP program.
 
-**Status:** the component builds with Apple Clang for foobar2000 on macOS. It's set up to build with clang-cl for 32-bit
-and 64-bit foobar2000 on Windows. The Windows build hasn't been tested in foobar2000 yet. `ctest` covers the player
-core.
+**Status:** the component builds with Apple Clang for foobar2000 on macOS. It builds with clang-cl for 32-bit and 64-bit
+foobar2000 on Windows. In tests on Windows, 32-bit and 64-bit foobar2000 load, decode, play and seek rips. `ctest`
+covers the player core.
 
 ## Features
 

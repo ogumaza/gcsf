@@ -413,6 +413,11 @@ struct GameProfile
     // a piece's states after the piece. Each state shares the piece's number.
     std::span<const jaudio::JungleBeatState> layer_states = {};
 
+    // The chord effects that the game plays beside a piece of music while an object keeps them playing, for
+    // driver/jungle_beat.c. The list of sounds puts a piece's layers after the piece and its states. Each layer shares
+    // the piece's number. The driver's parameters end with the layers' stages and records.
+    std::span<const jaudio::JungleBeatChordLayer> chord_layers = {};
+
     // The pieces whose tracks the game mutes as it starts them, for a driver that runs ntdlib's start-up of Z2 with the
     // music manager in its profile. The list of sounds gives each piece the children to mute (Sound::piece_state). A
     // start with a suffix becomes a sound after its piece, named with the suffix. Other profiles have none.

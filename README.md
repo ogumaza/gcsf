@@ -65,7 +65,10 @@ each part of a boss fight turn more tracks on or change them. A rip of Jungle Be
 starts it, and 101 variants of 43 pieces, one for each later state. A variant is named after the piece and what sets its
 state, for example `JA_BGM_MAIN_01_combo1` and `_combo2` for the layers of a combo, `_helibird` for a flight with a
 Helibird, `_round2` and `_change` for a boss's second round and the change before it, and `_underwater` for
-TropicalCoast's music while DK swims below. Each variant plays its state from the start of the piece. The game moves
+TropicalCoast's music while DK swims below. Some enemies and objects also play a loop beside the music while they're
+near DK, such as a sleeping hog or a stunned enemy. A rip contains 129 more variants of 25 pieces for those, one for
+each loop that a stage plays, named after the loop, for example `JA_BGM_MAIN_01_enemy_sleeping`. Each variant plays its
+state from the start of the piece. The game moves
 from one state to the next with a short fade, and the rips leave out those changes. The spec, `docs/gcsf.md`, lists the
 states and the stages that play each piece. Super Mario Sunshine keeps a table of its sounds' names. A rip of it takes
 its names from that table, for example `MSD_BGM_DOLPIC`. Pikmin's code lists its pieces of music by their files' names.

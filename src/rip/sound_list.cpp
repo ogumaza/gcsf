@@ -248,6 +248,18 @@ void AddLayerStates(const GameProfile& profile, std::vector<Sound>& sounds)
                       { return std::pair(state.piece | state.bits, std::string("_") + state.suffix); });
 }
 
+// Adds the chord effects that the game plays beside its music to `sounds`, each after its piece
+// (GameProfile::chord_layers). A layer's label is the label of the piece, "_" and the suffix of the layer, such as
+// "JA_BGM_MAIN_01_enemy_sleeping". The layers share the piece's number.
+void AddChordLayers(const GameProfile& profile, std::vector<Sound>& sounds)
+{
+    AddStatesOfPieces(profile.chord_layers, sounds, [&profile](const jaudio::JungleBeatChordLayer& layer)
+                      {
+                          const auto index = static_cast<uint32_t>(&layer - profile.chord_layers.data());
+                          return std::pair(jaudio::ChordLayerId(layer.piece, index), std::string("_") + layer.suffix);
+                      });
+}
+
 // Gives the pieces whose tracks the game mutes as it starts them the children to mute (GameProfile::muted_starts). A
 // start with a suffix becomes a sound after its piece. The sound's label is the piece's with the suffix, such as
 // "Z2BGM_FIELD_LINK_DAY_riding", and it shares the piece's number.
@@ -373,6 +385,7 @@ std::optional<GameSounds> ListGameSounds(const disc::GameFiles& game, const Game
     }
 
     AddMusicStates(profile, listed.sounds);
+    AddChordLayers(profile, listed.sounds); // before the states, which then come first after each piece
     AddLayerStates(profile, listed.sounds);
     AddPortVariants(profile, listed.sounds);
     AddRandomVariants(profile, listed.sounds);

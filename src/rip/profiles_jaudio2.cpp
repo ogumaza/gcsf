@@ -658,6 +658,12 @@ const GameProfile kJungleBeatUsa = {
             30,         // combo_stage: MorningField, whose combos reach their layers at counts of 10, 45 and 80
             0x80253da8, // flags_state: sets the state of the first table of the BGM player for the flags of the player
             0x164,      // flags_offset
+            // The chord effects that objects play beside a stage's music (ntdlib's kJungleBeatChordLayers). The table
+            // of chord layers follows (DriverParameters).
+            0x80256fcc, // keep_chord_effect: starts a record's effect, or keeps it playing, for an object that asks
+                        // once a frame (0x802301b4)
+            0x80256f48, // start_chord_once: starts a record's effect (0x80230110)
+            0x8024cba4, // chord_effect_playing: whether a record's effect plays
         },
     .watch =
         {
@@ -680,6 +686,7 @@ const GameProfile kJungleBeatUsa = {
     .background_sound = 52,       // the driver's word `music`
     .track_parent_offset = 0x12c, // JASTrack::connectChild (0x80007cec) stores the parent there
     .layer_states = jaudio::kJungleBeatStates,
+    .chord_layers = jaudio::kJungleBeatChordLayers,
 };
 
 // Mario Kart: Double Dash!! (USA). Its sound library is the earliest known build of JAudio2, under the game's audio
