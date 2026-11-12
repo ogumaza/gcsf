@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 
 // Unit tests for the .minigcsf's program (rip::BuildMini): the sound's ID, the wave list for a driver that names a
-// sound's waves, a file that replaces one of the library's files, the ports of a variant of an effect, and the children
-// of track 0 that Twilight Princess's driver mutes.
+// sound's waves, a file that replaces one of the library's files, the ports of a variant of an effect, the states of
+// pieces of music that the profiles list, and the children of track 0 that Twilight Princess's driver mutes.
 
 #include <algorithm>
 #include <cstddef>
@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "ntdlib/flipper/z2_params.h"
+#include "ntdlib/jaudio/jungle_beat_states.h"
 #include "xsflib/bytes.h"
 #include "xsflib/psf/psf.h"
 #include "xsflib/testing/check.h"
@@ -206,9 +207,41 @@ void TestMusicStates()
     }
 }
 
+void TestLayerStates()
+{
+    // Only Donkey Kong Jungle Beat's profile lists layer states. Each belongs to a piece of music, 0x01000000 plus an
+    // index below 0x100. Each sets only the state's bits: a combo's layer of 1 or 2, a state of the second table from
+    // 1 to 7, or a flight with a Helibird. A piece's states have different bits and different suffixes.
+    constexpr uint32_t kStateBits =
+        3u << ntdlib::jaudio::kComboLayerShift | 7u << ntdlib::jaudio::kTableStateShift | ntdlib::jaudio::kHelibird;
+    for (const rip::GameProfile& profile : rip::KnownProfiles())
+    {
+        if (!profile.layer_states.empty())
+        {
+            Check(profile.driver == rip::Driver::kJungleBeat, std::string(profile.name) + ": the driver of layers");
+        }
+
+        for (std::size_t i = 0; i < profile.layer_states.size(); i++)
+        {
+            const ntdlib::jaudio::JungleBeatState& state = profile.layer_states[i];
+            const uint32_t layer = state.bits >> ntdlib::jaudio::kComboLayerShift & 3;
+            Check((state.piece & 0xffffff00) == 0x01000000 && state.bits != 0 && (state.bits & ~kStateBits) == 0 &&
+                      layer != 3 && state.suffix && *state.suffix,
+                  std::string(profile.name) + ": layer state " + std::to_string(i));
+            for (std::size_t j = 0; j < i; j++)
+            {
+                Check(profile.layer_states[j].piece != state.piece ||
+                          (profile.layer_states[j].bits != state.bits &&
+                           std::string(profile.layer_states[j].suffix) != state.suffix),
+                      std::string(profile.name) + ": the bits and the suffix of layer state " + std::to_string(i));
+            }
+        }
+    }
+}
+
 void TestMutedChildren()
 {
-    // A piece whose tracks Twilight Princess mutes as it starts it gets the children after the profile, at 0x1F8 of the
+    // A piece whose tracks Twilight Princess mutes as it starts it gets the children after the profile, at 0x1FC of the
     // block. A mini with no state has no such chunk.
     const std::vector<uint32_t> kWaves = {0x00010000};
     const ntdlib::flipper::z2::PieceState kMuted = {.muted_children = 0x0fe0};
@@ -252,10 +285,10 @@ void TestMutedChildren()
         }
 
         // The four are the profile's last words.
-        const std::size_t words = sizeof(ntdlib::flipper::z2::Profile) / 4;
-        Check(profile.driver == rip::Driver::kTwilightPrincess && profile.params.size() == words &&
-                  profile.params[words - 4] != 0 && profile.params[words - 3] != 0 && profile.params[words - 2] != 0 &&
-                  profile.params[words - 1] != 0,
+        const std::size_t kWords = sizeof(ntdlib::flipper::z2::Profile) / 4;
+        Check(profile.driver == rip::Driver::kTwilightPrincess && profile.params.size() == kWords &&
+                  profile.params[kWords - 4] != 0 && profile.params[kWords - 3] != 0 &&
+                  profile.params[kWords - 2] != 0 && profile.params[kWords - 1] != 0,
               std::string(profile.name) + ": the music manager, setChildTrackVolume, setPortData and getPortData");
     }
 }
@@ -271,6 +304,7 @@ int main()
     TestPorts();
     TestPortVariants();
     TestMusicStates();
+    TestLayerStates();
     TestMutedChildren();
 
     return xsflib::testing::Summary("mini");

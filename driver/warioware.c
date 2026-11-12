@@ -14,10 +14,10 @@
  *     others with a second loader. That loader also reads the controllers and draws on screen. The driver loads all
  *     five. The set-up then uploads the samples to ARAM from memory and frees them;
  *   - the game's sound set-up: ARAM, the audio interface, MusyX, every sound group and the reverb;
- *   - the song, by its number, through the game's play function.
- * The driver's thread then sleeps for good, and the song plays from the audio and DSP interrupts. The OS's idle loop
+ *   - the sound, by its number, through the game's play function.
+ * The driver's thread then sleeps for good, and the sound plays from the audio and DSP interrupts. The OS's idle loop
  * runs while no thread can. A step that fails stops the driver with its number in the status word: 1 for the
- * driver's check of its parameter block, 10 + n for the profile's sound file n, and 3 for the song.
+ * driver's check of its parameter block, 10 + n for the profile's sound file n, and 3 for the sound.
  * `driver_params.status` reports the driver's progress to the player (see docs/gcsf.md).
  *
  * Build with `driver/build.py warioware` (clang). The result is committed as src/rip/driver_warioware_blob.h. Building
@@ -34,7 +34,7 @@ struct Params {
     u32 magic;
     u32 version;
     u32 status;   /* written by the driver */
-    u32 sound_id; /* the song: MusyX's song group in the top byte, the song's number in the low 16 bits */
+    u32 sound_id; /* the sound: a song's group or the effect bit in the top byte, the number in the low 16 bits */
     u32 sound;    /* unused: the game keeps the song's handle itself */
     /* the game's functions and variables */
     u32 os_sleep_thread; /* void OSSleepThread(OSThreadQueue*) */
@@ -70,7 +70,7 @@ __attribute__((noreturn)) void driver_main(void) {
         *(volatile u32*)p->file_pointers[i] = data;
     }
 
-    /* The sound set-up, then the song. */
+    /* The sound set-up, then the sound. */
     ((fn0)p->sound_init)();
     if ((s32)((fn2)p->play_sound)(p->play_mode, p->sound_id & 0xffff) < 0)
         fail(3);

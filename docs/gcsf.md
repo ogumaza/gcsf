@@ -248,6 +248,16 @@ next state at once. The game turns that piece's tracks on later. From then on th
 process once per video retrace. An entry of its wave list holds a wave bank in its high 16 bits and a group of that
 bank's wave system in its low 16 bits.
 
+A variant of a piece of music contains the states that the game sets for the piece during play, in bits 16 to 23 of its
+sound ID (see "Ripping"). Bits 16 and 17 set a combo's layer, bits 18 to 20 a state of the BGM player's second table,
+and bit 21 a flight with a Helibird. The driver starts the piece with those bits 0. It then sets the states through the
+game's functions (`play_states`). For a flight, it sets the player's flags to 4 and calls the player's state function
+for the flags. For a combo, it sets the number of the stage object to that of MorningField. The game's function for the
+stage counts then returns the count at which the combo reaches the layer. The driver calls the player's combo function
+with that count. For a state of the second table, it calls the player's function for that table. The game fades to each
+state. The driver sets each one at once. The last five words of the parameter block contain the functions, the stage and
+the offset of the flags.
+
 A chord effect plays over a stage's music (see "Chord effects" in "Ripping"). The driver starts the music of a stage
 through the game's stage object. Then the driver turns each of the music's tracks off at once with code 2 of the BGM
 player's track states. The tracks still run. The driver calls the game's `startChordSe` with the effect's first record
@@ -701,8 +711,9 @@ The `.gcsflib` contains:
   (`dvd/sound/Wave/*.wd`), as `FILE` chunks. For Animal Crossing, Doubutsu no Mori+ and Doubutsu no Mori e+, the disc's
   header and the game's sound data (`audiorom.img`), as `FILE` chunks. For the Pokémon Colosseum Bonus Disc, the disc
   header of the TGC's program and the effects' scripts and samples (`pm6fgm.sem` and `pm6fgm.ssm`), as `FILE` chunks.
-  For a game for `driver/musyx.c` or `driver/musyx_upload.c`, such as Metroid Prime, the disc's header, the catalogue of
-  the game's sounds, and the MusyX files of their groups and songs (see "MusyX catalogue");
+  For a game for `driver/musyx.c`, `driver/musyx_upload.c` or `driver/musyx_song_controls.c`, such as Metroid Prime,
+  the disc's header, the catalogue of the game's sounds, and the MusyX files of their groups and songs (see "MusyX
+  catalogue");
 - a process descriptor.
 
 The wave archives are every one that the start-up archive's wave systems name, unless the game loads its wave groups as
@@ -738,6 +749,75 @@ piece and with the piece's number. Its title is the piece's, a space and the arr
 state: `sailing` (`sea` and `sea_strm`), `on board` (`sea_enemy`), and `near`, `sword` and `near sword` (`enemy2`, the
 battle music, and `mboss` and `mboss_s`, the minibosses' music). An arrangement that plays what another plays is left
 out. The profile lists them (`GameProfile::music_states`). Each holds its state in bits 16 to 19 of its sound ID.
+
+Donkey Kong Jungle Beat changes the tracks of its music during play (see "Driver"). A rip starts each piece as the game
+starts it. It also contains the later states of 43 pieces, 101 variants in all. Each variant follows its piece and has
+the piece's number. Its label is the label of the piece, "_" and the name of the state, for example
+`JA_BGM_MAIN_01_combo1`. The states:
+
+- `combo1` and `combo2`: the layers of a combo. Once the combo's count reaches the stage's first or second count, the
+  BGM player plays more tracks. Most stages use the counts 10 and 45. At the third count, the BGM player plays the same
+  tracks as at the second. That count gets no variant.
+- `helibird`: the tracks that a Helibird adds while it carries DK, in three pieces. `helibird_combo1` and
+  `helibird_combo2` add the layers of a combo too.
+- `below_75`, `change`, `round2` and `round2_below_30`: the fights against the four Kongs. The boss's face sets these
+  states once the boss has 75 % of its health or less, while the boss changes between the rounds, in the second round,
+  and once the boss has 30 % or less there.
+- `hit`, `change`, `round2` and `round2_hit`: the two-round fights against GoroPig, ElephantCannon and SlumpBird. The
+  boss's code sets these states while DK hits or holds the boss in the first round, while the boss changes between the
+  rounds, in the second round, and while DK hits or holds the boss there.
+- `hold`, `below_60`, `below_60_hold`, `below_30` and `below_30_hold`: the final fight. The boss's health picks the
+  state. `hold` plays while DK holds on to the boss.
+- `underwater`: TropicalCoast's music while DK is below a depth of 12,000.
+- `fall`: JA_BGM_MAIN_22 while DK falls from the Helibird into the final fight.
+- `state1` and `state2`: the other states of the BGM player's second table. VsFinalKong's frame sets state 2 of
+  JA_BGM_MAIN_22 by DK's place. EndingCeremony's frame sets state 2 of JA_BGM_ENDING_CELEMONY by DK's place. The bind's
+  music, JA_BGM_BIND_01, gets state 1.
+
+The pieces with variants play in these stages, by the names in the game's stage table:
+
+| Piece | Stages |
+| --- | --- |
+| JA_BGM_MAIN_01 | MorningField |
+| JA_BGM_MAIN_02 | SteepValley |
+| JA_BGM_MAIN_03 | DeepJungle |
+| JA_BGM_MAIN_04 | BigGodTree |
+| JA_BGM_MAIN_05 | TropicalCoast |
+| JA_BGM_MAIN_06 | SkyGarden01, TheNestOfHeliBird |
+| JA_BGM_MAIN_07 | GoUpTheWaterFall |
+| JA_BGM_MAIN_08 | EscapeFromRelic |
+| JA_BGM_MAIN_09 | KikkiFestival |
+| JA_BGM_MAIN_10 | FactoryRelic, UnderGroundMaze |
+| JA_BGM_MAIN_11 | DesertRelic |
+| JA_BGM_MAIN_12 | IceCave, IceTunnel |
+| JA_BGM_MAIN_13 | InfernalZoo |
+| JA_BGM_MAIN_15 | CloudHeaven |
+| JA_BGM_MAIN_16 | AboveTheClouds |
+| JA_BGM_MAIN_17 | ClockTower |
+| JA_BGM_MAIN_18 | FairyWood |
+| JA_BGM_MAIN_19 | RoadToCastle |
+| JA_BGM_MAIN_20 | InTheCastle |
+| JA_BGM_MAIN_21 | DemonFireMarsh |
+| JA_BGM_MAIN_22 | VsFinalKong, VsFinalKong2 |
+| JA_BGM_UG_01 | LavaValley |
+| JA_BGM_VOLCANO | VolcanoBottom |
+| JA_BGM_BIRDRACE_01 and _02 | BirdLand, GreatestRace (_02 from the race's start) |
+| JA_BGM_SEARACE_01 and _02 | SwimRace (_02 from the race's start) |
+| JA_BGM_NINRACE_01 and _02 | RelicOfJungle (_02 from the race's start) |
+| JA_BGM_MATSURI_A and _B | DreadKong01 (_B from the boxing's start) |
+| JA_BGM_BOSS_KONFU_A and _B | VsKonfu (_B from the boxing's start) |
+| JA_BGM_BOSS_MIYAMOTO_A and _B | VsMiyamoto (_B from the boxing's start) |
+| JA_BGM_BOSS_AKEBONO_A and _B | VsAkebono (_B from the boxing's start) |
+| JA_BGM_BOSS_GOROPY_B | VsGoroPig1 to 4 |
+| JA_BGM_BOSS_IUZOU_B | VsElephantCannon1 to 4 |
+| JA_BGM_BOSS_BIRD_B | VsSlumpBird1 to 4 |
+| JA_BGM_BOSS_FINAL | VsFinalKong, VsFinalKong2 (from the fight's start) |
+| JA_BGM_ENDING_CELEMONY | EndingCeremony |
+| JA_BGM_BIND_01 | the bind |
+
+A variant plays its state from the piece's start. In the game, a state comes partway through the piece, with a fade of 5
+to 180 frames. The rips leave out the change from one state to the next. The profile lists the variants
+(`GameProfile::layer_states`). Bits 16 to 23 of a variant's sound ID contain its states.
 
 Some of The Wind Waker's effects make no sound in a rip, and the ripper skips them. Most are empty: their code
 returns at once, and the game plays nothing for them either. 30 others read a port that the game sets when it starts
@@ -1085,8 +1165,8 @@ group 0, is in `S/inst.snd`. That file starts with the number of its parts, 4, t
 big-endian word each. The parts are MusyX's project, pool, sample directory and samples. The ripper lists the table's
 111 songs in its order. A song is named after its file without the extension, for example `bgm_t000`. `--bgm` takes
 every song. The game plays a song at the music's volume of its options, 127 at their default. The play function sets
-the reverb of aux A for each song (see the profile in `src/rip/profiles.cpp`). A song's catalogue entry holds those
-settings. The disc holds six songs that the table leaves out: `bgm_etc004` and `temp1` to `temp5`. The game's code
+the reverb of aux A for each song (see the profile in `src/rip/profiles_musyx.cpp`). A song's catalogue entry holds
+those settings. The disc holds six songs that the table leaves out: `bgm_etc004` and `temp1` to `temp5`. The game's code
 names none of them, and the ripper leaves them out. Both discs hold the same code and the same music. A rip of either
 disc gives the same set.
 
@@ -1167,7 +1247,7 @@ digits, for example `RogueLeader-0048`.
 
 `main.dol` is a loader. It holds the OS, MusyX and a second DOL: the game. The loader maps the game in at 0x7FC00000.
 The driver runs only the loader's code. A rip skips the loader's set-up of the game's heaps and the game's static
-constructors. The profile in `src/rip/profiles.cpp` lists the rip's other patches.
+constructors. The profile in `src/rip/profiles_musyx.cpp` lists the rip's other patches.
 
 Sixty of Rogue Leader's songs play only streams. Each of them holds a single note. The note's program plays stream
 buffers: samples of one second that loop. A stream buffer has the sample type 5 in its bank's sample directory. The game
@@ -1176,16 +1256,16 @@ those of the banks that hold the songs with streams, 21 to 28 and 30 to 37, and 
 rip streams. These songs make no sound in a rip, and the ripper skips them. Eight more songs play a stream along with
 their notes: The Battle Of Yavin I and III, Hyperspace, Imperial Attack, The Asteroid Field, Celebration & End Titles,
 and two songs that the hall doesn't list (group 0x4D's song 0x1A and group 0x61's song 0x3D). A rip of one of them would
-play only its notes. The ripper leaves them out, as streams. The profile in `src/rip/profiles.cpp` lists them.
+play only its notes. The ripper leaves them out, as streams. The profile in `src/rip/profiles_musyx.cpp` lists them.
 
-Pokémon Colosseum keeps most of its files in FSYS archives (see `src/rip/fsys.h`). The module `common_rel` in
+Pokémon Colosseum keeps most of its files in FSYS archives (see ntdlib's `disc/fsys.h`). The module `common_rel` in
 `common.fsys` holds the game's table of sounds: 1,236 entries of 12 bytes. An entry's first byte has bit 7 set for an
 effect. A song's entry gives its group at +1, its reverb's preset at +2, the number of its file at +3 and MusyX's song
 ID in a big-endian half at +4. The module's table of 79 files gives each file's FSYS ID. `bgm_archive.fsys` holds the
 songs under those IDs and names them. The music's groups are in `common.fsys`: group 0 in `snd_music_proj`,
 `snd_music_pool` and `snd_music_sdir`, and group 1 in the same files of `snd_music_atmos`. Their samples are
-`sound/snd_music.samp` and `sound/snd_music_atmos.samp`. The profile in `src/rip/profiles.cpp` gives the tables' places
-in the module. The ripper lists the table's 78 songs in its order. A song is named after its file, for example
+`sound/snd_music.samp` and `sound/snd_music_atmos.samp`. The profile in `src/rip/profiles_musyx.cpp` gives the tables'
+places in the module. The ripper lists the table's 78 songs in its order. A song is named after its file, for example
 `title_song`. `--bgm` takes every song. `null_bgm_song` holds no notes. The game plays it to silence its music. The
 ripper skips it. The game plays its songs at volume 127. Studio 0's aux A holds MusyX's high-quality reverb. The
 module holds 12 presets of the reverb's settings. A song's entry picks one. A song's catalogue entry holds the
@@ -1329,11 +1409,11 @@ a volume of 0x7F and the default pan, then MIDI controller 7 with the sound's vo
 0x83 and 10. A rip plays every sound with controller 7 at 127 and the pan in the centre (0x40). The game plays its music
 that way. The game's scripts play the TV programmes' themes as effects. A rip lists them with the effects. The script of
 the game's sound viewer, `pch/scripts/sndviewer.pkc`, names the sounds. Its names are strings between tabs. They start
-at offset 0x197C3. The script's code from offset 0x4552 gives each name's effect (see `ViewerNames` in
-`src/rip/musyx_catalogue.cpp`). A rip names a sound as the viewer does, for example `SND_SUOU`. A sound that the viewer
-doesn't name is named after the set and its ID, for example `pchsound-1064`. The game's sample file is larger than main
-memory. The game's loader hands MusyX the samples through MusyX's upload callback. `driver/musyx_upload.c` does the
-same.
+at offset 0x197C3. The script's code from offset 0x4552 gives each name's effect (see `ViewerNames` in ntdlib's
+`src/musyx/catalogue_pokemon.cpp`). A rip names a sound as the viewer does, for example `SND_SUOU`. A sound that the
+viewer doesn't name is named after the set and its ID, for example `pchsound-1064`. The game's sample file is larger
+than main memory. The game's loader hands MusyX the samples through MusyX's upload callback. `driver/musyx_upload.c`
+does the same.
 
 Nintendo Puzzle Collection (Japan) holds a menu and three games: Dr. Mario, Panel de Pon and Yoshi's Cookie. `main.dol`
 holds the OS, the disc's library and MusyX. `main.dol` loads the menu and each game as a module of code (a REL) from a
@@ -1566,17 +1646,17 @@ that the effect opens.
   The next start then runs the finished tracks again from their first commands. Such a start ends a pass of the whole
   track, wherever the track finished. Two passes in a row loop the sound, as two jumps back do. The loops inside the
   track don't start that count again.
-- In Pikmin 2 and Pac-Man Vs., a track can also idle in a loop inside a subroutine. That holds only when the loop's
-  passes change nothing. Many of Pikmin 2's root tracks call a routine that polls the game once a beat and never
-  returns. The caves' music is the exception. Its conductors pick the phrases at random. A cave's piece never repeats.
-  The analysis counts its root track's polls as moves, and the piece plays to the limit. In one of Pac-Man Vs.'s effects
-  (se1-0006), the effect's track polls in such a routine while a child track loops.
+- In Pikmin 2, Pac-Man Vs. and Donkey Kong Jungle Beat, a track can also idle in a loop inside a subroutine. That holds
+  only when the loop's passes change nothing. Many of Pikmin 2's root tracks call a routine that polls the game once a
+  beat and never returns. The caves' music is the exception. Its conductors pick the phrases at random. A cave's piece
+  never repeats. The analysis counts its root track's polls as moves, and the piece plays to the limit. In one of
+  Pac-Man Vs.'s effects (se1-0006), the effect's track polls in such a routine while a child track loops. In Donkey Kong
+  Jungle Beat, the first track of an effect calls a routine that waits a tick and jumps back while any other track of
+  the effect plays. The loops of those tracks count.
 - The tracks are taken in the order in which they start. A track's loop counts only while each track before it idles,
   has ended, or has run no command for 10 seconds with no ticks left to wait. Many sound effects work this way: the
-  first track polls until the game stops the sound, and another track loops. In Donkey Kong Jungle Beat, the first track
-  polls in a subroutine. That loop doesn't count. The game's effects that loop therefore play until the 600-second
-  limit. Pikmin's events call each action as a subroutine. An action that loops plays until the limit too, unless it
-  holds. In two of Mario Kart: Double Dash!!'s pieces, a note holds a looping wave while the first tracks wait 133
+  first track polls until the game stops the sound, and another track loops. Pikmin's events call each action as a
+  subroutine. An action that loops plays until the limit, unless it holds. In two of Mario Kart: Double Dash!!'s pieces, a note holds a looping wave while the first tracks wait 133
   seconds between their jumps back. Those pieces play for 266.665 seconds, two of the first track's loops. 16 of the
   game's level sounds play until the 600-second limit. Each holds an engine's note while a timer interrupt sets the
   track's parameters 24 times a second. Each run of the interrupt is a move of the track.

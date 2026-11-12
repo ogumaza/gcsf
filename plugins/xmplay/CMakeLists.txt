@@ -11,3 +11,6 @@ xsflib_add_xmplay_plugin(xmp-gcsf
     OPTIONS ${GCSF_WARNINGS})
 xsflib_add_version(xmp-gcsf VERSION ${gcsf_VERSION} DEFINE GCSF_VERSION DESCRIPTION "GCSF plugin for XMPlay"
                    PRODUCT GCSF COPYRIGHT "Copyright (c) 2026 the GCSF authors. MIT licence.")
+
+# plugins/plugin_traits.h contains the traits that xmp-gcsf shares with the foobar2000 component.
+target_include_directories(xmp-gcsf PRIVATE ${PROJECT_SOURCE_DIR}/plugins)

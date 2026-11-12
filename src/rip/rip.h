@@ -24,7 +24,10 @@
 #include "ntdlib/flipper/z2_params.h"
 #include "ntdlib/jaudio/archive.h"
 #include "ntdlib/jaudio/game_lengths.h"
+#include "ntdlib/jaudio/jac_effects.h"
+#include "ntdlib/jaudio/jungle_beat_states.h"
 #include "ntdlib/jaudio/wave_system.h"
+#include "ntdlib/jaudio/wind_waker_ports.h"
 #include "ntdlib/jaudio/z2_starts.h"
 #include "ntdlib/jaudio/z2_states.h"
 #include "xsflib/rip/length.h"
@@ -134,7 +137,7 @@ enum class MusyXFiles : uint8_t
     kRebelStrike,
     // Nintendo Puzzle Collection's modules: the menu and three games, each a module of the game's code that Yay0
     // packs. A module holds its songs and MusyX's files, or a table of where another file holds them (see
-    // GatherPuzzleCollection).
+    // ntdlib's ReadCatalogue).
     kPuzzleCollection,
     // The NDDEMO tech demo's files: a table of the songs' paths in the demo's code (GameProfile::musyx_songs), the
     // songs' files, one set of MusyX's files in audio/, and a header there that names the effects.
@@ -201,103 +204,20 @@ enum class SoundLibrary : uint8_t
     kHal,
 };
 
-// A part of a Jac game's piece in parts (see GameProfile::parted_piece): its number, and the wave system and group
-// that the game loads for it.
-struct JacPart
-{
-    uint8_t number = 0;
-    uint8_t system = 0;
-    uint8_t group = 0;
-};
-
-// How a Jac game starts a sound effect: by its number as an effect of the system or of the player, or by an action of
-// an event. An event's number is its type << 12 | the action. The sound of Pikmin's formation (number 0) plays while
-// the player moves the formation. A variant gives the move on ports 2 and 3 of the formation's track.
-enum class JacEffect : uint8_t
-{
-    kSystem = 1,
-    kPlayer = 2,
-    kEvent = 3,
-    kFormation = 4,
-};
-
-// The sequences of a Jac game's sequence index that play its effects: the effects sequence plays the system's and the
-// player's, and the events' sequence the events'. A piece of music has a higher number.
-inline constexpr uint32_t kJacEffectsSequence = 0;
-inline constexpr uint32_t kJacEventsSequence = 1;
-inline constexpr uint32_t kJacFirstPiece = 2;
-
-// A Jac effect's sound ID: 0x80000000 | kind << 24 | number << 8 | the sequence that plays it. The number takes 16
-// bits.
-constexpr uint32_t JacEffectId(JacEffect kind, uint32_t number)
-{
-    const uint32_t sequence = kind == JacEffect::kEvent ? kJacEventsSequence : kJacEffectsSequence;
-    return 0x80000000u | static_cast<uint32_t>(kind) << 24 | (number & 0xffffu) << 8 | sequence;
-}
-
-// Whether a Jac sound's ID is an effect's.
-constexpr bool IsJacEffect(uint32_t id)
-{
-    return (id & 0xffu) < kJacFirstPiece;
-}
+// A Jac game's pieces in parts and its effects (ntdlib/jaudio/jac_effects.h).
+using jaudio::IsJacEffect;
+using jaudio::JacEffect;
+using jaudio::JacEffectId;
+using jaudio::JacPart;
+using jaudio::kJacFirstPiece;
 
 // The first bit of a JAudio2 sound's ID that gives the archive of the start-up archive's "baac" block that the sound
 // loads, plus 1 (see GameProfile::baac_archives). The bits from it are 0 for a sound that loads none.
 inline constexpr uint32_t kBaacArchiveShift = 28;
 
-// One of Pikmin 2's pieces of music, for driver/pikmin2.c (see GameProfile::scene_pieces): its file in the sequence
-// archive, how the game makes its object, the wave scene that the game loads for it (a group of the wave system,
-// besides group 0), an AutoBgm's conductor, the object's sound information, and the beat interval that the game gives
-// the root track (0 keeps the default). A boss's music then has a start point: the part of the music that the boss
-// starts. A variant of a piece plays it in another state of the game: with another conductor, or from another start
-// point. Its label names its rips. A piece has no label, and its rips are named after its file.
-struct ScenePiece
-{
-    // How Pikmin 2's driver makes a piece's object: driver/pikmin2.c's PIECE_ values. Each is a way in which the game
-    // makes a piece's object.
-    enum class Kind : uint32_t
-    {
-        kPlain = 0,       // a BgmSeq that only plays
-        kMain = 1,        // an area's music: a JumpBgmSeq with the scene's directors
-        kDirected = 2,    // a boss's music, or the music of 2-player battles
-        kAuto = 3,        // a cave's music: an AutoBgm. Its conductor picks what the tracks play
-        kBattle = 4,      // a DirectedBgm with the 2-player battle directors that the game gives battle_t
-        kFree = 5,        // a DirectedBgm without directors
-        kAutoFree = 6,    // an AutoBgm without directors or the arrangement of its melody
-        kBigBoss = 7,     // the final boss's music, with the final boss's sound object in place
-        kBigBossNear = 8, // the same, with the tension director on: a captain stands near the boss
-    };
-
-    // The JAInter::SoundInfo that the game gives a piece's object, in words: the flags, then the priority and the
-    // sequence's slot in the top two bytes, the pitch (1.0) and the volume in the top byte. The game's list of volumes
-    // (BgmList.txt) then sets the volume.
-    using SoundInfo = std::array<uint32_t, 4>;
-
-    // initMainBgm's sound information. A piece takes it unless its entry gives another.
-    static constexpr SoundInfo kAreaInfo = {0x1f00, 127u << 24 | 1u << 16, 0x3f800000, 50u << 24};
-
-    // The wave scene of a piece that the game never plays. The ripper finds the groups that hold its waves.
-    static constexpr uint8_t kFindWaves = 0xff;
-
-    const char* sequence;
-    Kind kind;
-    uint8_t wave_scene;
-    const char* conductor = "";
-    SoundInfo info = kAreaInfo;
-    uint16_t beat_interval = 0;
-    uint8_t start_point = 0;
-    const char* label = "";
-};
-
-// An effect that reads a port that the game's code sets when it starts the effect, and the values that the game puts
-// there for it (see GameProfile::port_effects). Each value plays a variant of the effect. A piece of music can read a
-// port that the game writes while the piece plays. The driver writes the value once the piece plays.
-struct PortEffect
-{
-    uint32_t id; // the effect's sound ID
-    int port;
-    std::vector<int16_t> values;
-};
+// A sound that reads a port that the game's code sets, and the values that the rips play it with (see
+// GameProfile::port_effects and ntdlib/jaudio/wind_waker_ports.h).
+using jaudio::PortEffect;
 
 // A state of Luigi's Mansion in which the game plays LuigiSings (GameProfile::singing_states). The game starts the
 // piece through a function of its own. That function reads Luigi's health, the room's lights, the room and the room's
@@ -403,23 +323,9 @@ struct GameProfile
     uint32_t parted_piece = 0;
     std::vector<JacPart> parts = {};
 
-    // A Jac game's catalogue of sound effects in its code (0 for none): `effect_count` rows of 20 bytes. A row gives a
-    // number in its word at +4, a pointer to the effect's name at +8 and how the game starts the effect at +16: -2 for
-    // an effect of the system, -1 for one of the player, or the type of the event whose action the number is. The
-    // table at `event_offsets` holds each event type's first entry in the table of actions that follows it. An
-    // action's entry gives the number of the effect that it plays, in its halfword at +4. The game's code starts the
-    // effects in `other_effects` itself. `left_out_effects` are effects of the catalogue that the ripper leaves out.
-    // Both lists hold sound IDs (JacEffectId).
-    uint32_t effect_table = 0;
-    uint32_t effect_count = 0;
-    uint32_t event_offsets = 0;
-    std::vector<uint32_t> other_effects = {};
-    std::vector<uint32_t> left_out_effects = {};
-
-    // A Jac game's event type whose event starts an effect as the game creates it (0 for none), and the type of the
-    // event that a rip plays the type's effects on instead (see JacEffects).
-    uint32_t sounding_event = 0;
-    uint32_t quiet_event = 0;
+    // A Jac game's catalogue of sound effects in its code, and the effects that the ripper adds and leaves out (see
+    // JacEffects).
+    jaudio::JacEffectRules jac_effects = {};
 
     // The wave groups that a Jac game loads for its effects, each (system << 16) | group. A rip loads them for an
     // effect.
@@ -438,21 +344,21 @@ struct GameProfile
     // archive before it starts the effect. The library holds the wave archives of the archives that its sounds load.
     bool baac_archives = false;
 
-    // Other files on the disc that the driver loads for the sound library, such as Donkey Kong Jungle Beat's chord
-    // archive and chord database. The library holds them.
-    std::vector<const char*> other_sound_files = {};
-
-    // Other files of the disc that the game's sound layer reads. The library contains them too.
+    // Other files on the disc that the driver or the game's sound layer reads, such as Donkey Kong Jungle Beat's chord
+    // archive and chord database, or Pikmin 2's conductors. The library holds them. With `other_files_first`, they come
+    // straight after the sound archive and the sequence archive. Otherwise they come after the wave archives, without
+    // the files that the library holds already.
     std::vector<const char*> other_files = {};
+    bool other_files_first = false;
 
     // The driver's parameters, in the order of its parameter block (see the driver's source). They follow the sound's
     // handle, or the wave list for a driver that NamesWaves.
     std::vector<uint32_t> params = {};
 
-    // Pikmin 2's pieces of music. Its driver takes them as a table after `params`. A piece's sound ID is 0x80000000 and
-    // its place here. The game's sound table lists sequences whose data the game's sound layer gives them. The pieces
-    // take their place (see ListSounds). Other profiles leave this empty.
-    std::span<const ScenePiece> scene_pieces = {};
+    // Whether the driver takes Pikmin 2's pieces of music (ntdlib's kPikmin2Pieces) as a table after `params`. A
+    // piece's sound ID is 0x80000000 and its place in the table. The game's sound table lists sequences whose data the
+    // game's sound layer gives them. The pieces take their place (see ListSounds).
+    bool pikmin2_pieces = false;
 
     // What the length analysis and the wave discovery watch in a JAudio game's code (see ntdlib's jaudio::GameWatch).
     // A game that loads its wave groups as its scenes require them gives the functions with which a note looks up its
@@ -502,6 +408,10 @@ struct GameProfile
     // through the game's sound layer (driver/wind_waker.c). The list of sounds gives a piece's states after the piece.
     // Each state shares the piece's number.
     std::span<const MusicState> music_states = {};
+
+    // The states that the game's code sets for its music during play, for driver/jungle_beat.c. The list of sounds puts
+    // a piece's states after the piece. Each state shares the piece's number.
+    std::span<const jaudio::JungleBeatState> layer_states = {};
 
     // The pieces whose tracks the game mutes as it starts them, for a driver that runs ntdlib's start-up of Z2 with the
     // music manager in its profile. The list of sounds gives each piece the children to mute (Sound::piece_state). A
@@ -716,7 +626,7 @@ struct GameProfile
     const char* program_id = nullptr;
 
     // A game with HAL Laboratory's sound library (SoundLibrary::kHal) keeps its effects' scripts in the file at
-    // `sound_archive`, and their samples in the bank file that `other_sound_files` names. The file of scripts holds
+    // `sound_archive`, and their samples in the bank file that `other_files` names. The file of scripts holds
     // four tables, each a 32-bit count and then its entries. The effects form groups. The third table gives each
     // group's first effect, and the fourth gives each effect's script, as an offset in the file. An effect's ID is its
     // group in bits 16 to 31 and its place in the group in the low 16 bits. The game's C header at `sound_names`
@@ -775,7 +685,7 @@ void UnpackSoundArchive(disc::GameFiles& game, const GameProfile& profile);
 // The game's sounds, from its start-up archive. A JAudio1 game's sound table names no sound. `names`, if given, is the
 // game's sound name table (the profile's `sound_names`). It names each sound that it lists, and gives a sequence the
 // game's ID. Otherwise, an effect is named by its category and index ("se4-0123"), and a sequence by its file in the
-// sequence archive, without the extension. Pikmin 2's pieces of music and their variants (GameProfile::scene_pieces)
+// sequence archive, without the extension. Pikmin 2's pieces of music and their variants (GameProfile::pikmin2_pieces)
 // come first. A piece is named by its file, and a variant by its label. Its effects follow. A JAudio2 start-up archive
 // may be compressed with Yaz0. Throws xsflib::FormatError if an archive that the list requires is damaged.
 std::vector<jaudio::SoundEntry> ListSounds(const GameProfile& profile, const std::vector<uint8_t>& sound_archive,
@@ -806,7 +716,8 @@ struct Sound
     // Whether the sound's files take the number of the sound before it in the list: a port effect's variant, a
     // singing state after the first (GameProfile::singing_states), a state of a piece of music
     // (GameProfile::music_states), a piece's second set of tracks (GameProfile::second_set_piece), a piece's second
-    // start (GameProfile::muted_starts) or another state of a piece (GameProfile::piece_states).
+    // start (GameProfile::muted_starts), another state of a piece (GameProfile::piece_states), a state of a piece's
+    // layers (GameProfile::layer_states) or a key of a random effect after the first (GameProfile::random_effects).
     bool shares_number = false;
 
     // The state that the driver gives the piece after it starts the sound: the children of track 0 that it mutes or
@@ -852,10 +763,11 @@ struct GameSounds
 // for HAL, and N64Sounds for the Nintendo 64's sound library. The songs and the pieces are music. The effects aren't.
 // A JAudio game's start-up archive lists its sounds (ListSounds), with the profile's sound name table if it has one.
 // The variants of the profile's port effects follow their effects. A profile's singing states take the place of their
-// piece. A piece's second set of tracks follows the piece. The sequences that no sound plays follow
-// (UnplayedSequences). A JAudio1 game's list requires its sequence archive. Another game's sequence archive that can't
-// be read or is damaged loses only those sequences. A warning then says so. Returns nullopt and sets `error` if a file
-// that the list requires can't be read or is damaged.
+// piece. A piece's second set of tracks follows the piece. The profile's states of music, of layers and of pieces and
+// its second starts follow their piece. The keys of its random effects take the place of their effect. The sequences
+// that no sound plays follow (UnplayedSequences). A JAudio1 game's list requires its sequence archive. Another game's
+// sequence archive that can't be read or is damaged loses only those sequences. A warning then says so. Returns nullopt
+// and sets `error` if a file that the list requires can't be read or is damaged.
 std::optional<GameSounds> ListGameSounds(const disc::GameFiles& game, const GameProfile& profile,
                                          std::string* error = nullptr);
 
@@ -936,12 +848,14 @@ public:
     // group. The profile gives the groups of Pikmin 2's pieces that the game plays. Another sound takes the groups of
     // `systems` that hold the waves that it plays (FindWaves). The driver loads at most DriverBlock::kMaxWaves groups.
     // A longer list keeps its first ones. `group_count`, if given, gets the number of groups before that cut. `ports`
-    // and `state` are as in BuildMini. Returns nullopt when the sound's waves can't be found.
+    // and `state` are as in BuildMini. `searched`, if given, is set to whether the sound played to find its waves.
+    // Returns nullopt when the sound's waves can't be found.
     std::optional<std::vector<uint32_t>> FindWaveGroups(uint32_t id, const FileChunk* file,
                                                         const std::vector<jaudio::WaveSystem>& systems,
                                                         std::size_t* group_count = nullptr,
                                                         const xsflib::psf::Variables* ports = nullptr,
-                                                        const ntdlib::flipper::z2::PieceState* state = nullptr) const;
+                                                        const ntdlib::flipper::z2::PieceState* state = nullptr,
+                                                        bool* searched = nullptr) const;
 
 private:
     struct Impl;

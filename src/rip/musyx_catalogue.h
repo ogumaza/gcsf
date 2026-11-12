@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "ntdlib/disc/game.h"
+#include "ntdlib/musyx/catalogue.h"
 
 #include "rip/rip.h"
 
@@ -24,10 +25,7 @@ namespace gcsf::rip
 struct MusyXCatalogue
 {
     // MusyX's four files for one or more groups: the project, the pool, the sample directory and the samples.
-    struct FileSet
-    {
-        std::vector<uint8_t> project, pool, sdir, samples;
-    };
+    using FileSet = ntdlib::musyx::FileSet;
 
     // A group that a sound pushes: its MusyX group ID and the file set that holds it.
     struct Group
@@ -93,32 +91,6 @@ struct MusyXCatalogue
 // The catalogue of the game's sounds, from its files as the profile's `musyx_files` says. Throws xsflib::FormatError if
 // a file is missing or damaged.
 MusyXCatalogue GatherMusyX(const disc::GameFiles& game, const GameProfile& profile);
-
-// The contents of a file that Yay0 packs, such as a module of Nintendo Puzzle Collection's code. The header holds
-// "Yay0", the unpacked size, the offset of the table of copies and the offset of the table of bytes, as big-endian
-// words. Mask words follow the header. Each bit of a mask, from the top, gives the next step. A set bit takes the next
-// byte of the table of bytes. A clear bit copies earlier output. The copy takes the next big-endian half of the table
-// of copies: the distance back, less 1, in its low 12 bits, and the length, less 2, in its top 4. A length of 0 there
-// takes the length, less 18, from the table of bytes. Throws xsflib::FormatError if the file is damaged, or if it
-// unpacks to more than 64 MiB.
-std::vector<uint8_t> UnpackYay0(std::span<const uint8_t> file);
-
-// An effect of a project's effects group: the group's ID, the effect's ID and the volume of the effect's row.
-struct ProjectEffect
-{
-    uint16_t group = 0;
-    uint16_t id = 0;
-    uint8_t volume = 0;
-};
-
-// The effects of the effects groups in `project`, a MusyX project file, in the file's order. A group's header starts
-// with the offset of the next group (0xFFFFFFFF ends the list), then the group's ID and its type (1 for effects) in
-// big-endian halves. An effects group's header gives the offset of its table of effects at 0x1C. The table holds the
-// number of effects in a big-endian half, two more bytes, and 10 bytes for each effect, starting with the effect's ID
-// in a big-endian half. The byte at +4 of an effect's row limits the voices that play the effect at once. MusyX never
-// starts an effect whose limit is 0. The list leaves such an effect out. The byte at +6 is the effect's volume. Every
-// offset counts from the start of the file. Throws xsflib::FormatError if the file is damaged.
-std::vector<ProjectEffect> ProjectEffects(std::span<const uint8_t> project);
 
 // The catalogue's path in the library.
 inline constexpr char kMusyXCatalogue[] = "MusyX/sounds.bin";

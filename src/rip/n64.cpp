@@ -32,7 +32,6 @@
 
 namespace gcsf::rip
 {
-
 namespace
 {
 
@@ -184,7 +183,7 @@ std::vector<Sound> N64Pieces(const ntdlib::Dol& dol, const GameProfile& profile)
 // Throws xsflib::FormatError if the tables lie outside the sound data.
 std::vector<Sound> N64Effects(const disc::GameFiles& game, const ntdlib::Dol& dol, const GameProfile& profile)
 {
-    const std::vector<uint8_t> rom = ReadGameFile(game, profile.sound_archive);
+    const std::vector<uint8_t> rom = DiscFile(game, profile.sound_archive);
     const N64TableSequence effects = N64Sequence(dol, profile, profile.n64_effects);
     const uint64_t offset = effects.offset;
     const uint64_t size = effects.size;
@@ -569,38 +568,16 @@ private:
 // layers follow. The sound ends when the driver clears the handle.
 std::optional<Timing> AnalyzeN64Sound(Player& player, const GameProfile& profile, uint32_t handle_address, bool effect)
 {
-    using ntdlib::jaudio::FramesToMs;
-    using ntdlib::jaudio::LoopFinder;
     using ntdlib::jaudio::TrackEvent;
-    const auto ms = [](uint64_t frames)
-    {
-        return FramesToMs(frames, kLengthRules.sample_rate);
-    };
 
     AnalysisMachine machine(player);
     N64Tracks tracks(machine, profile, effect);
-    uint64_t frames = 0;
+    ntdlib::jaudio::SoundLength length(kLengthRules);
     const ScopedWatch watch(machine.Cpu(), {profile.n64_read_byte, profile.n64_flow},
-                            [&tracks, &frames](uint32_t pc) { tracks.OnWatch(pc, frames); });
+                            [&tracks, &length](uint32_t pc) { tracks.OnWatch(pc, length.Frames()); });
     const auto read_wait = [&tracks](uint32_t track)
     {
         return tracks.Wait(track);
-    };
-
-    // Play until the sound ends, loops twice, holds, falls silent for good or reaches the limit.
-    std::vector<int16_t> block(kLengthRules.block_frames * 2);
-    std::optional<LoopFinder> finder;
-    std::optional<uint64_t> first_sound;
-    uint64_t last_sound = 0;
-    std::optional<uint64_t> released;
-    const auto ended = [&]() -> Timing
-    {
-        if (!first_sound)
-        {
-            return {kLengthRules.tail_ms, 0, true};
-        }
-
-        return {ms(last_sound + 1) + kLengthRules.tail_ms, 0, false};
     };
 
     const auto changes = [](uint8_t code)
@@ -608,7 +585,9 @@ std::optional<Timing> AnalyzeN64Sound(Player& player, const GameProfile& profile
         return code != kN64Still;
     };
 
-    while (ms(frames) < kLengthRules.limit_ms)
+    // Play until the sound ends, loops twice, holds, falls silent for good or reaches the limit.
+    std::vector<int16_t> block(kLengthRules.block_frames * 2);
+    while (length.Running())
     {
         tracks.Events().clear();
         if (machine.Render(block.data(), kLengthRules.block_frames) != kLengthRules.block_frames)
@@ -616,79 +595,30 @@ std::optional<Timing> AnalyzeN64Sound(Player& player, const GameProfile& profile
             return std::nullopt;
         }
 
-        for (std::size_t i = 0; i < kLengthRules.block_frames; i++)
-        {
-            if (xsflib::rip::Audible(std::span<const int16_t>(&block[2 * i], 2)))
-            {
-                last_sound = frames + i;
-                first_sound = first_sound.value_or(last_sound);
-            }
-        }
-
+        length.Hear(block);
         const uint32_t handle = machine.Word(handle_address);
-        if (handle && !finder)
+        if (handle && !length.Following())
         {
-            finder.emplace(tracks.Start(handle), kLengthRules.sample_rate, +changes);
+            length.Follow(tracks.Start(handle), +changes);
         }
 
-        // The tracks' loops. Loops before the first sound don't count.
-        const ntdlib::jaudio::Sounded sounded = {first_sound.has_value(), last_sound};
         for (const TrackEvent& event : tracks.Events())
         {
-            const LoopFinder::Verdict verdict = finder ? finder->Take(event, sounded) : LoopFinder::Verdict::kNone;
-            if (verdict == LoopFinder::Verdict::kLoops)
+            if (const std::optional<Timing> timing = length.Take(event))
             {
-                return Timing{ms(event.frame), kLengthRules.loop_fade_ms, false};
+                return timing;
             }
-
-            if (verdict == LoopFinder::Verdict::kEnded)
-            {
-                return ended();
-            }
-        }
-
-        frames += kLengthRules.block_frames;
-        if (finder)
-        {
-            finder->TakeWaits(read_wait);
         }
 
         // The driver clears the handle when the player stops. The notes can still sound after that: the output runs
         // behind the sequence, and a release fades on.
-        if (!handle && finder && !released)
+        if (const std::optional<Timing> timing = length.EndBlock(handle != 0, read_wait))
         {
-            released = frames;
-        }
-
-        if (released && (ms(frames - std::max(*released, last_sound)) >= kLengthRules.tail_ms ||
-                         ms(frames - *released) >= ntdlib::jaudio::kStillMs))
-        {
-            return ended();
-        }
-
-        // A sound that holds loops where it holds, if it still sounds.
-        if (first_sound && finder && finder->Holds(frames))
-        {
-            if (ms(frames - last_sound) <= kLengthRules.holding_ms)
-            {
-                return Timing{ms(frames), kLengthRules.loop_fade_ms, false};
-            }
-
-            return ended();
-        }
-
-        if (first_sound && ms(frames - last_sound) >= kLengthRules.silence_ms)
-        {
-            return ended();
+            return timing;
         }
     }
 
-    if (!first_sound)
-    {
-        return ended();
-    }
-
-    return Timing{kLengthRules.limit_ms, kLengthRules.loop_fade_ms, false};
+    return length.AtLimit();
 }
 
 } // namespace

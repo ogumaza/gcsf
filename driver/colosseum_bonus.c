@@ -29,7 +29,7 @@
 
 #include "driver.h"
 
-/* The retraces that the driver waits for the samples and for the effect before it gives up: 10 s. */
+/* The retraces that the driver waits for the samples before it gives up: 10 s. */
 #define SETUP_RETRACES 600u
 
 /* The volume and the pan with which the program plays every effect: the highest volume, in the centre. */

@@ -48,56 +48,19 @@
  */
 
 #include "driver.h"
+#include "jaudio/pikmin.h"
 
-/* The fields of Params.sound_id: 0x80000000 | group << 24 | wave system << 16 | part << 8 | piece. The piece field
-   holds the piece's number in the sequence index. The driver loads the wave group `group` of the wave system. Part 0
-   plays the piece in the game's slot for music. Any other part goes to the piece that the sound library plays from
-   its start-up. */
-#define SOUND_PIECE(id) ((id) & 0xffu)
-#define SOUND_PART(id) (((id) >> 8) & 0xffu)
+/* The fields of Params.sound_id: 0x80000000 | group << 24 | wave system << 16 | part << 8 | piece (SOUND_PIECE and
+   SOUND_PART). The driver loads the wave group `group` of the wave system. */
 #define SOUND_SYSTEM(id) (((id) >> 16) & 0xffu)
 #define SOUND_GROUP(id) (((id) >> 24) & 0x3fu)
 
-/* An effect's ID: 0x80000000 | kind << 24 | number << 8 | sequence. The sequence field holds 0 or 1, the effects'
-   sequence or the events'. Pieces start at FIRST_PIECE. The kind gives the game's function that starts the effect. An
-   event's number holds the event's type and the action (EVENT_TYPE). */
-#define FIRST_PIECE 2u
-#define EFFECT_KIND(id) (((id) >> 24) & 0x7fu)
-#define EFFECT_NUMBER(id) (((id) >> 8) & 0xffffu)
-#define EFFECT_SYSTEM 1u
-#define EFFECT_PLAYER 2u
-#define EFFECT_EVENT 3u
-#define EFFECT_FORMATION 4u
-#define EVENT_TYPE(number) ((number) >> 12)
-#define EVENT_ACTION(number) ((number) & 0xfffu)
-
-/* The DVD task's passes for a piece's files and for the effects' wave groups. The game's scene set-up makes them the
-   same way. */
-#define PASS_OF_PIECE 0x10000u
-#define PASS_OF_EFFECTS 0x20000u
-
 /* The wave groups that the game's set-up of its first scene of play loads for the effects: groups 1 to 3 of wave
-   system 0, then group 0 of systems 14, 15 and 2 (Jac_SceneSetup, 0x80019be0). It loads the first three without
+   system 0 (EFFECTS_SYSTEM), then group 0 of systems 14, 15 and 2 (Jac_SceneSetup, 0x80019be0). It loads the first three without
    making them their system's scene. The ripper's profile names the same groups (effect_groups). */
-#define EFFECTS_SYSTEM 0u
 #define EFFECTS_FIRST_GROUP 1u
 #define EFFECTS_LAST_GROUP 3u
 static const u32 scene_systems[] = {14, 15, 2};
-
-/* The game's scene of a stage's play, and the system's effect that closes the menu. Jac_PlaySystemSe plays that effect
-   only while the menu's flag is set. The effect that opens the menu sets it. */
-#define SCENE_OF_PLAY 5u
-#define EFFECT_CLOSES_MENU 7u
-
-/* The port that a cutscene writes its part to, and the word of a track that holds the track's first child. The root
-   track opens the track that plays the part as its first child. */
-#define PART_PORT 0u
-#define TRACK_FIRST_CHILD 0x44u
-
-/* A track's state, a byte: 0 while the track is free. A track has 16 children, in words from TRACK_FIRST_CHILD. */
-#define TRACK_STATE 0x3cu
-#define TRACK_FREE 0u
-#define TRACK_CHILDREN 16u
 
 /* The ports of the formation's track that Jac_Orima_Formation (0x80018200) writes: x, and the length of the move
    (x, y), from 0 to 179. It writes 1 to port 0 as a move starts and 0 as it ends. The driver passes port 2's value as

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 
 /*
- * GCSF guest driver for The Legend of Zelda: Four Swords Adventures (USA) and Four Swords+ (Japan). Their sound library
- * is JAudio2, the sound library of Nintendo EAD's JSystem. The driver is compiled for Gekko and stored in the game's
- * .gcsflib. The player boots the game's start-up code: the OS initialisation and the static constructors. The rip
- * patches the game's main to branch here.
+ * GCSF guest driver for The Legend of Zelda: Four Swords Adventures (USA and Europe) and Four Swords+ (Japan). Their
+ * sound library is JAudio2, the sound library of Nintendo EAD's JSystem. The driver is compiled for Gekko and stored in
+ * the game's .gcsflib. The player boots the game's start-up code: the OS initialisation and the static constructors.
+ * The rip patches the game's main to branch here.
  *
  * The driver then calls the game's functions to do what the game's main does for sound, without its graphics. The
  * profile in `driver_params` gives their addresses. The ripper fills in the profile. The driver starts the video

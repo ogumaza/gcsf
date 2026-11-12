@@ -23,7 +23,6 @@
 
 namespace gcsf::rip
 {
-
 namespace
 {
 
@@ -63,7 +62,7 @@ std::map<uint32_t, std::string> HalNames(const disc::GameFiles& game, const Game
 
 std::vector<Sound> HalEffects(const disc::GameFiles& game, const GameProfile& profile)
 {
-    const std::vector<uint8_t> scripts = ReadGameFile(game, profile.sound_archive);
+    const std::vector<uint8_t> scripts = DiscFile(game, profile.sound_archive);
     const xsflib::Reader r(scripts, true);
     uint32_t at = 0;
     for (int table = 0; table < 2; table++)
@@ -105,7 +104,7 @@ std::vector<Sound> HalEffects(const disc::GameFiles& game, const GameProfile& pr
 std::optional<std::string> AddHalFiles(ProgramBuilder& program, const disc::GameFiles& game, const GameProfile& profile)
 {
     std::vector<std::string> paths = {profile.sound_archive};
-    paths.insert(paths.end(), profile.other_sound_files.begin(), profile.other_sound_files.end());
+    paths.insert(paths.end(), profile.other_files.begin(), profile.other_files.end());
 
     return AddDiscFiles(program, game, paths);
 }

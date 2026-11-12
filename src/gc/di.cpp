@@ -103,9 +103,9 @@ void DiscInterface::Write(uint32_t offset, uint32_t value, uint64_t now)
         status_ = (status_ & kStatusFlags & ~value) | (value & kStatusMasks);
 
         // A break stops the command in progress. The command then ends with the break's interrupt.
-        if ((value & kBreak) && done_ != UINT64_MAX)
+        if ((value & kBreak) && done_ != kNoCommand)
         {
-            done_ = UINT64_MAX;
+            done_ = kNoCommand;
             control_ &= ~kStart;
             status_ |= kBreakInterrupt;
         }
@@ -130,7 +130,7 @@ void DiscInterface::Write(uint32_t offset, uint32_t value, uint64_t now)
         break;
 
     case kControlRegister:
-        if ((value & kStart) && done_ == UINT64_MAX)
+        if ((value & kStart) && done_ == kNoCommand)
         {
             control_ = value & 7;
             Start(now);
@@ -222,7 +222,7 @@ void DiscInterface::Complete()
 
     status_ |= ok ? kTransferInterrupt : kErrorInterrupt;
     control_ &= ~kStart;
-    done_ = UINT64_MAX;
+    done_ = kNoCommand;
 }
 
 bool DiscInterface::ReadIntoMemory(uint64_t offset, uint32_t length)

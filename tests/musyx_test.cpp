@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: MIT
 
 // Tests of how a MusyX song's tracks loop (rip::SectionsOf), with made-up SNG files: songs without sections, songs in
-// sections, and damaged songs. Then a test of the catalogue's file (rip::CatalogueFile) with an effect's controllers,
-// and tests of rip::UnpackYay0 with made-up files. The last test checks the file sets and the songs that some sounds of
-// a made-up catalogue use (rip::FilesInUse).
+// sections, and damaged songs. Then a test of the catalogue's file (rip::CatalogueFile) with an effect's controllers.
+// The last test checks the file sets and the songs that some sounds of a made-up catalogue use (rip::FilesInUse).
 
 #include <algorithm>
 #include <cstddef>
@@ -65,6 +64,7 @@ void TestWithoutSections()
     {
         all_in_0 = all_in_0 && section == 0;
     }
+
     Check(all_in_0 && looping.looping == 1, "a song without sections keeps its tracks in section 0, which loops");
 
     const rip::MusyXSections ends = rip::SectionsOf(MakeSong({kEnd, kNoTrack, kEnd}, {}));
@@ -119,6 +119,7 @@ void TestControllers()
     catalogue.entries.push_back(effect);
 
     const std::vector<uint8_t> file = rip::CatalogueFile(catalogue);
+
     Check(file.size() == 32 + 2 * 20 + 2 * 4 + 3 * 8, "the file holds two sounds, two group entries and three words");
     if (file.size() != 32 + 2 * 20 + 2 * 4 + 3 * 8)
     {
@@ -153,6 +154,7 @@ void TestSongControllers()
     catalogue.entries.push_back(song);
 
     const std::vector<uint8_t> file = rip::CatalogueFile(catalogue);
+
     Check(file.size() == 32 + 20 + 4 + 2 * 8, "the file holds one sound, one group entry and two words");
     if (file.size() != 32 + 20 + 4 + 2 * 8)
     {
@@ -165,67 +167,6 @@ void TestSongControllers()
     const uint8_t* words = file.data() + xsflib::LoadBe32(file.data() + 0x1c);
     Check(xsflib::LoadBe32(words) == 0x50007 && xsflib::LoadBe32(words + 4) == 80, "CC7 on channel 5, at 80");
     Check(xsflib::LoadBe32(words + 8) == 0x5000a && xsflib::LoadBe32(words + 12) == 64, "CC10 on channel 5, at 64");
-}
-
-// A made-up Yay0 file: the header for `size` bytes, then the masks, the table of copies and the table of bytes.
-std::vector<uint8_t> MakeYay0(uint32_t size, const std::vector<uint32_t>& masks, const std::vector<uint16_t>& copies,
-                              const std::string& bytes)
-{
-    const auto copies_at = static_cast<uint32_t>(16 + masks.size() * 4);
-    const auto bytes_at = static_cast<uint32_t>(copies_at + copies.size() * 2);
-    std::vector<uint8_t> file(bytes_at + bytes.size());
-    xsflib::StoreBe32(file.data(), 0x59617930); // "Yay0"
-    xsflib::StoreBe32(file.data() + 4, size);
-    xsflib::StoreBe32(file.data() + 8, copies_at);
-    xsflib::StoreBe32(file.data() + 12, bytes_at);
-    for (std::size_t i = 0; i < masks.size(); i++)
-    {
-        xsflib::StoreBe32(file.data() + 16 + i * 4, masks[i]);
-    }
-
-    for (std::size_t i = 0; i < copies.size(); i++)
-    {
-        xsflib::StoreBe16(file.data() + copies_at + i * 2, copies[i]);
-    }
-
-    std::copy(bytes.begin(), bytes.end(), file.begin() + bytes_at);
-
-    return file;
-}
-
-// The mask 1110 10 takes "abc", copies 6 bytes from 3 back, takes "d", then copies from 10 back. That copy's half gives
-// a length of 0, and the byte 2 after "d" gives 2 + 18 = 20 bytes. Both copies overlap the bytes that they write.
-void TestYay0()
-{
-    const std::vector<uint8_t> file = MakeYay0(30, {0xe8000000}, {0x4002, 0x0009}, std::string("abcd\x02", 5));
-    const std::vector<uint8_t> cut = MakeYay0(5, {0xe8000000}, {0x4002}, "abc");
-
-    std::vector<uint8_t> out, cut_out;
-    const std::string error = ErrorOf([&] { out = rip::UnpackYay0(file); });
-    const std::string cut_error = ErrorOf([&] { cut_out = rip::UnpackYay0(cut); });
-
-    const std::string kExpected = "abcabcabcdabcabcabcdabcabcabcd";
-    Check(error.empty() && out == std::vector<uint8_t>(kExpected.begin(), kExpected.end()),
-          "Yay0's literals and copies");
-    Check(cut_error.empty() && cut_out == std::vector<uint8_t>{'a', 'b', 'c', 'a', 'b'},
-          "a copy stops at the unpacked size");
-}
-
-void TestDamagedYay0()
-{
-    std::vector<uint8_t> no_magic = MakeYay0(3, {0xe0000000}, {}, "abc");
-    no_magic[3] = '1';
-    Check(!ErrorOf([&no_magic] { rip::UnpackYay0(no_magic); }).empty(), "a file without \"Yay0\" is refused");
-
-    const std::vector<uint8_t> early = MakeYay0(4, {0}, {0x1000}, "");
-    Check(!ErrorOf([&early] { rip::UnpackYay0(early); }).empty(), "a copy from before the start is refused");
-
-    const std::vector<uint8_t> short_table = MakeYay0(4, {0xf0000000}, {}, "abc");
-    Check(!ErrorOf([&short_table] { rip::UnpackYay0(short_table); }).empty(),
-          "a table that ends before the unpacked size is refused");
-
-    const std::vector<uint8_t> too_big = MakeYay0(64u << 20 | 1, {0x80000000}, {}, "a");
-    Check(!ErrorOf([&too_big] { rip::UnpackYay0(too_big); }).empty(), "a size over 64 MiB is refused");
 }
 
 // A catalogue of four file sets and three songs. Sound 0 plays song 2 and has groups in sets 0 and 3. Sound 1 is an
@@ -252,12 +193,13 @@ void TestFilesInUse()
     other.groups = {{6, 2}};
     catalogue.entries.push_back(other);
 
-    const std::vector<uint32_t> sounds = {0, 1, 7};
-    const rip::MusyXFilesInUse use = rip::FilesInUse(catalogue, sounds);
+    const std::vector<uint32_t> kSounds = {0, 1, 7};
+
+    const rip::MusyXFilesInUse use = rip::FilesInUse(catalogue, kSounds);
+    const rip::MusyXFilesInUse none = rip::FilesInUse(catalogue, {});
+
     Check(use.sets == std::vector<bool>{true, true, false, true}, "the sounds use the sets of their groups");
     Check(use.songs == std::vector<bool>{false, false, true}, "the sounds use their songs' files");
-
-    const rip::MusyXFilesInUse none = rip::FilesInUse(catalogue, {});
     Check(none.sets == std::vector<bool>(4) && none.songs == std::vector<bool>(3), "no sounds use no files");
 }
 
@@ -270,8 +212,6 @@ int main()
     TestDamaged();
     TestControllers();
     TestSongControllers();
-    TestYay0();
-    TestDamagedYay0();
     TestFilesInUse();
 
     return xsflib::testing::Summary("musyx");

@@ -55,7 +55,8 @@ System::System(Disc& disc) : disc_(disc)
 void System::Start(uint32_t entry)
 {
     // The part of the boot that the GameCube shares with the Wii, then the CPU (see MachineBase).
-    LoadBootInfo({1, kArenaTop, kRetailConsole, kBusClock, kCpuClock});
+    LoadBootInfo(
+        {.arena_top = kArenaTop, .console_type = kRetailConsole, .bus_clock = kBusClock, .cpu_clock = kCpuClock});
     StartCpu(entry);
 }
 

@@ -8,6 +8,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <set>
@@ -18,6 +19,7 @@
 
 #include "ntdlib/disc/game.h"
 #include "ntdlib/dol.h"
+#include "ntdlib/musyx/project.h"
 #include "ntdlib/ppc/cpu.h"
 #include "xsflib/ascii.h"
 #include "xsflib/binary.h"
@@ -34,7 +36,6 @@
 
 namespace gcsf::rip
 {
-
 namespace
 {
 
@@ -181,15 +182,24 @@ constexpr uint32_t kSectionEffects = 0x80, kSectionNarrations = 0x81, kSectionCo
 // A group's four files: its pool, its project, its sample directory and its samples, two file numbers apart.
 constexpr uint32_t kFileStep = 2, kGroupFiles = 4;
 
+// The word of a Camelot game's table that marks no files, and the size of an entry of its tables of narrations and of
+// courts.
+constexpr uint32_t kNoFiles = 0xffffffff, kCamelotEntry = 8;
+
+// The bytes of a voice bank's name at the start of its entry: the profile's size, or 4 for a pointer to the name.
+uint32_t VoiceBankNameSize(const GameProfile& profile)
+{
+    return profile.voice_bank_name_size != 0 ? profile.voice_bank_name_size : 4;
+}
+
 // The four files of each group that holds a game's effects beside its sound banks (see GameProfile::voice_banks): the
 // voice banks' groups, the narrations' groups, the group of the narrations that the game keeps, the courts' groups and
 // the groups that no table lists. Each group's files are listed once. Throws xsflib::FormatError if a table lies
 // outside the game's code.
 std::vector<std::string> CamelotEffectFiles(const ntdlib::Dol& dol, const GameProfile& profile)
 {
-    constexpr uint32_t kNoFiles = 0xffffffff, kEntry = 8;
     std::vector<uint32_t> firsts;
-    const uint32_t name_size = profile.voice_bank_name_size != 0 ? profile.voice_bank_name_size : 4;
+    const uint32_t name_size = VoiceBankNameSize(profile);
     for (uint32_t b = 0; b < profile.voice_bank_count; b++)
     {
         const uint32_t at = profile.voice_banks + b * profile.voice_bank_size;
@@ -198,13 +208,15 @@ std::vector<std::string> CamelotEffectFiles(const ntdlib::Dol& dol, const GamePr
 
     for (uint32_t n = 0; n < profile.narration_count; n++)
     {
-        firsts.push_back(xsflib::LoadBe32(EffectEntry(dol, profile.narrations + n * kEntry, kEntry).data()));
+        firsts.push_back(
+            xsflib::LoadBe32(EffectEntry(dol, profile.narrations + n * kCamelotEntry, kCamelotEntry).data()));
     }
 
     firsts.push_back(profile.narration_files != 0 ? profile.narration_files : kNoFiles);
     for (uint32_t c = 0; c < profile.court_bank_count; c++)
     {
-        firsts.push_back(xsflib::LoadBe32(EffectEntry(dol, profile.court_banks + c * kEntry, kEntry).data()));
+        firsts.push_back(
+            xsflib::LoadBe32(EffectEntry(dol, profile.court_banks + c * kCamelotEntry, kCamelotEntry).data()));
     }
 
     for (uint32_t g = 0; g < profile.other_group_count; g++)
@@ -230,6 +242,129 @@ std::vector<std::string> CamelotEffectFiles(const ntdlib::Dol& dol, const GamePr
     return paths;
 }
 
+// The effects of a Camelot game by ID, each with its sound ID and label (see CamelotEffects).
+using CamelotEffectMap = std::map<uint32_t, Sound>;
+
+// Adds effect `id` of `bank` with the sound ID `sound` to `effects`, unless `effects` has the ID. Its label is the
+// bank, a hyphen and the ID in four digits.
+void AddCamelotEffect(CamelotEffectMap& effects, uint32_t id, uint32_t sound, const std::string& bank)
+{
+    effects.try_emplace(id, Sound{sound, bank + "-" + ZeroPadded(id, 4), false});
+}
+
+// The project of the group whose first file is number `first`. Throws xsflib::FormatError if the project is missing or
+// too short for a project.
+std::vector<uint8_t> ReadCamelotProject(const disc::GameFiles& game, uint32_t first)
+{
+    constexpr uint32_t kProjectFile = 2, kGroupHeader = 6;
+    const std::string path = CamelotPath(first + kProjectFile);
+    std::vector<uint8_t> project = DiscFile(game, path);
+    if (project.size() < kGroupHeader)
+    {
+        throw xsflib::FormatError(path + " is too short for a project");
+    }
+
+    return project;
+}
+
+// The effects of the banks that the game loads at start-up: the ranges of IDs in the table at `effect_ranges`.
+void AddStartUpEffects(const ntdlib::Dol& dol, const GameProfile& profile, CamelotEffectMap& effects)
+{
+    constexpr uint32_t kEndOfRanges = 0xffffffff, kRangeEntry = 8;
+    for (uint32_t at = profile.effect_ranges; at != 0; at += kRangeEntry)
+    {
+        const uint32_t first = xsflib::LoadBe32(EffectEntry(dol, at, 4).data());
+        if (first == kEndOfRanges)
+        {
+            break;
+        }
+
+        const uint32_t last = xsflib::LoadBe32(EffectEntry(dol, at, kRangeEntry).data() + 4);
+        for (uint32_t id = first; id <= last && id <= 0xffff; id++)
+        {
+            AddCamelotEffect(effects, id, kSectionEffects << 24 | id, "se");
+        }
+    }
+}
+
+// The effects of the voice banks, each labelled with its bank's name.
+void AddVoiceBankEffects(const ntdlib::Dol& dol, const GameProfile& profile, CamelotEffectMap& effects)
+{
+    const uint32_t name_size = VoiceBankNameSize(profile);
+    for (uint32_t b = 0; b < profile.voice_bank_count; b++)
+    {
+        const std::span<const uint8_t> entry =
+            EffectEntry(dol, profile.voice_banks + b * profile.voice_bank_size, profile.voice_bank_size);
+        const std::span<const uint8_t> name =
+            profile.voice_bank_name_size != 0 ? entry.first(name_size) : DolBytes(dol, xsflib::LoadBe32(entry.data()));
+        const std::string bank = TerminatedText(name, "main.dol's name of a voice bank doesn't end");
+        const uint32_t count = xsflib::LoadBe32(entry.data() + name_size + 4);
+        const uint32_t first = xsflib::LoadBe32(entry.data() + name_size + 8);
+        for (uint32_t id = first; id < first + count && id <= 0xffff; id++)
+        {
+            AddCamelotEffect(effects, id, kSectionEffects << 24 | (b + 1) << 16 | id, bank);
+        }
+    }
+}
+
+// The narrations' effects.
+void AddNarrationEffects(const ntdlib::Dol& dol, const GameProfile& profile, CamelotEffectMap& effects)
+{
+    for (uint32_t n = 0; n < profile.narration_count; n++)
+    {
+        const uint32_t id =
+            xsflib::LoadBe16(EffectEntry(dol, profile.narrations + n * kCamelotEntry, kCamelotEntry).data() + 6);
+        AddCamelotEffect(effects, id, kSectionNarrations << 24 | n, "narration");
+    }
+}
+
+// The effects of the courts' banks: the effects of each bank's group in its project.
+void AddCourtEffects(const ntdlib::Dol& dol, const disc::GameFiles& game, const GameProfile& profile,
+                     CamelotEffectMap& effects)
+{
+    std::set<uint32_t> groups;
+    for (uint32_t c = 0; c < profile.court_bank_count; c++)
+    {
+        const std::span<const uint8_t> entry = EffectEntry(dol, profile.court_banks + c * kCamelotEntry, kCamelotEntry);
+        const uint32_t file = xsflib::LoadBe32(entry.data());
+        const uint16_t group = xsflib::LoadBe16(entry.data() + 6);
+        if (file == kNoFiles || !groups.insert(group).second)
+        {
+            continue;
+        }
+
+        for (const ntdlib::musyx::ProjectEffect& effect :
+             ntdlib::musyx::ProjectEffects(ntdlib::musyx::ReadProject(ReadCamelotProject(game, file))))
+        {
+            if (effect.group == group)
+            {
+                AddCamelotEffect(effects, effect.row.id, kSectionCourtEffects << 24 | c << 16 | effect.row.id, "court");
+            }
+        }
+    }
+}
+
+// The effects of the groups that no table lists: those of the first group in each group's project.
+void AddOtherGroupEffects(const disc::GameFiles& game, const GameProfile& profile, CamelotEffectMap& effects)
+{
+    constexpr uint32_t kMaxGroupField = 0xfff;
+    for (uint32_t g = 0; g < profile.other_group_count; g++)
+    {
+        const uint32_t first = profile.other_groups + g * kGroupFiles * kFileStep;
+        const std::vector<uint8_t> project = ReadCamelotProject(game, first);
+        const uint16_t group = xsflib::LoadBe16(project.data() + 4);
+        for (const ntdlib::musyx::ProjectEffect& effect :
+             ntdlib::musyx::ProjectEffects(ntdlib::musyx::ReadProject(project)))
+        {
+            if (effect.group == group && effect.row.id <= kMaxGroupField && first / 2 <= kMaxGroupField)
+            {
+                AddCamelotEffect(effects, effect.row.id, kSectionGroupEffects << 24 | first / 2 << 12 | effect.row.id,
+                                 "se");
+            }
+        }
+    }
+}
+
 // The effects of a game for driver/mario_golf.c (see GameProfile::voice_banks), in the order of their IDs. A sound
 // ID's top byte gives the driver's section for the effect. An effect of the banks that the game loads at start-up
 // gives its ID below. An effect of a voice bank adds the bank's number plus 1 in bits 16 to 23. An effect of a court's
@@ -242,100 +377,12 @@ std::vector<std::string> CamelotEffectFiles(const ntdlib::Dol& dol, const GamePr
 // Throws xsflib::FormatError if a table lies outside the game's code, or if a group's project is missing or damaged.
 std::vector<Sound> CamelotEffects(const ntdlib::Dol& dol, const disc::GameFiles& game, const GameProfile& profile)
 {
-    constexpr uint32_t kEndOfRanges = 0xffffffff, kNoFiles = 0xffffffff, kEntry = 8, kProjectFile = 2,
-                       kMaxGroupField = 0xfff, kGroupHeader = 6;
-    std::map<uint32_t, Sound> effects;
-    const auto add = [&effects](uint32_t id, uint32_t sound, const std::string& bank)
-    {
-        effects.try_emplace(id, Sound{sound, bank + "-" + ZeroPadded(id, 4), false});
-    };
-    const auto read_project = [&game](uint32_t first)
-    {
-        const std::string path = CamelotPath(first + kProjectFile);
-        std::vector<uint8_t> project;
-        if (!game.read_file || !game.read_file(path, project))
-        {
-            throw xsflib::FormatError("can't read " + path);
-        }
-
-        if (project.size() < kGroupHeader)
-        {
-            throw xsflib::FormatError(path + " is too short for a project");
-        }
-
-        return project;
-    };
-
-    for (uint32_t at = profile.effect_ranges; at != 0; at += kEntry)
-    {
-        const uint32_t first = xsflib::LoadBe32(EffectEntry(dol, at, 4).data());
-        if (first == kEndOfRanges)
-        {
-            break;
-        }
-
-        const uint32_t last = xsflib::LoadBe32(EffectEntry(dol, at, kEntry).data() + 4);
-        for (uint32_t id = first; id <= last && id <= 0xffff; id++)
-        {
-            add(id, kSectionEffects << 24 | id, "se");
-        }
-    }
-
-    const uint32_t name_size = profile.voice_bank_name_size != 0 ? profile.voice_bank_name_size : 4;
-    for (uint32_t b = 0; b < profile.voice_bank_count; b++)
-    {
-        const std::span<const uint8_t> entry =
-            EffectEntry(dol, profile.voice_banks + b * profile.voice_bank_size, profile.voice_bank_size);
-        const std::span<const uint8_t> name =
-            profile.voice_bank_name_size != 0 ? entry.first(name_size) : DolBytes(dol, xsflib::LoadBe32(entry.data()));
-        const std::string bank = TerminatedText(name, "main.dol's name of a voice bank doesn't end");
-        const uint32_t count = xsflib::LoadBe32(entry.data() + name_size + 4);
-        const uint32_t first = xsflib::LoadBe32(entry.data() + name_size + 8);
-        for (uint32_t id = first; id < first + count && id <= 0xffff; id++)
-        {
-            add(id, kSectionEffects << 24 | (b + 1) << 16 | id, bank);
-        }
-    }
-
-    for (uint32_t n = 0; n < profile.narration_count; n++)
-    {
-        const uint32_t id = xsflib::LoadBe16(EffectEntry(dol, profile.narrations + n * kEntry, kEntry).data() + 6);
-        add(id, kSectionNarrations << 24 | n, "narration");
-    }
-
-    std::set<uint32_t> groups;
-    for (uint32_t c = 0; c < profile.court_bank_count; c++)
-    {
-        const std::span<const uint8_t> entry = EffectEntry(dol, profile.court_banks + c * kEntry, kEntry);
-        const uint32_t file = xsflib::LoadBe32(entry.data());
-        const uint16_t group = xsflib::LoadBe16(entry.data() + 6);
-        if (file == kNoFiles || !groups.insert(group).second)
-        {
-            continue;
-        }
-
-        for (const ProjectEffect& effect : ProjectEffects(read_project(file)))
-        {
-            if (effect.group == group)
-            {
-                add(effect.id, kSectionCourtEffects << 24 | c << 16 | effect.id, "court");
-            }
-        }
-    }
-
-    for (uint32_t g = 0; g < profile.other_group_count; g++)
-    {
-        const uint32_t first = profile.other_groups + g * kGroupFiles * kFileStep;
-        const std::vector<uint8_t> project = read_project(first);
-        const uint16_t group = xsflib::LoadBe16(project.data() + 4);
-        for (const ProjectEffect& effect : ProjectEffects(project))
-        {
-            if (effect.group == group && effect.id <= kMaxGroupField && first / 2 <= kMaxGroupField)
-            {
-                add(effect.id, kSectionGroupEffects << 24 | first / 2 << 12 | effect.id, "se");
-            }
-        }
-    }
+    CamelotEffectMap effects;
+    AddStartUpEffects(dol, profile, effects);
+    AddVoiceBankEffects(dol, profile, effects);
+    AddNarrationEffects(dol, profile, effects);
+    AddCourtEffects(dol, game, profile, effects);
+    AddOtherGroupEffects(game, profile, effects);
 
     std::vector<Sound> sounds;
     for (auto& [id, sound] : effects)
@@ -355,7 +402,8 @@ std::vector<Sound> MusyXSongs(const disc::GameFiles& game, const GameProfile& pr
     {
         std::vector<Sound> sounds = NamedSongs(dol, profile);
         std::vector<Sound> effects = PlayedEffects(dol, profile, sounds);
-        sounds.insert(sounds.end(), effects.begin(), effects.end());
+        sounds.insert(sounds.end(), std::make_move_iterator(effects.begin()), std::make_move_iterator(effects.end()));
+
         return sounds;
     }
 
@@ -455,34 +503,19 @@ std::optional<std::string> AddMusyXFiles(ProgramBuilder& program, const disc::Ga
         return e.what();
     }
 
-    const auto effect = [&profile](uint32_t id)
-    {
-        return (id & profile.musyx_effect_bit) != 0;
-    };
-    if (!sounds || std::any_of(sounds->begin(), sounds->end(), effect))
-    {
-        paths.insert(paths.end(), effect_files.begin(), effect_files.end());
-        return AddDiscFiles(program, game, paths);
-    }
-
     if (const std::optional<std::string> problem = AddDiscFiles(program, game, paths))
     {
         return problem;
     }
 
-    // Only an effect reads the files of the effects' groups. Each file keeps its size, but holds zeros.
-    for (const std::string& path : effect_files)
+    // Only an effect reads the files of the effects' groups. Without one, each file keeps its size, but holds zeros.
+    const auto effect = [&profile](uint32_t id)
     {
-        std::vector<uint8_t> bytes;
-        if (!game.read_file || !game.read_file(path, bytes))
-        {
-            return "can't read " + path;
-        }
+        return (id & profile.musyx_effect_bit) != 0;
+    };
+    const bool any_effect = !sounds || std::any_of(sounds->begin(), sounds->end(), effect);
 
-        program.AddFile(path, std::vector<uint8_t>(bytes.size(), 0));
-    }
-
-    return std::nullopt;
+    return AddDiscFiles(program, game, effect_files, any_effect);
 }
 
 namespace
@@ -554,6 +587,7 @@ private:
             {
                 fell |= 1u << sections_.of_track[k];
             }
+
             last_ticks_[k] = ticks;
         }
 

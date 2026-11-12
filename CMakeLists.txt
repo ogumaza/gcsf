@@ -3,7 +3,7 @@
 cmake_minimum_required(VERSION 3.20)
 # Shared version for gcsfrip, gcsfplay, the foobar2000 component, the XMPlay plugin, Windows file properties and macOS
 # bundles (xsflib_add_version below). For a release, update it here and add notes in docs/release-notes/.
-project(gcsf VERSION 1.9.0 LANGUAGES C CXX)
+project(gcsf VERSION 1.10.0 LANGUAGES C CXX)
 
 # xsflib, a library for players and rippers of the PSF family, is the submodule externals/xsflib. Its
 # XsflibProject.cmake sets what a project built on it starts with: C++20, a release build by default, the static C
@@ -25,6 +25,13 @@ set(XSFLIB_CLI ON)
 set(XSFLIB_DISC_LIBRARIES ON)
 set(NTDLIB_DISC ON)
 xsflib_add_libraries(xsflib ntdlib)
+
+# GCSF's designated initializers name only the fields that differ from their defaults. Naming the others would copy
+# their default member initializers into each initializer, where the copies could drift. clang-cl's /W4 warns about the
+# fields left out.
+if (MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    list(APPEND GCSF_WARNINGS -Wno-missing-designated-field-initializers)
+endif()
 
 # The include directory for all of src, and xsflib's common helpers. The other GCSF libraries link it.
 add_library(gcsf_common INTERFACE)
@@ -83,22 +90,33 @@ add_library(gcsf_rip STATIC
     src/rip/driver_warioware_blob.h
     src/rip/driver_wind_waker_blob.h
     src/rip/analysis.h
-    src/rip/fsys.cpp
-    src/rip/fsys.h
     src/rip/hal.cpp
     src/rip/jaudio.cpp
+    src/rip/jaudio_analysis.cpp
+    src/rip/jaudio_sound_files.cpp
     src/rip/msm.cpp
     src/rip/musyx.cpp
     src/rip/musyx_catalogue.cpp
     src/rip/musyx_catalogue.h
     src/rip/n64.cpp
     src/rip/profiles.cpp
+    src/rip/profiles.h
+    src/rip/profiles_hal.cpp
+    src/rip/profiles_jaudio1.cpp
+    src/rip/profiles_jaudio2.cpp
+    src/rip/profiles_musyx.cpp
+    src/rip/profiles_musyx_game_drivers.cpp
+    src/rip/profiles_n64.cpp
+    src/rip/profiles_red.cpp
+    src/rip/length_analyzer.cpp
     src/rip/red.cpp
     src/rip/rip.cpp
     src/rip/rip.h
     src/rip/sound_libraries.h
+    src/rip/sound_list.cpp
 )
-target_link_libraries(gcsf_rip PUBLIC gcsf_player ntdlib::common ntdlib::disc_containers ntdlib::jaudio xsflib::rip)
+target_link_libraries(gcsf_rip PUBLIC gcsf_player ntdlib::common ntdlib::musyx_catalogue ntdlib::disc_containers
+                                       ntdlib::jaudio ntdlib::musyx xsflib::rip)
 target_compile_options(gcsf_rip PRIVATE ${GCSF_WARNINGS})
 
 add_executable(gcsfplay src/cli/gcsfplay.cpp)
@@ -144,16 +162,13 @@ if (GCSF_TESTS)
 
     # The unit tests: gcsf_<name>_test from tests/<name>_test.cpp, registered as gcsf_<name>.
     xsflib_add_project_test(gcsf format gcsf_format)
-    xsflib_add_project_test(gcsf fsys gcsf_rip)
     xsflib_add_project_test(gcsf mini gcsf_rip)
     xsflib_add_project_test(gcsf musyx gcsf_rip)
     xsflib_add_project_test(gcsf sound_files gcsf_rip ntdlib::testing)
     xsflib_add_project_test(gcsf unplayed gcsf_rip ntdlib::testing)
 
     # The tools report the version they were built as.
-    string(REPLACE "." "\\." version_pattern ${gcsf_VERSION})
-    add_test(NAME version_gcsfrip COMMAND gcsfrip --version)
-    set_tests_properties(version_gcsfrip PROPERTIES PASS_REGULAR_EXPRESSION "^gcsfrip ${version_pattern}[\r\n]*$")
+    xsflib_add_version_test(gcsfrip VERSION ${gcsf_VERSION} NAME version_gcsfrip)
 
     # Load local_tests.cmake from each immediate subdirectory to register tests that use locally supplied files.
     xsflib_include_local_tests()

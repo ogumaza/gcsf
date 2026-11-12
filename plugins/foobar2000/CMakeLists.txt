@@ -14,3 +14,6 @@ xsflib_add_foobar2000_component(foo_input_gcsf SDK ${FOOBAR2000_SDK_DIR} SOURCES
                                 OPTIONS ${GCSF_WARNINGS})
 xsflib_add_version(foo_input_gcsf VERSION ${gcsf_VERSION} DEFINE GCSF_VERSION DESCRIPTION "GCSF decoder for foobar2000"
                    PRODUCT GCSF COPYRIGHT "Copyright (c) 2026 the GCSF authors. MIT licence.")
+
+# plugins/plugin_traits.h contains the traits that foo_input_gcsf shares with the XMPlay plugin.
+target_include_directories(foo_input_gcsf PRIVATE ${PROJECT_SOURCE_DIR}/plugins)

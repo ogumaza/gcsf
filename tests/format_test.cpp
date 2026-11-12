@@ -169,6 +169,7 @@ static void TestLoadingOrder()
         b.AddFile("f", std::vector<uint8_t>{1});
         fs["dir/lib.gcsflib"] = WritePsf(kPsfVersionGcsf, d.Serialize(), b.Data(), {{"game", "G"}});
     }
+
     {
         ProgramBuilder b;
         b.AddMemory(0x80004000, std::vector<uint8_t>{2});
@@ -176,6 +177,7 @@ static void TestLoadingOrder()
             WritePsf(kPsfVersionGcsf, {}, b.Data(),
                      {{"_lib", "../lib.gcsflib"}, {"_lib2", "extra.minigcsf"}, {"title", "X"}, {"length", "1:00"}});
     }
+
     {
         ProgramBuilder b;
         b.AddMemory(0x80004000, std::vector<uint8_t>{3});
@@ -201,6 +203,7 @@ static void TestLoadingOrder()
         fs["dir/sub/v.minigcsf"] = WritePsf(kPsfVersionGcsf, {}, b.Data(),
                                             {{"_lib", "../lib.gcsflib"}, {"_lib2", ""}, {"_lib3", "extra.minigcsf"}});
     }
+
     LoadedSet gap;
 
     XSFLIB_CHECK(!LoadSet("dir/sub/v.minigcsf", reader, gap));

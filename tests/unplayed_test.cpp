@@ -229,6 +229,7 @@ void TestFirstLayouts()
     profile.first_layouts = true;
 
     const std::vector<jaudio::SoundEntry> sounds = rip::ListSounds(profile, baa, {});
+
     Check(sounds.size() == 3, "three sounds with the first layouts");
     if (sounds.size() != 3)
     {
@@ -238,6 +239,7 @@ void TestFirstLayouts()
     const rip::Sound effect = rip::SoundOf(sounds[0]);
     const rip::Sound music = rip::SoundOf(sounds[1]);
     const rip::Sound stream = rip::SoundOf(sounds[2]);
+
     Check(!effect.music && !effect.stream && sounds[0].volume == 90, "an effect");
     Check(music.music && !music.stream && sounds[1].volume == 80 &&
               sounds[1].source == jaudio::SoundEntry::Source::kBlock && sounds[1].resource == 0x01000000,
@@ -246,7 +248,9 @@ void TestFirstLayouts()
 
     // A profile without the first layouts reads the volume where the earlier layout keeps it.
     profile.first_layouts = false;
+
     const std::vector<jaudio::SoundEntry> earlier = rip::ListSounds(profile, baa, {});
+
     Check(earlier.size() == 3 && earlier[0].volume == 0 && !rip::SoundOf(earlier[2]).stream,
           "the first layouts belong to the profile");
 }

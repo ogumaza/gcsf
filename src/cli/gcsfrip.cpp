@@ -24,10 +24,12 @@
 // after the sound table's sounds. The inputs are ripped one after another. An input that fails doesn't stop the rest.
 // Files dropped on the program become inputs.
 
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <regex>
 #include <span>
@@ -102,6 +104,10 @@ struct Job
     std::vector<uint32_t> waves;  // the waves that the driver loads, for a profile whose driver NamesWaves
     xsflib::psf::Variables ports; // the ports that the driver sets (rip::Sound::ports)
     ntdlib::flipper::z2::PieceState piece_state; // the state that the driver gives a piece (rip::Sound::piece_state)
+
+    // The seconds that the search for the sound's waves took, or infinity if no search played the sound
+    // (FindWaveGroups). The length analysis starts the sounds whose search took longest first.
+    double search_seconds = std::numeric_limits<double>::infinity();
 };
 
 // The number of each of the game's sounds in the file names: its place in the list without the sounds that share the
@@ -182,9 +188,17 @@ void FindWaveGroups(std::vector<Job>& jobs, const std::vector<uint8_t>& library,
     const rip::LengthAnalyzer analyzer(library, profile);
     const auto find = [&](Job& job)
     {
+        const auto start = std::chrono::steady_clock::now();
         std::size_t group_count = 0;
-        std::optional<std::vector<uint32_t>> groups = analyzer.FindWaveGroups(
-            job.sound_id, job.archive ? &*job.archive : nullptr, systems, &group_count, &job.ports, &job.piece_state);
+        bool searched = false;
+        std::optional<std::vector<uint32_t>> groups =
+            analyzer.FindWaveGroups(job.sound_id, job.archive ? &*job.archive : nullptr, systems, &group_count,
+                                    &job.ports, &job.piece_state, &searched);
+        if (searched)
+        {
+            job.search_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+        }
+
         if (!groups)
         {
             std::fprintf(stderr, "warning: the waves of %s can't be found; it plays without them\n", job.label.c_str());
@@ -429,9 +443,10 @@ std::optional<GameLibrary> BuildGameLibrary(const disc::GameFiles& game, const r
 }
 
 // Analyses the length of each job's sound, then takes the sounds that never make a sound out of the jobs. Each sound
-// plays in game mode. The progress line comes every 50 sounds. For a game whose wave groups were found, the analysis
-// also checks that the sound's groups hold every wave that its notes looked up. A wave that no group holds doesn't
-// count. The game has no samples for it either. Returns the number of sounds taken out.
+// plays in game mode. The sounds whose wave search took longest start first. The progress line comes every 50 sounds.
+// For a game whose wave groups were found, the analysis also checks that the sound's groups hold every wave that its
+// notes looked up. A wave that no group holds doesn't count. The game has no samples for it either. Returns the number
+// of sounds taken out.
 std::size_t MeasureJobs(std::vector<Job>& jobs, const GameLibrary& library, const rip::GameProfile& profile,
                         unsigned threads)
 {
@@ -452,9 +467,14 @@ std::size_t MeasureJobs(std::vector<Job>& jobs, const GameLibrary& library, cons
 
         return true;
     };
-    xsflib::cli::AnalyzeLengths(
-        jobs, threads, analyze,
-        {.out_of_memory = "out of memory during length analysis; try fewer --jobs", .progress_every = 50});
+    xsflib::cli::AnalysisSettings settings = {.out_of_memory = "out of memory during length analysis; try fewer --jobs",
+                                              .progress_every = 50};
+    for (const Job& job : jobs)
+    {
+        settings.costs.push_back(job.search_seconds);
+    }
+
+    xsflib::cli::AnalyzeLengths(jobs, threads, analyze, settings);
 
     std::size_t silent = 0;
     const auto is_silent = [&silent](const Job& job)
@@ -533,7 +553,7 @@ int WriteRip(const std::string& input, const Options& o, xsflib::cli::FileNameRe
 
     std::fprintf(stderr, "%zu %s written%s\n", jobs.size(), jobs.size() == 1 ? "sound" : "sounds",
                  xsflib::cli::SkippedText(0, "", silent, "").c_str());
-    std::fprintf(stderr, "output: %s\n", fs::absolute(out_dir).lexically_normal().string().c_str());
+    xsflib::rip::ReportOutput(out_dir);
 
     return 0;
 }
@@ -573,7 +593,7 @@ int RipInput(const std::string& input, const Options& o, xsflib::cli::FileNameRe
     {
         if (o.only_text.empty())
         {
-            std::fprintf(stderr, "error: no music found (--bgm)\n");
+            std::fputs(o.bgm ? "error: no music found (--bgm)\n" : "error: no sounds found\n", stderr);
         }
         else
         {

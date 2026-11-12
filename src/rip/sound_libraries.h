@@ -38,17 +38,26 @@ std::string TextBeforeZero(std::span<const uint8_t> bytes);
 // ends it.
 std::string TerminatedText(std::span<const uint8_t> bytes, const char* error);
 
-// The bytes of the game's code and data from `address` to the end of its section (ntdlib::Dol::At). Throws
+// The bytes of the game's code and data from `address` to the end of its section (ntdlib::Dol::From). Throws
 // xsflib::FormatError if no section holds the address.
 std::span<const uint8_t> DolBytes(const ntdlib::Dol& dol, uint32_t address);
 
-// The game's file at `path`. Throws xsflib::FormatError if it can't be read.
-std::vector<uint8_t> ReadGameFile(const disc::GameFiles& game, const std::string& path);
+// Reads the game's file at `path` into `bytes`. Returns "can't read <path>" if it can't be read, or nothing.
+std::optional<std::string> ReadDiscFile(const disc::GameFiles& game, const std::string& path,
+                                        std::vector<uint8_t>& bytes);
 
-// Adds the disc's files at `paths` to the library, each at its path. Returns the error for a file that can't be read,
-// or nothing.
+// The game's file at `path`. Throws xsflib::FormatError if it can't be read.
+std::vector<uint8_t> DiscFile(const disc::GameFiles& game, const std::string& path);
+
+// Reads the game's file at `path` into `bytes` and adds it to the library at its path. Without `used`, the file keeps
+// its size, but holds zeros. Returns the error if it can't be read, or nothing.
+std::optional<std::string> AddDiscFile(ProgramBuilder& program, const disc::GameFiles& game, const std::string& path,
+                                       std::vector<uint8_t>& bytes, bool used = true);
+
+// Adds the disc's files at `paths` to the library, each at its path. Without `used`, each file keeps its size, but
+// holds zeros. Returns the error for a file that can't be read, or nothing.
 std::optional<std::string> AddDiscFiles(ProgramBuilder& program, const disc::GameFiles& game,
-                                        const std::vector<std::string>& paths);
+                                        const std::vector<std::string>& paths, bool used = true);
 
 // JAudio2, JAudio1 and Jac (jaudio.cpp)
 
@@ -58,7 +67,7 @@ std::optional<std::string> ListJAudioSounds(const disc::GameFiles& game, const G
                                             GameSounds& listed);
 
 // A Jac game's pieces of music: the files of its sequence index from number 2, without the empty ones. Numbers 0 and
-// 1 are the effects' and the system's sequences. A piece's sound ID is 0x80000000 | group << 24 | wave system << 16 |
+// 1 are the effects and the events sequences. A piece's sound ID is 0x80000000 | group << 24 | wave system << 16 |
 // part << 8 | piece. The piece field holds the piece's number in the index. The driver loads the wave group. A piece's
 // part is 0. A piece plays group 0 of the wave system with the piece's number. A piece's label is its file's name
 // without the extension. A piece in parts is listed as its parts instead (GameProfile::parts). A part's label is the
@@ -68,7 +77,7 @@ std::optional<std::string> ListJAudioSounds(const disc::GameFiles& game, const G
 // xsflib::FormatError if main.dol isn't a DOL, or if the index lies outside the game's code or isn't a BARC.
 std::vector<Sound> JacPieces(const disc::GameFiles& game, const GameProfile& profile);
 
-// A Jac game's sound effects: those of its catalogue (GameProfile::effect_table), then the profile's other effects,
+// A Jac game's sound effects: those of its catalogue (GameProfile::jac_effects), then the profile's other effects,
 // without the ones that the profile leaves out. An effect's ID is JacEffectId's. A system's or a player's effect gives
 // the number that the catalogue's row holds. An event's gives the event's type and the action. An effect that the
 // actions of several events play comes once, with its first row's name. The other effects' labels are their IDs in hex.
@@ -205,7 +214,8 @@ std::optional<Timing> MeasureHalEffect(Player& player);
 // A game's sounds with the Nintendo 64's sound library: its pieces of music, then its effects if the profile has them.
 // A piece's ID gives the museum's room in bits 16 to 23, the weather in bits 8 to 15 and the game's number of the piece
 // in the low byte. An effect's ID has kind 1 in its top byte, its bank in bits 8 to 15 and its place in the bank in
-// the low byte.
+// the low byte. With `n64_wide_numbers`, a piece's ID takes driver/animal_crossing.c's layout for 16-bit numbers
+// (WIDE_PIECE).
 std::vector<Sound> N64Sounds(const disc::GameFiles& game, const GameProfile& profile);
 
 // The sound files of a game with the Nintendo 64's sound library: the file of sound data. Returns the error, or

@@ -8,9 +8,9 @@ GCSF is under the MIT licence (`LICENSE`). Its dependencies have the following l
 | ntdlib, Copyright (c) 2026 the ntdlib authors | MIT | A library for the hardware and formats of Nintendo's consoles. GCSF takes from it the PowerPC interpreter, the DSP and its coefficient ROM, the GameCube's devices and the base of its machine, the readers of disc images, the readers of JAudio's sound files, and the length analysis of JAudio's sounds. Twilight Princess's driver includes ntdlib's start-up of the game's sound layer. A Git submodule in `externals/ntdlib`, built into GCSF's programs. |
 | Data from [Unicode](https://www.unicode.org), Copyright © 1991-2026 Unicode, Inc. | Unicode-3.0 | ntdlib's `src/disc/cp932.h`, a mapping of code page 932 (Windows' Shift-JIS) to Unicode. The mapping is derived from CP932.TXT, Microsoft's table of code page 932 as Unicode publishes it. ntdlib's disc readers decode the Shift-JIS text of GameCube discs with it: the titles of Japanese discs and the names in a disc's file system. Built into `gcsfrip`. |
 | seqlib, Copyright (c) 2026 the seqlib authors | MIT (`externals/xsflib/externals/seqlib/LICENSE`) | In `externals/xsflib/externals/seqlib`, a submodule of xsflib. Only the tests use it: their checks come from it, through `xsflib::testing`. |
-| [zlib](https://zlib.net), Copyright (C) 1995-2024 Jean-loup Gailly and Mark Adler | zlib | The PSF container, and GCZ disc images. The installed copy is used if there is one. Otherwise v1.3.1 is downloaded when configuring. |
+| [zlib](https://zlib.net), Copyright (C) 1995-2026 Jean-loup Gailly and Mark Adler | zlib | The PSF container, and GCZ disc images. The installed copy is used if there is one. Otherwise v1.4 is downloaded when configuring. |
 | [Zstandard](https://github.com/facebook/zstd), Copyright (c) Meta Platforms, Inc. and affiliates | BSD-3-Clause | RVZ disc images. The installed copy is used if there is one. Otherwise v1.5.7 is downloaded when configuring. |
-| [liblzma](https://tukaani.org/xz/) from XZ Utils | 0BSD | LZMA and LZMA2 in WIA and RVZ disc images. The installed copy is used if there is one. Otherwise v5.8.1 is downloaded when configuring. |
+| [liblzma](https://tukaani.org/xz/) from XZ Utils | 0BSD | LZMA and LZMA2 in WIA and RVZ disc images. The installed copy is used if there is one. Otherwise v5.8.4 is downloaded when configuring. |
 | [bzip2](https://sourceware.org/bzip2/), Copyright (C) 1996-2019 Julian R Seward | bzip2 (BSD-style) | bzip2 in WIA and RVZ disc images. The installed copy is used if there is one. Otherwise 1.0.8 is downloaded when configuring. |
 | [libFLAC](https://xiph.org/flac/), Copyright the Xiph.Org Foundation | BSD-3-Clause | FLAC output in `gcsfplay`. The installed copy is used if there is one. Otherwise 1.5.0 is downloaded when configuring. |
 | [foobar2000 SDK](https://www.foobar2000.org/SDK), Copyright Peter Pawlowski | BSD-style (the SDK's `sdk-license.txt`, and `pfc-license.txt` for its pfc library) | Only for `plugins/foobar2000`. Not included here. The SDK is supplied when building the component. |
@@ -171,7 +171,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 Copyright notice:
 
- (C) 1995-2022 Jean-loup Gailly and Mark Adler
+ (C) 1995-2026 Jean-loup Gailly and Mark Adler
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages

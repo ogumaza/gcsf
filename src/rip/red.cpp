@@ -30,7 +30,6 @@
 
 namespace gcsf::rip
 {
-
 namespace
 {
 
@@ -198,7 +197,7 @@ std::vector<Sound> RedSounds(const disc::GameFiles& game, const GameProfile& pro
 
     for (const auto& [number, path] : RedBlocks(game, profile))
     {
-        const std::vector<uint8_t> bytes = ReadGameFile(game, path);
+        const std::vector<uint8_t> bytes = DiscFile(game, path);
         const std::optional<std::vector<RedBlockEffect>> effects = RedBlockEffects(bytes);
         if (!effects)
         {
@@ -220,41 +219,20 @@ std::vector<Sound> RedSounds(const disc::GameFiles& game, const GameProfile& pro
     return sounds;
 }
 
-std::optional<std::string> AddRedFiles(ProgramBuilder& program, const disc::GameFiles& game, const GameProfile& profile,
-                                       const std::vector<uint32_t>* sounds)
+namespace
 {
-    constexpr std::size_t kBankOffset = 6;
-    constexpr std::size_t kSepBankOffset = 0x11;
-    const std::map<uint32_t, std::string> banks = RedFiles(game, profile.wave_folder, kRedBank);
+
+// The wave banks of a Red game while AddRedFiles adds its files: the disc's banks by number, the banks that the files
+// name, and the banks that the rip loads.
+struct RedBankUse
+{
+    std::map<uint32_t, std::string> banks;
     std::set<uint32_t> named;
     std::set<uint32_t> loaded;
 
-    // Whether the rip plays sound `id`. Without `sounds`, it plays every sound. Any effect loads the blocks and their
-    // banks (driver/crystal_chronicles.c).
-    const auto plays = [sounds](uint32_t id)
-    {
-        return !sounds || std::find(sounds->begin(), sounds->end(), id) != sounds->end();
-    };
-    const bool any_effect =
-        !sounds || std::any_of(sounds->begin(), sounds->end(), [](uint32_t id) { return id >= kRedEffectId; });
-
-    // Reads the file at `path` into `bytes` and adds it to the library. A file that the rip doesn't `read` keeps its
-    // size, but holds zeros. Returns the error, or nothing.
-    const auto add = [&](const std::string& path, std::vector<uint8_t>& bytes, bool read) -> std::optional<std::string>
-    {
-        if (!game.read_file || !game.read_file(path, bytes))
-        {
-            return "can't read " + path;
-        }
-
-        program.AddFile(path, read ? bytes : std::vector<uint8_t>(bytes.size(), 0));
-
-        return std::nullopt;
-    };
-
     // Notes that the file at `path` names wave bank `bank`, and that the rip loads the bank if it reads the file.
-    // Returns the error if the disc lacks the bank, or nothing.
-    const auto name = [&](const std::string& path, uint32_t bank, bool read) -> std::optional<std::string>
+    // Returns the error if the disc has no such bank, or nothing.
+    std::optional<std::string> Name(const std::string& path, uint32_t bank, bool read)
     {
         if (!banks.contains(bank))
         {
@@ -268,13 +246,26 @@ std::optional<std::string> AddRedFiles(ProgramBuilder& program, const disc::Game
         }
 
         return std::nullopt;
-    };
+    }
+};
 
+// Whether a rip of `sounds` plays sound `id`. Without `sounds`, it plays every sound.
+bool Plays(const std::vector<uint32_t>* sounds, uint32_t id)
+{
+    return !sounds || std::find(sounds->begin(), sounds->end(), id) != sounds->end();
+}
+
+// Adds the pieces of music, and notes their banks in `use`. Returns the error, or nothing.
+std::optional<std::string> AddRedPieces(ProgramBuilder& program, const disc::GameFiles& game,
+                                        const GameProfile& profile, const std::vector<uint32_t>* sounds,
+                                        RedBankUse& use)
+{
+    constexpr std::size_t kBankOffset = 6;
     for (const auto& [number, path] : RedFiles(game, profile.music_folder, kRedPiece))
     {
         std::vector<uint8_t> bytes;
-        const bool read = plays(number);
-        if (const std::optional<std::string> error = add(path, bytes, read))
+        const bool read = Plays(sounds, number);
+        if (const std::optional<std::string> error = AddDiscFile(program, game, path, bytes, read))
         {
             return error;
         }
@@ -284,62 +275,106 @@ std::optional<std::string> AddRedFiles(ProgramBuilder& program, const disc::Game
             return path + " isn't a piece of music";
         }
 
-        if (const std::optional<std::string> error = name(path, xsflib::LoadBe16(bytes.data() + kBankOffset), read))
+        if (const std::optional<std::string> error = use.Name(path, xsflib::LoadBe16(bytes.data() + kBankOffset), read))
         {
             return error;
         }
     }
 
-    if (profile.effect_folder)
+    return std::nullopt;
+}
+
+// Adds the blocks of effects, and notes their banks in `use`. The rip reads them if it plays any effect. Returns the
+// error, or nothing.
+std::optional<std::string> AddRedBlocks(ProgramBuilder& program, const disc::GameFiles& game,
+                                        const GameProfile& profile, bool any_effect, RedBankUse& use)
+{
+    for (const auto& [number, path] : RedBlocks(game, profile))
     {
-        for (const auto& [number, path] : RedBlocks(game, profile))
+        std::vector<uint8_t> bytes;
+        if (const std::optional<std::string> error = AddDiscFile(program, game, path, bytes, any_effect))
         {
-            std::vector<uint8_t> bytes;
-            if (const std::optional<std::string> error = add(path, bytes, any_effect))
-            {
-                return error;
-            }
-
-            const std::optional<std::vector<RedBlockEffect>> effects = RedBlockEffects(bytes);
-            if (!effects)
-            {
-                return path + " isn't a block of effects";
-            }
-
-            for (const RedBlockEffect& effect : *effects)
-            {
-                if (const std::optional<std::string> error = name(path, effect.bank, any_effect))
-                {
-                    return error;
-                }
-            }
+            return error;
         }
 
-        for (const auto& [number, path] : RedSeps(game, profile))
+        const std::optional<std::vector<RedBlockEffect>> effects = RedBlockEffects(bytes);
+        if (!effects)
         {
-            std::vector<uint8_t> bytes;
-            const bool read = plays(kRedEffectId + number);
-            if (const std::optional<std::string> error = add(path, bytes, read))
-            {
-                return error;
-            }
+            return path + " isn't a block of effects";
+        }
 
-            if (bytes.size() < kSepBankOffset + 2 || !std::equal(bytes.begin(), bytes.begin() + 5, "SeSep"))
-            {
-                return path + " isn't an effect";
-            }
-
-            if (const std::optional<std::string> error = name(path, RedInfoBank(bytes, kSepBankOffset), read))
+        for (const RedBlockEffect& effect : *effects)
+        {
+            if (const std::optional<std::string> error = use.Name(path, effect.bank, any_effect))
             {
                 return error;
             }
         }
     }
 
-    for (const uint32_t bank : named)
+    return std::nullopt;
+}
+
+// Adds the effects that play alone ("SeSep"), and notes their banks in `use`. Returns the error, or nothing.
+std::optional<std::string> AddRedSeps(ProgramBuilder& program, const disc::GameFiles& game, const GameProfile& profile,
+                                      const std::vector<uint32_t>* sounds, RedBankUse& use)
+{
+    constexpr std::size_t kSepBankOffset = 0x11;
+    for (const auto& [number, path] : RedSeps(game, profile))
     {
         std::vector<uint8_t> bytes;
-        if (const std::optional<std::string> error = add(banks.at(bank), bytes, loaded.contains(bank)))
+        const bool read = Plays(sounds, kRedEffectId + number);
+        if (const std::optional<std::string> error = AddDiscFile(program, game, path, bytes, read))
+        {
+            return error;
+        }
+
+        if (bytes.size() < kSepBankOffset + 2 || !std::equal(bytes.begin(), bytes.begin() + 5, "SeSep"))
+        {
+            return path + " isn't an effect";
+        }
+
+        if (const std::optional<std::string> error = use.Name(path, RedInfoBank(bytes, kSepBankOffset), read))
+        {
+            return error;
+        }
+    }
+
+    return std::nullopt;
+}
+
+} // namespace
+
+std::optional<std::string> AddRedFiles(ProgramBuilder& program, const disc::GameFiles& game, const GameProfile& profile,
+                                       const std::vector<uint32_t>* sounds)
+{
+    RedBankUse use{.banks = RedFiles(game, profile.wave_folder, kRedBank)};
+    if (const std::optional<std::string> error = AddRedPieces(program, game, profile, sounds, use))
+    {
+        return error;
+    }
+
+    // Any effect loads the blocks and their banks (driver/crystal_chronicles.c).
+    if (profile.effect_folder)
+    {
+        const bool any_effect =
+            !sounds || std::any_of(sounds->begin(), sounds->end(), [](uint32_t id) { return id >= kRedEffectId; });
+        if (const std::optional<std::string> error = AddRedBlocks(program, game, profile, any_effect, use))
+        {
+            return error;
+        }
+
+        if (const std::optional<std::string> error = AddRedSeps(program, game, profile, sounds, use))
+        {
+            return error;
+        }
+    }
+
+    for (const uint32_t bank : use.named)
+    {
+        std::vector<uint8_t> bytes;
+        if (const std::optional<std::string> error =
+                AddDiscFile(program, game, use.banks.at(bank), bytes, use.loaded.contains(bank)))
         {
             return error;
         }

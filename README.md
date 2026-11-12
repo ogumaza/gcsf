@@ -60,11 +60,18 @@ arrangement. `_status12` plays the sections of a long walk or ride, `_status4` t
 four entries, `_status10` and `_status11` the two endings of a day, `_status8` and `_status9` the starts that the
 field's code makes once no music plays, and `_riding_status3` the section of Link standing on his horse. Donkey Kong
 Jungle Beat plays many of its effects in the chords of the music. A rip plays such an effect over the music of one
-stage, with the music silent. Super Mario Sunshine keeps a table of its sounds' names. A rip of it takes its names from
-that table, for example `MSD_BGM_DOLPIC`. Pikmin's code lists its pieces of music by their files' names. A rip of Pikmin
-names a piece after its file, for example `select`. The game plays the music of its cutscenes as parts of one piece. A
-rip names a part after the piece and the part's number, for example `demobgm-5`. The rip includes the sound effects of
-the game's catalogue. An effect takes its name from the
+stage, with the music silent. The game also adds layers to its music as you play: a combo, a flight with a Helibird and
+each part of a boss fight turn more tracks on or change them. A rip of Jungle Beat contains each piece as the game
+starts it, and 101 variants of 43 pieces, one for each later state. A variant is named after the piece and what sets its
+state, for example `JA_BGM_MAIN_01_combo1` and `_combo2` for the layers of a combo, `_helibird` for a flight with a
+Helibird, `_round2` and `_change` for a boss's second round and the change before it, and `_underwater` for
+TropicalCoast's music while DK swims below. Each variant plays its state from the start of the piece. The game moves
+from one state to the next with a short fade, and the rips leave out those changes. The spec, `docs/gcsf.md`, lists the
+states and the stages that play each piece. Super Mario Sunshine keeps a table of its sounds' names. A rip of it takes
+its names from that table, for example `MSD_BGM_DOLPIC`. Pikmin's code lists its pieces of music by their files' names.
+A rip of Pikmin names a piece after its file, for example `select`. The game plays the music of its cutscenes as parts
+of one piece. A rip names a part after the piece and the part's number, for example `demobgm-5`. The rip includes the
+sound effects of the game's catalogue. An effect takes its name from the
 catalogue, for example `SE_FLOG_JUMP`. The sound of the formation plays a full move of the formation straight ahead. Its
 `gcsf_var` tag holds the move. The rip leaves out the game's streamed music. Pikmin 2's pieces of music are named after
 their files too. A cave's music changes with the floor, and a boss's music with the boss's actions. `gcsfrip` rips a
@@ -193,6 +200,26 @@ GameCube has an archive. `gcsfrip` reads the table into the disc's archive. The 
 plays louder than on the GameCube. Its volume in the table is 65 of 127. The GameCube's table gives it 40. Many waves
 were resampled from 16,000 Hz to 28,000 Hz. Some new ones play at 44,100 Hz.
 
+### Ripping faster
+
+Finding the length of each sound takes most of the time of a rip. `gcsfrip` plays every sound on the emulated GameCube
+until it ends or starts to repeat, for 10 minutes at most. A sound effect that loops for as long as the game keeps it
+going, such as wind or a machine, often plays the full 10 minutes. In a game that loads its waves as each scene requires
+them, such as Donkey Kong Jungle Beat, every sound also plays once before that, to find the waves it uses. A whole rip
+of such a game can take a long time.
+
+- `--bgm` rips only the music. It's the quickest way to rip a game's soundtrack.
+- `--only REGEX` rips only the sounds whose labels match. For example, `--only BOSS` rips the sounds whose labels
+  contain `BOSS`. `--list` shows the labels.
+- `--jobs N` sets how many sounds play at once. The default is the number of CPU threads. That's the fastest setting.
+- `--no-length` skips the length analysis. The rips then have no length or fade tags, and a player plays each one for
+  its default length. The sounds that make no sound get rips too.
+
+Dropping a disc image on `gcsfrip` rips every sound. To use these options, run `gcsfrip` from a command prompt or a
+terminal:
+
+    gcsfrip --bgm "Donkey Kong Jungle Beat.ciso"
+
 ### Downloads
 
 The Releases page has `gcsfrip` and `gcsfplay` for 64-bit Windows, the foobar2000 component for 64-bit and 32-bit
@@ -273,9 +300,9 @@ WarioWare, Inc.: Mega Party Game$!, `driver_pikmin2_blob.h` for Pikmin 2, `drive
 Final Fantasy Crystal Chronicles, `driver_animal_crossing_blob.h` for Animal Crossing, Doubutsu no Mori+ and Doubutsu no
 Mori e+, `driver_colosseum_bonus_blob.h` for the Pokémon Colosseum Bonus Disc, `driver_musyx_blob.h` for Metroid Prime,
 Metroid Prime 2: Echoes, Paper Mario: The Thousand-Year Door, Tales of Symphonia, Star Fox Adventures, Rogue Leader,
-Rebel Strike, Pokémon Colosseum, Resident Evil, Resident Evil Zero, Nintendo Puzzle Collection and the NDDEMO tech demo,
-`driver_musyx_upload_blob.h` for Pokémon Channel, and `driver_mario_party_blob.h` for Mario Party 4. Building GCSF
-itself requires no PowerPC toolchain.
+Rebel Strike, Pokémon Colosseum, Resident Evil Zero, Nintendo Puzzle Collection and the NDDEMO tech demo,
+`driver_musyx_song_controls_blob.h` for Resident Evil, `driver_musyx_upload_blob.h` for Pokémon Channel, and
+`driver_mario_party_blob.h` for Mario Party 4. Building GCSF itself requires no PowerPC toolchain.
 
 ## Licence
 

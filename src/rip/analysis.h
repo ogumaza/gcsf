@@ -274,6 +274,7 @@ public:
         {
             first_ = i;
         }
+
         if (i == *first_)
         {
             looped_ = true;

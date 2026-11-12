@@ -23,6 +23,9 @@ using ntdlib::flipper::Disc;
 class DiscInterfaceState
 {
 protected:
+    // The value of done_ while no command is in progress.
+    static constexpr uint64_t kNoCommand = UINT64_MAX;
+
     uint32_t status_ = 0;   // DISR: the interrupt flags and their masks
     uint32_t cover_ = 0;    // DICVR: the cover's state, and its interrupt flag and mask
     uint32_t command_[3]{}; // DICMDBUF0-2
@@ -31,7 +34,7 @@ protected:
     uint32_t control_ = 0; // DICR
     uint32_t immediate_ = 0;
     uint32_t error_ = 0;         // what the next RequestError reports
-    uint64_t done_ = UINT64_MAX; // the CPU cycle at which the command in progress completes
+    uint64_t done_ = kNoCommand; // the CPU cycle at which the command in progress completes
 };
 
 class DiscInterface : private DiscInterfaceState
