@@ -92,7 +92,7 @@ struct Params {
     u32 load_banks;      /* the game's sound banks: two MusyX groups */
     u32 play_song;       /* playSong(number) */
     u32 play_jingle;     /* playJingle(number) */
-    /* the game's functions for effects, 0 for one that the game lacks */
+    /* the game's functions for effects, 0 for one that the game doesn't have */
     u32 load_voice_bank; /* JVoiceLoad1(bank) */
     u32 play_voice;      /* voiceFXcall(bank, effect, volume) */
     u32 play_effect;     /* starts an effect of the start-up banks or of a court's bank: (effect, volume, pan) */

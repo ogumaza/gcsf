@@ -52,7 +52,6 @@ const GameProfile kColosseumBonusUsa = {
             0x800976fc, // playing: the count of the effects that play
             0x800f4fc8, // playing_list: the head of their list
         },
-    .library_name = "ColosseumBonus",
     .tgc = "tgc/pokedownload.tgc",
     .program_id = "POKE01",
 };

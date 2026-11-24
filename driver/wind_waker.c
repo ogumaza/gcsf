@@ -33,8 +33,8 @@
  * that state (MUSIC_STATE_SHIFT). The driver gives it to the game's sound layer before the start. The game calls
  * bgmNowBattle once a frame while a fight goes on. Without that call, the sound layer stops the battle music after 30
  * frames. The driver calls bgmNowBattle once a frame for each piece that subBgmStart or bgmNowBattle starts. A piece
- * that the game's actors give a status gets it on port 9 of the port list. The driver passes it to the game's
- * changeBgmStatus or changeSubBgmStatus a frame after the piece's sequence has started.
+ * that the game's actors give a status gets it on port 9 of the port list. The driver writes a piece's ports to its
+ * root track after the sequence's first tick (see play_music).
  *
  * Build with `driver/build.py wind_waker` (clang). The result is committed as src/rip/driver_wind_waker_blob.h.
  * Building GCSF itself requires no PowerPC toolchain.
@@ -60,8 +60,19 @@
 #define DRAWS_SHIFT 20
 #define DRAWS_MASK 0xffu
 
-/* The port that holds the status that the game's actors give a piece of music (JAIZelBasic::changeBgmStatus). */
-#define MUSIC_STATUS_PORT 9u
+/* The root track of a sound's sequence: the sound's parameters (JAISound::mCustomParameter) hold it at
+   PARAMETERS_ROOT_TRACK. The profile's watch gives the ripper the same offsets. */
+#define SOUND_PARAMETERS 0x3c
+#define PARAMETERS_ROOT_TRACK 0x1360
+
+/* A track's sequence reader (JASystem::TSeqCtrl) holds the start of the track's data, then the next command to read.
+   The root track reads from the start of its data. Its first tick moves the reader on. */
+#define TRACK_DATA 0x0
+#define TRACK_NEXT_COMMAND 0x4
+
+/* A track's activity, a byte: 1 while its sequence runs. */
+#define TRACK_ACTIVITY 0x37e
+#define TRACK_RUNS 1u
 
 /* A piece of music's ID: bit 31 set and bit 30 clear. The ID gives the piece's index in the low 12 bits. The IDs from
    0x80000105 to 0x80000152 start a piece in another arrangement. */
@@ -155,8 +166,8 @@ struct Params {
     u32 set_ship_sail_state;   /* void setShipSailState(s32) */
     u32 set_link_on_board;     /* void setLinkOnBoard(s32) */
     u32 set_sword_using;       /* void bgmSetSwordUsing(s32) */
-    u32 change_bgm_status;     /* void changeBgmStatus(s32): port 9 of the main music */
-    u32 change_sub_bgm_status; /* void changeSubBgmStatus(s32): port 9 of the music over it */
+    u32 register_callback; /* s32 JASystem::Kernel::registerSubFrameCallback(s32 (*)(void*), void*) */
+    u32 write_port;        /* s32 JASystem::TTrack::writePortAppDirect(u32 port, u16 value) */
     u32 sub_bgm[MUSIC_PIECES / 32]; /* the pieces that subBgmStart starts: bit n % 32 of word n / 32 for piece n */
     u32 battle_bgm;                 /* the ID of the piece that bgmNowBattle starts */
     /* the offset in the sound layer of the main music's handle. The handle of the music over it follows */
@@ -245,12 +256,42 @@ static int is_sub_bgm(u32 id) {
     return piece < MUSIC_PIECES && (driver_params.sub_bgm[piece / 32] >> (piece % 32) & 1);
 }
 
+/* The address of the handle of the piece of music that plays. */
+static u32 music_handle;
+
+/* The sound library's callback that writes the ports of the port list to the piece's root track after the sequence's
+   first tick. The sound library calls each of its callbacks in the same loop as the root track's callback, which runs
+   the sequence's ticks. This callback waits until the root track's reader has moved on from the start of its data. It
+   therefore writes between the first call of the root track's callback that ticks and the next. A callback that
+   returns -1 is dropped. */
+static s32 write_ports_after_first_tick(void) {
+    volatile struct Params* p = &driver_params;
+    const u32 sound = word(music_handle);
+    const u32 parameters = sound ? word(sound + SOUND_PARAMETERS) : 0;
+    if (!parameters)
+        return 0;
+    const u32 track = parameters + PARAMETERS_ROOT_TRACK;
+    if (byte(track + TRACK_ACTIVITY) != TRACK_RUNS || word(track + TRACK_NEXT_COMMAND) == word(track + TRACK_DATA))
+        return 0;
+
+    for (u32 i = 0; i < p->port_count && i < MAX_PORTS; i++) {
+        const u32 port = p->ports[i] >> 16;
+        if (port < MAX_PORTS)
+            ((fn3)p->write_port)(track, port, p->ports[i] & 0xffff);
+    }
+    return -1;
+}
+
 /* Plays the piece of music that the sound's ID names, as the game's sound layer does, forever. The ID's state goes to
    the sound layer first. bgmStart starts the main music without a fade, as every start of the game's scenes does
-   (mDoAud_bgmStart). The music's handle is the sound layer's. A frame after the piece's sequence has started, the
-   driver gives the piece the ports of the port list: port 9, the piece's status, through the sound layer's writer of
-   it, and any other port through setPortData. onEnemyDamage writes port 11 of the battle music when Link hits an
-   enemy. */
+   (mDoAud_bgmStart). The music's handle is the sound layer's.
+
+   The game's actors write port 9 of a piece while it plays: the piece's status. onEnemyDamage writes port 11 of the
+   battle music when Link hits an enemy. A variant is a state of the piece. The driver gives the piece the ports of the
+   port list as soon as the sequence can keep them. Each piece's root track clears its ports in its first commands. The
+   driver therefore writes them to the root track after the sequence's first tick. That point is fixed in the sequence,
+   and the timing of the boot doesn't move it. The sequence takes a port's value at its next poll of the port after the
+   first tick, and then clears the port again, as it does for a status from the game's actors. */
 __attribute__((noreturn)) static void play_music(void) {
     volatile struct Params* p = &driver_params;
     const u32 basic = word(p->sound_library);
@@ -283,25 +324,14 @@ __attribute__((noreturn)) static void play_music(void) {
     p->sound = word(handle);
     if (!p->sound)
         fail(7);
+    music_handle = handle;
+    if (p->port_count && (s32)((fn2)p->register_callback)((u32)&write_ports_after_first_tick, 0) < 0)
+        fail(7);
 
-    int ports_pending = p->port_count > 0;
     p->status = STATUS_PLAYING;
-    u32 frames_playing = 0;
     for (;;) {
         ((fn0)p->audio_process)();
         p->sound = word(handle);
-        if (ports_pending && p->sound && byte(p->sound + p->sound_state_offset) >= SOUND_PLAYING &&
-            ++frames_playing > 1) {
-            for (u32 i = 0; i < p->port_count && i < MAX_PORTS; i++) {
-                const u32 port = p->ports[i] >> 16;
-                const u32 value = p->ports[i] & 0xffff;
-                if (port == MUSIC_STATUS_PORT)
-                    ((fn2)(over ? p->change_sub_bgm_status : p->change_bgm_status))(basic, value);
-                else if (port < MAX_PORTS)
-                    ((fn3)p->set_port_data)(p->sound, port, value);
-            }
-            ports_pending = 0;
-        }
         if (p->status == STATUS_PLAYING && p->sound == 0)
             p->status = STATUS_FINISHED;
         wait_frame();

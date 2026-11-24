@@ -27,6 +27,7 @@
 #include "ntdlib/flipper/wave_list.h"
 #include "ntdlib/flipper/z2_params.h"
 #include "ntdlib/jaudio/pikmin2_pieces.h"
+#include "ntdlib/ppc/branch.h"
 #include "xsflib/binary.h"
 #include "xsflib/bytes.h"
 #include "xsflib/text.h"
@@ -147,7 +148,9 @@ std::optional<DriverImage> ImageOf(Driver driver)
 static_assert(DriverBlock::kMaxWaves == ntdlib::flipper::kMaxWaves);
 
 // A driver that runs ntdlib's start-up of Z2 holds its Z2Params from the sound on. The profile follows the wave list.
+// Every driver holds its wave list where Z2Params holds it, and a mini writes it there (MiniChunks).
 static_assert(DriverBlock::kListedProfileOffset - DriverBlock::kSoundOffset == ntdlib::flipper::z2::kProfileOffset);
+static_assert(DriverBlock::kWaveListOffset - DriverBlock::kSoundOffset == ntdlib::flipper::z2::kWaveCountOffset);
 
 // The profile's driver parameters, in the order of the driver's parameter block: `params`, then for a profile with
 // singing states their number and the states (driver/luigis_mansion.c's State), and for Pikmin 2 the table of its
@@ -178,7 +181,7 @@ std::vector<uint32_t> DriverParameters(const GameProfile& p)
     return words;
 }
 
-// A TGC's header: its magic, and where its parts lie in it. The program's disc header comes first, then bi2.bin and
+// A TGC's header: its magic, and where its parts are in it. The program's disc header comes first, then bi2.bin and
 // the apploader. The file system table gives each file's offset as if the files began at kTgcTableFiles. They begin at
 // kTgcFiles in the TGC. The values were read from the Pokémon Colosseum Bonus Disc's TGC. Its file system table then
 // finds each file's data.
@@ -369,30 +372,6 @@ std::vector<uint8_t> DiscFile(const disc::GameFiles& game, const std::string& pa
     return bytes;
 }
 
-std::string ZeroPadded(uint32_t number, std::size_t digits)
-{
-    std::string text = std::to_string(number);
-    text.insert(0, digits > text.size() ? digits - text.size() : 0, '0');
-
-    return text;
-}
-
-std::string TextBeforeZero(std::span<const uint8_t> bytes)
-{
-    return std::string(bytes.begin(), std::find(bytes.begin(), bytes.end(), uint8_t{0}));
-}
-
-std::string TerminatedText(std::span<const uint8_t> bytes, const char* error)
-{
-    const auto end = std::find(bytes.begin(), bytes.end(), uint8_t{0});
-    if (end == bytes.end())
-    {
-        throw xsflib::FormatError(error);
-    }
-
-    return std::string(bytes.begin(), end);
-}
-
 namespace
 {
 
@@ -513,7 +492,7 @@ std::optional<std::string> AddDriver(ProgramBuilder& program, const GameProfile&
     program.AddMemory(image->base, driver);
 
     uint8_t branch[4];
-    xsflib::StoreBe32(branch, 0x48000000 | ((image->entry - profile.main) & 0x03fffffc));
+    xsflib::StoreBe32(branch, ntdlib::ppc::Branch(profile.main, image->entry));
     program.AddMemory(profile.main, branch, sizeof(branch));
     for (const auto& [address, word] : profile.patches)
     {
@@ -645,27 +624,19 @@ std::optional<std::vector<uint8_t>> BuildLibrary(const disc::GameFiles& game, co
 namespace
 {
 
-// The chunks of a .minigcsf (see BuildMini): the sound in the driver block, the waves after it if `waves` isn't null,
-// the piece's state if `state` holds one, and `file` if it isn't null. The Z2 start-up's parameters start at the
-// sound.
+// The chunks of a .minigcsf (see BuildMini): the writes that ntdlib's MiniWrites makes to the parameters of the Z2
+// start-up, from the sound in the driver block on, then `file` if it isn't null. The writes contain the waves only if
+// `waves` isn't null. They contain the piece's state and its writes to memory only if `state` contains one.
 ProgramChunks MiniChunks(uint32_t id, const FileChunk* file, const std::vector<uint32_t>* waves,
                          const ntdlib::flipper::z2::PieceState* state)
 {
     ProgramChunks chunks;
-    std::vector<uint8_t> sound(4);
-    xsflib::StoreBe32(sound.data(), id);
-    chunks.memory.push_back({DriverBlock::kAddress + DriverBlock::kSoundOffset, std::move(sound)});
-    if (waves)
+    const std::optional<std::span<const uint32_t>> listed =
+        waves ? std::optional<std::span<const uint32_t>>(*waves) : std::nullopt;
+    for (ntdlib::flipper::z2::PieceState::Memory& write :
+         ntdlib::flipper::z2::MiniWrites(DriverBlock::kAddress + DriverBlock::kSoundOffset, id, listed, state))
     {
-        chunks.memory.push_back(
-            {DriverBlock::kAddress + DriverBlock::kWaveListOffset, ntdlib::flipper::WaveList(*waves)});
-    }
-
-    if (std::vector<uint8_t> words = state ? state->Bytes() : std::vector<uint8_t>(); !words.empty())
-    {
-        chunks.memory.push_back({DriverBlock::kAddress + DriverBlock::kSoundOffset +
-                                     ntdlib::flipper::z2::kMutedChildrenOffset - ntdlib::flipper::z2::kSoundOffset,
-                                 std::move(words)});
+        chunks.memory.push_back({write.address, std::move(write.data)});
     }
 
     if (file)

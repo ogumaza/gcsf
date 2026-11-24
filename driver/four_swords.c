@@ -94,6 +94,7 @@ static volatile u32 setup_state[2];
 
 #include "aram_manager.h"
 #include "frames.h"
+#include "jsystem_heaps.h"
 #include "section_waves.h"
 
 /* Mutes the children of the sound's track 0 whose bits `muted` sets and lets the others play. The game's music start
@@ -124,9 +125,8 @@ __attribute__((noreturn)) void driver_main(void) {
     ((fn0)p->vi_init)();
 
     /* JSystem: the root heap, the system heap, the ARAM manager and the main thread's JKRThread. */
-    const u32 root = ((fn2)p->create_root_heap)(p->max_heaps, 0);
-    if (!root || !((fn3)p->create_exp_heap)(p->system_heap_size, root, 0))
-        fail(2);
+    u32 system;
+    create_jsystem_heaps(&system);
     create_aram_manager();
     const u32 thread = ((fn1)p->alloc)(THREAD_SIZE);
     if (thread)

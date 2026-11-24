@@ -20,8 +20,8 @@
  *      health, the room's lights, the room and the room's sound information. It then picks the tracks that play and
  *      sets the piece's tempo. A sound ID with a state in bits 16 to 23 gives the game that state, then calls that
  *      function. A state in which Luigi is shrunk then gets the game's call that raises the tune by an octave. The
- *      function puts the piece's JAISound in a word of the game's, and the driver copies that word to the sound's handle
- *      once a frame.
+ *      function puts the piece's JAISound in a word of the game. The driver copies that word to the sound's handle once
+ *      a frame.
  * Then the game's sound frame runs once a frame, forever. A step that fails stops the driver with its number in the
  * status word (step 1 is the driver's check of its parameter block). `driver_params.status` reports the driver's
  * progress to the player (see docs/gcsf.md).

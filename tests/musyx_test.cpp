@@ -26,8 +26,8 @@ constexpr uint16_t kNoTrack = 0, kEnd = 0xffff, kLoop = 0xfffe;
 constexpr std::size_t kHeader = 0x58, kTrackTable = kHeader, kSectionTable = kTrackTable + 64 * 4;
 constexpr std::size_t kRegions = kSectionTable + 64, kEntry = 12;
 
-// A made-up song. `last[k]` is the last entry of track k: kEnd, kLoop, or kNoTrack for a track that the song lacks.
-// Each track has one region of pattern 0 before it. The song puts its tracks in `sections` if that isn't empty.
+// A made-up song. `last[k]` is the last entry of track k: kEnd, kLoop, or kNoTrack for a track that the song doesn't
+// have. Each track has one region of pattern 0 before it. The song puts its tracks in `sections` if that isn't empty.
 std::vector<uint8_t> MakeSong(const std::vector<uint16_t>& last, const std::vector<uint8_t>& sections)
 {
     std::vector<uint8_t> song(kRegions + last.size() * 2 * kEntry);

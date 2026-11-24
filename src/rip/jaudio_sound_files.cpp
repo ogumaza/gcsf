@@ -187,8 +187,8 @@ std::optional<std::filesystem::path> UseSoundFiles(disc::GameFiles& game, const 
                     "). Give the folder of the one to use.");
     }
 
-    // The sound files come from the folder, and the rest from the game. A sound file that the folder lacks belongs to
-    // the other release, and isn't read from the game. A sequence table in place of the sequence archive is read into
+    // The sound files come from the folder, and the rest from the game. A sound file that isn't in the folder belongs
+    // to the other release. The game's copy isn't read. A sequence table in place of the sequence archive is read into
     // the game's archive.
     const fs::path root = found.front();
     const auto from_game = game.read_file;

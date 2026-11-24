@@ -146,7 +146,6 @@ const GameProfile kAnimalCrossingUsa = {
             .player_ports = 0x158, // as Nas_GroupSeq reads them
         }
             .Words(),
-    .library_name = "AnimalCrossing",
     // __OK: blr. The sound library calls it once the game's sound data is in ARAM. It plays the start-up screen's sound
     // on the early JAudio1's sequence player: about 7 s of a voice and a chime. The game plays no music over that
     // sound.
@@ -224,7 +223,6 @@ const GameProfile kDoubutsuNoMoriPlusJpn = {
             .player_ports = 0x158,
         }
             .Words(),
-    .library_name = "DoubutsuNoMoriPlus",
     .patches = {{0x8000b7f0, 0x4e800020},  // __OK: blr (see Animal Crossing's profile)
                 {0x8000c110, 0x7f83e378},  // Sou_TrgStart: mr r3, r28 in place of the add of Nap_GetRandom() & 1
                 {0x8000c120, 0x7f83e378}}, // Sou_TrgStart: mr r3, r28 in place of the add of Nap_GetRandom() & 3
@@ -243,9 +241,9 @@ const GameProfile kDoubutsuNoMoriPlusJpn = {
 
 // Doubutsu no Mori+ (Japan), disc version 0. The disc's link map of main.dol (static.map) gives each address. Of the
 // 805 functions of the game's sound code, 794 are disc version 1's code at other addresses. The driver calls two of the
-// others. Na_GameFrame also counts down a byte that the game sets elsewhere. Na_MDPlayerPos lacks disc version 1's
-// test of a flag. The sequences are disc version 1's, but for the release of one envelope in the effects sequence.
-// Sequence 240 differs too. No piece plays it.
+// others. Na_GameFrame also counts down a byte that the game sets elsewhere. Na_MDPlayerPos leaves out a test of a flag
+// that disc version 1 makes. The sequences are disc version 1's, but for the release of one envelope in the effects
+// sequence. Sequence 240 differs too. No piece plays it.
 const GameProfile kDoubutsuNoMoriPlusJpnV0 = {
     .name = "Doubutsu no Mori+",
     .game_id = "GAFJ01",
@@ -296,7 +294,6 @@ const GameProfile kDoubutsuNoMoriPlusJpnV0 = {
             .player_ports = 0x158,
         }
             .Words(),
-    .library_name = "DoubutsuNoMoriPlus",
     .patches = {{0x8000b7d0, 0x4e800020},  // __OK: blr (see Animal Crossing's profile)
                 {0x8000c0f0, 0x7f83e378},  // Sou_TrgStart: mr r3, r28 in place of the add of Nap_GetRandom() & 1
                 {0x8000c100, 0x7f83e378}}, // Sou_TrgStart: mr r3, r28 in place of the add of Nap_GetRandom() & 3
@@ -317,7 +314,7 @@ const GameProfile kDoubutsuNoMoriPlusJpnV0 = {
 // build numbers the pieces and their sequences with 16 bits. SEQ_TABLE holds 384 entries of 16 bits, and the table of
 // sequences holds 353 sequences. Na_InitAudio takes the start-up screen's sound, the sound's size and the ARAM for the
 // sound library. The game's main works out that size from the size of audiorom.img (Na_GetAudioARAMSize). A sequence
-// player takes 4 more bytes. Its fields from +4 on lie up to 4 bytes further on. The names and addresses come from the
+// player takes 4 more bytes. Its fields from +4 on are up to 4 bytes further on. The names and addresses come from the
 // disc's link map of main.dol (static.map).
 //
 // The music discs' pieces are 208 to 367 (Sou_Na_BgmStart). The island's piece, 376, plays a copy of piece 91's
@@ -377,7 +374,6 @@ const GameProfile kDoubutsuNoMoriEPlusJpn = {
             .set_island = 0x80019488, // Na_PrivateIslandStatus
         }
             .Words(),
-    .library_name = "DoubutsuNoMoriEPlus",
     // This release's Sou_TrgStart adds Nap_GetRandom() & 1 to 0x63, 0x65, 0x67, 0x11e, 0x148, 0x475 and 0x4028.
     .patches = {{0x80010260, 0x4e800020},  // __OK: blr (see Animal Crossing's profile)
                 {0x80011064, 0x7c601b78},  // Sou_TrgStart: mr r0, r3 in place of the add of Nap_GetRandom() & 1
@@ -405,7 +401,7 @@ const GameProfile kDoubutsuNoMoriEPlusJpn = {
 // 1's code at other addresses, with the same constants. Their data differs only in two words of the start-up voice's
 // wave table. Of the 873 functions of the sound library, 771 are disc version 1's code. Nas_GroupSeq and Nas_SubSeq
 // are among the others. They differ only in their registers and in the order of a few instructions. Their reads of a
-// command and their returns from Common_Com lie at disc version 1's offsets.
+// command and their returns from Common_Com are at disc version 1's offsets.
 const GameProfile kDoubutsuNoMoriEPlusJpnV0 = {
     .name = "Doubutsu no Mori e+",
     .game_id = "GAEJ01",
@@ -459,7 +455,6 @@ const GameProfile kDoubutsuNoMoriEPlusJpnV0 = {
             .set_island = 0x800195a8, // Na_PrivateIslandStatus
         }
             .Words(),
-    .library_name = "DoubutsuNoMoriEPlus",
     .patches = {{0x80010380, 0x4e800020},  // __OK: blr (see Animal Crossing's profile)
                 {0x80011184, 0x7c601b78},  // Sou_TrgStart: mr r0, r3 in place of the add of Nap_GetRandom() & 1
                 {0x800111a0, 0x7c601b78}}, // Sou_TrgStart: mr r0, r3 in place of the add of Nap_GetRandom() & 3

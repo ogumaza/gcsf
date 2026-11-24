@@ -163,7 +163,6 @@ const GameProfile kMarioGolfUsa = {
     .jingle_table = 0x801379e4,
     .jingle_count = 9,
     .bank_files = {"B/T/M", "B/T/N", "B/T/O", "B/T/P", "D/L/L", "D/L/M", "D/L/N", "D/L/O"},
-    .library_name = "MarioGolf",
     .effect_ranges = 0x801320cc,
     .voice_banks = 0x80137308,
     .voice_bank_count = 37,
@@ -266,7 +265,6 @@ const GameProfile kMarioPowerTennisUsa = {
     .song_count = 111,
     .song_name_size = 0x18,
     .bank_files = {"A/O/F", "A/O/G", "A/O/H", "A/O/I", "A/O/J", "A/O/K", "A/O/L", "A/O/M"},
-    .library_name = "MarioPowerTennis",
     .effect_ranges = 0x802177e8,
     .voice_banks = 0x80215e98,
     .voice_bank_count = 18,
@@ -334,11 +332,8 @@ const GameProfile kWarioWareUsa = {
         },
     .bank_files = {"gcwario_sound.sdir", "gcwario_sound.pool", "gcwario_sound.proj", "sound_data.bin",
                    "gcwario_sound.samp"},
-    .library_name = "WarioWare",
     .named_songs = 0x801b2c38,
     .named_song_count = 231,
-    .named_song_size = 0x20,
-    .named_song_name = 0xc,
     .effect_songs = 0x801b4918,
     .effect_song_count = 933,
     .play_effects = 0x801b6640,
@@ -402,7 +397,6 @@ const GameProfile kMarioParty4Usa = {
             0x80119a94, // msm_se_play: msmSePlay
         },
     .bank_files = {"sound/mpgcsnd.msm"},
-    .library_name = "MarioParty4",
     .stream_file = "sound/mpgcstr.pdt",
     .sound_test_module = "dll/option.rel",
     .sound_test = 0xac58,
@@ -465,7 +459,6 @@ const GameProfile kMarioParty4Eur = {
             0x801198c4, // msm_se_play: msmSePlay
         },
     .bank_files = {"sound/mpgcsnd.msm"},
-    .library_name = "MarioParty4",
     .stream_file = "sound/mpgcstr.pdt",
     .sound_test_module = "dll/option.rel",
     .sound_test = 0xabf0,
@@ -488,9 +481,9 @@ const GameProfile kMarioParty4Eur = {
 
 // Mario Party 4's Japanese release. The sound manager, MusyX and the game's audio set-up are the American code at other
 // addresses. The options module holds the American sound test at the American offsets. The Japanese messages name the
-// sounds in the game's Japanese font. The sound manager's file leaves out two macros and two samples of group 0x5A,
-// which holds se-2066 to se-2071. Its se-2068 plays se-2067's macro. Its se-2069 plays the macro of the game's silent
-// effects. The other groups hold the American samples.
+// sounds in the game's Japanese font. The sound manager's file leaves out two macros and two samples of group 0x5A.
+// That group holds se-2066 to se-2071. Its se-2068 plays se-2067's macro. Its se-2069 plays the macro of the game's
+// silent effects. The other groups hold the American samples.
 const GameProfile kMarioParty4Jpn = {
     .name = "Mario Party 4",
     .game_id = "GMPJ01",
@@ -518,7 +511,6 @@ const GameProfile kMarioParty4Jpn = {
             0x80119684, // msm_se_play: msmSePlay
         },
     .bank_files = {"sound/mpgcsnd.msm"},
-    .library_name = "MarioParty4",
     .stream_file = "sound/mpgcstr.pdt",
     .sound_test_module = "dll/option.rel",
     .sound_test = 0xac58,

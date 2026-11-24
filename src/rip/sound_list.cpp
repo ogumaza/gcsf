@@ -10,14 +10,15 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 #include "ntdlib/disc/game.h"
+#include "ntdlib/dol.h"
+#include "ntdlib/flipper/piece_variants.h"
 #include "ntdlib/flipper/z2_params.h"
 #include "ntdlib/jaudio/jungle_beat_states.h"
-#include "ntdlib/jaudio/z2_starts.h"
-#include "ntdlib/jaudio/z2_states.h"
 #include "xsflib/binary.h"
 #include "xsflib/psf/psf.h"
 
@@ -197,6 +198,17 @@ void AddSecondSet(const GameProfile& profile, std::vector<Sound>& sounds)
     sounds.insert(piece + 1, std::move(set));
 }
 
+// A variant of `piece`: a copy whose label is the piece's with `suffix`, such as "Z2BGM_FIELD_LINK_DAY_riding". The
+// variant shares the piece's number.
+Sound VariantOf(const Sound& piece, std::string_view suffix)
+{
+    Sound variant = piece;
+    variant.label += suffix;
+    variant.shares_number = true;
+
+    return variant;
+}
+
 // Adds a variant to `sounds` after each piece for each of `states` whose `piece` is the piece's ID. `variant` takes a
 // state and gives the variant's ID and the text that follows the piece's label. The variants share the piece's number.
 template <typename State, typename Variant>
@@ -207,28 +219,25 @@ void AddStatesOfPieces(std::span<const State> states, std::vector<Sound>& sounds
         return;
     }
 
-    std::vector<Sound> listed;
-    for (Sound& sound : sounds)
+    const auto states_of = [states, &variant](const Sound& piece)
     {
-        listed.push_back(std::move(sound));
-        const std::size_t piece = listed.size() - 1;
+        std::vector<Sound> added;
         for (const State& state : states)
         {
-            if (state.piece != listed[piece].id)
+            if (state.piece != piece.id)
             {
                 continue;
             }
 
             const auto [id, suffix] = variant(state);
-            Sound added = listed[piece];
-            added.id = id;
-            added.label += suffix;
-            added.shares_number = true;
-            listed.push_back(std::move(added));
+            Sound sound = VariantOf(piece, suffix);
+            sound.id = id;
+            added.push_back(std::move(sound));
         }
-    }
 
-    sounds = std::move(listed);
+        return added;
+    };
+    ntdlib::flipper::AddVariantsAfterEach(sounds, states_of);
 }
 
 // Adds the profile's states of pieces of music to `sounds`, each after its piece (GameProfile::music_states). A state's
@@ -244,8 +253,11 @@ void AddMusicStates(const GameProfile& profile, std::vector<Sound>& sounds)
 // "JA_BGM_MAIN_01_combo1". The states share the piece's number.
 void AddLayerStates(const GameProfile& profile, std::vector<Sound>& sounds)
 {
-    AddStatesOfPieces(profile.layer_states, sounds, [](const jaudio::JungleBeatState& state)
-                      { return std::pair(state.piece | state.bits, std::string("_") + state.suffix); });
+    const auto state_of = [](const jaudio::JungleBeatState& state)
+    {
+        return std::pair(state.piece | state.bits, std::string("_") + state.suffix);
+    };
+    AddStatesOfPieces(profile.layer_states, sounds, state_of);
 }
 
 // Adds the chord effects that the game plays beside its music to `sounds`, each after its piece
@@ -253,106 +265,53 @@ void AddLayerStates(const GameProfile& profile, std::vector<Sound>& sounds)
 // "JA_BGM_MAIN_01_enemy_sleeping". The layers share the piece's number.
 void AddChordLayers(const GameProfile& profile, std::vector<Sound>& sounds)
 {
-    AddStatesOfPieces(profile.chord_layers, sounds, [&profile](const jaudio::JungleBeatChordLayer& layer)
-                      {
-                          const auto index = static_cast<uint32_t>(&layer - profile.chord_layers.data());
-                          return std::pair(jaudio::ChordLayerId(layer.piece, index), std::string("_") + layer.suffix);
-                      });
+    const auto state_of = [&profile](const jaudio::JungleBeatChordLayer& layer)
+    {
+        const auto index = static_cast<uint32_t>(&layer - profile.chord_layers.data());
+        return std::pair(jaudio::ChordLayerId(layer.piece, index), std::string("_") + layer.suffix);
+    };
+    AddStatesOfPieces(profile.chord_layers, sounds, state_of);
 }
 
-// Gives the pieces whose tracks the game mutes as it starts them the children to mute (GameProfile::muted_starts). A
-// start with a suffix becomes a sound after its piece. The sound's label is the piece's with the suffix, such as
-// "Z2BGM_FIELD_LINK_DAY_riding", and it shares the piece's number.
-void AddMutedStarts(const GameProfile& profile, std::vector<Sound>& sounds)
+// Gives each chord layer whose piece starts with every track off the piece's second state in place of its first
+// (GameProfile::state_table). The driver starts a layer's music through the stage's start. That start applies the first
+// state. The piece alone gets the second state from the driver.
+void AddSilentStarts(const disc::GameFiles& game, const GameProfile& profile, std::vector<Sound>& sounds)
 {
-    if (profile.muted_starts.empty())
+    if (profile.chord_layers.empty() || profile.state_table.rows == 0)
     {
         return;
     }
 
-    std::vector<Sound> listed;
+    const ntdlib::Dol dol = ntdlib::Dol::ParseMain(game.dol);
     for (Sound& sound : sounds)
     {
-        const std::size_t piece = listed.size();
-        listed.push_back(std::move(sound));
-        for (const ntdlib::jaudio::MutedStart& start : profile.muted_starts)
+        if (std::optional<ntdlib::flipper::z2::PieceState::Memory> start =
+                jaudio::JungleBeatSilentStart(dol, profile.state_table, sound.id))
         {
-            if (start.sound != listed[piece].id || listed[piece].stream)
-            {
-                continue;
-            }
-
-            if (start.suffix.empty())
-            {
-                listed[piece].piece_state.muted_children = start.muted_children;
-                continue;
-            }
-
-            Sound variant = listed[piece];
-            variant.label += start.suffix;
-            variant.piece_state.muted_children = start.muted_children;
-            variant.shares_number = true;
-            listed.push_back(std::move(variant));
+            sound.piece_state.memory.push_back(std::move(*start));
         }
     }
-
-    sounds = std::move(listed);
-}
-
-// Gives the pieces their states (GameProfile::piece_states). A state without a suffix is the piece's. A state with a
-// suffix becomes a sound after the piece and its other starts. The sound's label is the piece's with the suffix, such
-// as "Z2BGM_TOAL_VILLEGE_status1", and it shares the piece's number.
-void AddPieceStates(const GameProfile& profile, std::vector<Sound>& sounds)
-{
-    if (profile.piece_states.empty())
-    {
-        return;
-    }
-
-    std::vector<Sound> listed;
-    for (std::size_t i = 0; i < sounds.size(); i++)
-    {
-        const std::size_t piece = listed.size();
-        listed.push_back(std::move(sounds[i]));
-        if (listed[piece].stream || listed[piece].shares_number)
-        {
-            continue;
-        }
-
-        std::vector<Sound> states;
-        for (const ntdlib::jaudio::MusicState& state : profile.piece_states)
-        {
-            if (state.sound != listed[piece].id)
-            {
-                continue;
-            }
-
-            if (state.suffix.empty())
-            {
-                listed[piece].piece_state = ntdlib::flipper::z2::PieceStateOf(state);
-                continue;
-            }
-
-            Sound variant = listed[piece];
-            variant.label += state.suffix;
-            variant.piece_state = ntdlib::flipper::z2::PieceStateOf(state);
-            variant.shares_number = true;
-            states.push_back(std::move(variant));
-        }
-
-        // The piece's other starts stay right after it.
-        while (i + 1 < sounds.size() && sounds[i + 1].shares_number)
-        {
-            listed.push_back(std::move(sounds[++i]));
-        }
-
-        listed.insert(listed.end(), std::make_move_iterator(states.begin()), std::make_move_iterator(states.end()));
-    }
-
-    sounds = std::move(listed);
 }
 
 } // namespace
+
+void AddFightMusic(const GameProfile& profile, std::vector<Sound>& sounds)
+{
+    if (profile.stage_table == 0)
+    {
+        return;
+    }
+
+    for (Sound& sound : sounds)
+    {
+        if (std::optional<ntdlib::flipper::z2::PieceState::Memory> music =
+                jaudio::JungleBeatFightMusic(profile.chord_layers, profile.stage_table, sound.id))
+        {
+            sound.piece_state.memory.push_back(std::move(*music));
+        }
+    }
+}
 
 std::optional<GameSounds> ListGameSounds(const disc::GameFiles& game, const GameProfile& profile, std::string* error)
 {
@@ -387,12 +346,27 @@ std::optional<GameSounds> ListGameSounds(const disc::GameFiles& game, const Game
     AddMusicStates(profile, listed.sounds);
     AddChordLayers(profile, listed.sounds); // before the states, which then come first after each piece
     AddLayerStates(profile, listed.sounds);
+    AddFightMusic(profile, listed.sounds);
+    try
+    {
+        AddSilentStarts(game, profile, listed.sounds);
+    }
+    catch (const xsflib::FormatError& e)
+    {
+        if (error)
+        {
+            *error = e.what();
+        }
+
+        return std::nullopt;
+    }
+
     AddPortVariants(profile, listed.sounds);
     AddRandomVariants(profile, listed.sounds);
     AddSingingStates(profile, listed.sounds);
     AddSecondSet(profile, listed.sounds);
-    AddMutedStarts(profile, listed.sounds);
-    AddPieceStates(profile, listed.sounds);
+    ntdlib::flipper::AddMutedStarts(profile.muted_starts, listed.sounds, VariantOf);
+    ntdlib::flipper::AddPieceStates(profile.piece_states, listed.sounds, VariantOf);
 
     return listed;
 }

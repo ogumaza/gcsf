@@ -196,7 +196,7 @@ __attribute__((section(".params"), used)) volatile struct Params driver_params =
     .version = PARAMS_VERSION,
 };
 
-/* The OS's arena, which the driver hands out from the bottom up. */
+/* The OS's arena. The driver hands it out from the bottom up. */
 static u32 heap_next;
 static u32 heap_end;
 
@@ -212,15 +212,7 @@ static u32 fade_in_para[8];
 
 #include "sleep.h"
 
-/* `size` bytes of the arena, at a 32-byte boundary: the DSP and the disc require that for their transfers. Returns 0
- * when the arena is used up. */
-static u32 heap_alloc(u32 size) {
-    const u32 at = (heap_next + 31) & ~31u;
-    if (at + size < at || at + size > heap_end)
-        return 0;
-    heap_next = at + size;
-    return at;
-}
+#include "arena.h"
 
 static u32 hook_malloc(u32 size) {
     return heap_alloc(size);
@@ -230,7 +222,7 @@ static void hook_free(u32 address) {
     (void)address;
 }
 
-/* The path "MusyX/<number><extension>" in `out`, which holds at least 32 bytes. */
+/* The path "MusyX/<number><extension>" in `out`. `out` holds at least 32 bytes. */
 static void file_path(char* out, u32 number, const char* extension) {
     static const char prefix[] = "MusyX/";
     u32 n = 0;
@@ -405,7 +397,7 @@ __attribute__((noreturn)) void driver_main(void) {
                                                    p->aux_callback[1], p->aux_user[1], p->aux_midi[1], 0);
     }
 
-    /* The sound's groups, each from its set of files. A set's number has 16 bits, so `loaded` starts as none. */
+    /* The sound's groups, each from its set of files. A set's number has 16 bits. `loaded` therefore starts as none. */
     u32 loaded = 0xffffffffu, project = 0, pool = 0, sdir = 0, samples = 0;
 #ifdef MUSYX_UPLOAD
     upload_buffer = heap_alloc(UPLOAD_CHUNK);

@@ -20,6 +20,7 @@
 #include "ntdlib/dol.h"
 #include "ntdlib/jaudio/game_lengths.h"
 #include "ntdlib/jaudio/loop_finder.h"
+#include "ntdlib/zero_padded.h"
 #include "xsflib/binary.h"
 #include "xsflib/bytes.h"
 #include "xsflib/rip/length.h"
@@ -130,7 +131,7 @@ N64TableSequence N64Sequence(const ntdlib::Dol& dol, const GameProfile& profile,
 // rooms. Doubutsu no Mori e+'s island piece is listed with the islander and without. Another number is listed if the
 // game plays it as a piece (N64PlaysPiece) and no lower such number plays the same sequence. A piece's label is "bgm"
 // and its number in three digits. For a piece of the hour, of the museum or of the island, a hyphen and the weather's,
-// the room's or the islander's name follow. Throws xsflib::FormatError if a table lies outside the game's code.
+// the room's or the islander's name follow. Throws xsflib::FormatError if a table is outside the game's code.
 std::vector<Sound> N64Pieces(const ntdlib::Dol& dol, const GameProfile& profile)
 {
     const uint32_t entry_size = profile.n64_wide_numbers ? 2 : 1;
@@ -146,7 +147,7 @@ std::vector<Sound> N64Pieces(const ntdlib::Dol& dol, const GameProfile& profile)
     {
         const uint32_t entry = profile.n64_wide_numbers ? xsflib::LoadBe16(table.data() + 2 * number) : table[number];
         const uint32_t sequence = N64Sequence(dol, profile, entry).number;
-        std::string label = "bgm" + ZeroPadded(number, 3);
+        std::string label = "bgm" + ntdlib::ZeroPadded(number, 3);
         if (number >= kN64FirstHour && number <= kN64LastHour)
         {
             for (const N64Weather& weather : kN64Weathers)
@@ -180,7 +181,7 @@ std::vector<Sound> N64Pieces(const ntdlib::Dol& dol, const GameProfile& profile)
 // A game's effects with the Nintendo 64's sound library (see GameProfile::n64_effects). A bank's table ends where
 // another bank's table or an effect's script starts, or after 128 effects. An effect is named after its bank and its
 // place, for example `se2-017`. The game's effect 0 is none: the game's slot of an effect holds 0 when it's free.
-// Throws xsflib::FormatError if the tables lie outside the sound data.
+// Throws xsflib::FormatError if the tables are outside the sound data.
 std::vector<Sound> N64Effects(const disc::GameFiles& game, const ntdlib::Dol& dol, const GameProfile& profile)
 {
     const std::vector<uint8_t> rom = DiscFile(game, profile.sound_archive);
@@ -245,7 +246,7 @@ std::vector<Sound> N64Effects(const disc::GameFiles& game, const ntdlib::Dol& do
             }
 
             sounds.push_back({kN64EffectKind << 24 | number << 8 | place,
-                              "se" + std::to_string(number) + "-" + ZeroPadded(place, 3), false});
+                              "se" + std::to_string(number) + "-" + ntdlib::ZeroPadded(place, 3), false});
         }
     }
 
@@ -560,19 +561,20 @@ private:
     std::vector<TrackEvent> events_;        // the events of this block
 };
 
-// The length of a sound of the Nintendo 64's sound library, which the driver has started (see LengthAnalyzer::Analyze).
+// The length of a sound of the Nintendo 64's sound library that the driver has started (see LengthAnalyzer::Analyze).
 // For a piece of music, the driver's handle holds the piece's sequence player. The analysis follows the player's
 // script, its channels' and their layers' through ntdlib's LoopFinder (see N64Tracks), as it follows a JAudio sound's
 // tracks (ntdlib::jaudio::AnalyzeGameSound). A script is a track. The player's script is the root. For an effect, the
 // handle holds the channel of the effects sequence that plays the effect. The channel's script is the root, and its
-// layers follow. The sound ends when the driver clears the handle.
-std::optional<Timing> AnalyzeN64Sound(Player& player, const GameProfile& profile, uint32_t handle_address, bool effect)
+// layers follow. The sound ends when the driver clears the handle. The analysis runs up to `limit` (GameRules).
+std::optional<Timing> AnalyzeN64Sound(Player& player, const GameProfile& profile, uint32_t handle_address, bool effect,
+                                      xsflib::rip::Limit limit)
 {
     using ntdlib::jaudio::TrackEvent;
 
     AnalysisMachine machine(player);
     N64Tracks tracks(machine, profile, effect);
-    ntdlib::jaudio::SoundLength length(kLengthRules);
+    ntdlib::jaudio::SoundLength length(ntdlib::jaudio::WithLimit(kLengthRules, limit));
     const ScopedWatch watch(machine.Cpu(), {profile.n64_read_byte, profile.n64_flow},
                             [&tracks, &length](uint32_t pc) { tracks.OnWatch(pc, length.Frames()); });
     const auto read_wait = [&tracks](uint32_t track)
@@ -623,10 +625,10 @@ std::optional<Timing> AnalyzeN64Sound(Player& player, const GameProfile& profile
 
 } // namespace
 
-std::optional<Timing> MeasureN64Sound(Player& player, const GameProfile& profile, uint32_t id)
+std::optional<Timing> MeasureN64Sound(Player& player, const GameProfile& profile, uint32_t id, xsflib::rip::Limit limit)
 {
     return AnalyzeN64Sound(player, profile, DriverBlock::kAddress + DriverBlock::kHandleOffset,
-                           id >> 24 == kN64EffectKind);
+                           id >> 24 == kN64EffectKind, limit);
 }
 
 } // namespace gcsf::rip

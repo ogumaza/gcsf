@@ -88,6 +88,60 @@ std::vector<uint8_t> Yaz0Bytes(const std::vector<uint8_t>& data)
     return b;
 }
 
+// Checks the copy of the start-up archive `baa` that plays the unplayed file `u`: it plays as the first sound of
+// `sounds`, at the volume that most sounds have, with the file's id in its entry. Nothing else in the copy changes.
+void CheckCopy(const rip::UnplayedSequence& u, const std::vector<uint8_t>& baa, const std::vector<uint8_t>& arc,
+               const std::vector<jaudio::SoundEntry>& sounds, uint8_t type)
+{
+    const uint32_t entry = sounds[0].offset;
+    const jaudio::ItemLayout layout = jaudio::LayoutOf(type);
+    const uint32_t file = entry + layout.file.value_or(0);
+
+    Check(u.sound.Id() == sounds[0].Id() && rip::IsMusic(u.sound), u.file_name + ": plays as the first sound");
+    const std::vector<jaudio::SoundEntry> changed = rip::ListSounds(Baa(), u.sound_archive, arc);
+    Check(changed.size() == 3 && changed[0].volume == 55 && changed[0].resource == u.sound.resource &&
+              changed[1].volume == 55 && changed[1].resource == 2,
+          u.file_name + ": the copy's first sound plays the file at volume 55");
+
+    bool elsewhere = u.sound_archive.size() != baa.size();
+    for (std::size_t i = 0; i < baa.size() && i < u.sound_archive.size(); i++)
+    {
+        elsewhere =
+            elsewhere || (baa[i] != u.sound_archive[i] && i != entry + layout.volume && i != file && i != file + 1);
+    }
+
+    Check(!elsewhere, u.file_name + ": the copy changes only the entry's volume and file");
+}
+
+// Checks that archives compressed with Yaz0 give the same files and copies as `baa` and `arc` do (`unplayed`), and that
+// a damaged compressed start-up archive is refused.
+void CheckCompressed(const std::vector<uint8_t>& baa, const std::vector<uint8_t>& arc,
+                     const std::vector<jaudio::SoundEntry>& sounds, const std::vector<rip::UnplayedSequence>& unplayed)
+{
+    const std::vector<rip::UnplayedSequence> compressed = rip::UnplayedSequences(Baa(), baa, sounds, Yaz0Bytes(arc));
+
+    Check(compressed.size() == 2 && compressed[1].file_name == "four" &&
+              compressed[1].sound_archive == unplayed[1].sound_archive,
+          "a sequence archive compressed with Yaz0");
+
+    // A start-up archive compressed with Yaz0 lists the same sounds, and the copies of it are decoded. Donkey Kong
+    // Jungle Beat compresses its start-up archive.
+    const std::vector<uint8_t> compressed_baa = Yaz0Bytes(baa);
+    const std::vector<jaudio::SoundEntry> same = rip::ListSounds(Baa(), compressed_baa, arc);
+    const std::vector<rip::UnplayedSequence> decoded = rip::UnplayedSequences(Baa(), compressed_baa, same, arc);
+
+    Check(same.size() == 3 && same[2].resource == 3 && same[2].offset == sounds[2].offset,
+          "a start-up archive compressed with Yaz0 lists the same sounds");
+    Check(decoded.size() == 2 && decoded[0].sound_archive == unplayed[0].sound_archive &&
+              decoded[1].sound_archive == unplayed[1].sound_archive,
+          "the copies of a compressed start-up archive are decoded");
+
+    const std::vector<uint8_t> cut_baa(compressed_baa.begin(), compressed_baa.end() - 16);
+
+    Check(!ErrorOf([&] { rip::UnplayedSequences(Baa(), cut_baa, sounds, arc); }).empty(),
+          "a damaged compressed start-up archive is refused");
+}
+
 void TestUnplayed(uint8_t type)
 {
     // Sounds play files 0, 2 and 3. Two of the three play at volume 55. Files 1 and 4 have no sound, and file 6 is
@@ -119,53 +173,12 @@ void TestUnplayed(uint8_t type)
     Check(unplayed[0].sound.name == "one" && unplayed[0].file_name == "one.bms", "a file named without its extension");
     Check(unplayed[1].sound.name == "four" && unplayed[1].file_name == "four", "a file without an extension");
 
-    // Each plays as the first sound, at the volume that most sounds have, with the file's id in its entry. Nothing
-    // else in the copy changes.
-    const uint32_t entry = sounds[0].offset;
-    const jaudio::ItemLayout layout = jaudio::LayoutOf(type);
-    const uint32_t file = entry + layout.file.value_or(0);
-
     for (const rip::UnplayedSequence& u : unplayed)
     {
-        Check(u.sound.Id() == sounds[0].Id() && rip::IsMusic(u.sound), u.file_name + ": plays as the first sound");
-        const std::vector<jaudio::SoundEntry> changed = rip::ListSounds(Baa(), u.sound_archive, arc);
-        Check(changed.size() == 3 && changed[0].volume == 55 && changed[0].resource == u.sound.resource &&
-                  changed[1].volume == 55 && changed[1].resource == 2,
-              u.file_name + ": the copy's first sound plays the file at volume 55");
-
-        bool elsewhere = u.sound_archive.size() != baa.size();
-        for (std::size_t i = 0; i < baa.size() && i < u.sound_archive.size(); i++)
-        {
-            elsewhere =
-                elsewhere || (baa[i] != u.sound_archive[i] && i != entry + layout.volume && i != file && i != file + 1);
-        }
-
-        Check(!elsewhere, u.file_name + ": the copy changes only the entry's volume and file");
+        CheckCopy(u, baa, arc, sounds, type);
     }
 
-    // A sequence archive compressed with Yaz0 gives the same files.
-    const std::vector<rip::UnplayedSequence> compressed = rip::UnplayedSequences(Baa(), baa, sounds, Yaz0Bytes(arc));
-
-    Check(compressed.size() == 2 && compressed[1].file_name == "four" &&
-              compressed[1].sound_archive == unplayed[1].sound_archive,
-          "a sequence archive compressed with Yaz0");
-
-    // A start-up archive compressed with Yaz0 lists the same sounds, and the copies of it are decoded. Donkey Kong
-    // Jungle Beat compresses its start-up archive.
-    const std::vector<uint8_t> compressed_baa = Yaz0Bytes(baa);
-    const std::vector<jaudio::SoundEntry> same = rip::ListSounds(Baa(), compressed_baa, arc);
-    const std::vector<rip::UnplayedSequence> decoded = rip::UnplayedSequences(Baa(), compressed_baa, same, arc);
-
-    Check(same.size() == 3 && same[2].resource == 3 && same[2].offset == sounds[2].offset,
-          "a start-up archive compressed with Yaz0 lists the same sounds");
-    Check(decoded.size() == 2 && decoded[0].sound_archive == unplayed[0].sound_archive &&
-              decoded[1].sound_archive == unplayed[1].sound_archive,
-          "the copies of a compressed start-up archive are decoded");
-
-    const std::vector<uint8_t> cut_baa(compressed_baa.begin(), compressed_baa.end() - 16);
-
-    Check(!ErrorOf([&] { rip::UnplayedSequences(Baa(), cut_baa, sounds, arc); }).empty(),
-          "a damaged compressed start-up archive is refused");
+    CheckCompressed(baa, arc, sounds, unplayed);
 
     // A table whose sounds play no file of the archive offers nothing.
     Check(rip::UnplayedSequences(Baa(), baa, {}, arc).empty(), "no sound plays a file of the archive");

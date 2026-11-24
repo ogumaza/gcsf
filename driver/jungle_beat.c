@@ -18,13 +18,14 @@
  *   6. the waves that the .minigcsf names, one group of a wave bank each. The game loads its waves per stage, and its
  *      waves don't all fit in ARAM;
  *   7. the sound, by its JAudio sound ID. Music starts in the game's BGM player, the way the game starts it. A variant
- *      of a piece then gets the states that the game sets for the piece during play (see play_states). A chord effect
- *      plays over a stage's music with the music's tracks off (see play_over_music). An effect that reads a value at
- *      port 0xb starts with the value that the game's code gives it first (see play_with_count). The sound manager
- *      starts other sounds.
+ *      of a piece then gets the states that the game sets for the piece during play (see jungle_beat_play_states). A
+ *      chord effect plays over a stage's music with the music's tracks off (see play_over_music). An effect that reads
+ *      a value at port 0xb starts with the value that the game's code gives it first (see play_with_count). The sound
+ *      manager starts other sounds.
  * Then the audio manager's frame process runs once a frame, forever. While a chord effect plays, the rhythm's frame
- * process follows it. A step that fails stops the driver with its number in the status word (step 1 is the driver's
- * check of its parameter block). `driver_params.status` reports the driver's progress to the player (see docs/gcsf.md).
+ * process comes first in each frame, as in the game. A step that fails stops the driver with its number in the status
+ * word (step 1 is the driver's check of its parameter block). `driver_params.status` reports the driver's progress to
+ * the player (see docs/gcsf.md).
  *
  * Build with `driver/build.py jungle_beat` (clang). The result is committed as src/rip/driver_jungle_beat_blob.h.
  * Building GCSF itself requires no PowerPC toolchain.
@@ -140,29 +141,7 @@ __attribute__((section(".params"), used)) volatile struct Params driver_params =
 
 #include "aram_manager.h"
 #include "frames.h"
-
-/* A wave archive of the listed `wave`: (wave bank << 16) | group. A bank's vtable gives its archive at slot 0x10 and
-   the number of its archives at slot 0x14. Returns 0 if the bank or the group doesn't exist. */
-static u32 wave_arc(u32 wave) {
-    volatile struct Params* p = &driver_params;
-    const u32 bank = word(word(p->section_heap) + p->wave_banks_offset + (wave >> 16) * 4);
-    if (!bank || (wave & 0xffff) >= ((fn1)virtual_function(bank, 0x14))(bank))
-        return 0;
-    return ((fn2)virtual_function(bank, 0x10))(bank, wave & 0xffff);
-}
-
-/* Whether every listed wave archive is in ARAM. An archive without a file on the disc (entry number below 0) is never
-   loaded. */
-static int waves_loaded(void) {
-    volatile struct Params* p = &driver_params;
-    for (u32 i = 0; i < p->wave_count && i < MAX_WAVES; i++) {
-        const u32 arc = wave_arc(p->waves[i]);
-        if (arc && (s32)word(arc + p->wave_arc_state_offset + 4) >= 0 &&
-            word(arc + p->wave_arc_state_offset) != WAVES_LOADED)
-            return 0;
-    }
-    return 1;
-}
+#include "jaudio/jungle_beat_reads.h"
 
 /* Whether the first state of the music `id` in the BGM player's second table turns every track off. A state holds
    a code for each track in a nibble, high nibble first. The player ignores the code's bit 3. Codes 0 and 2 turn a
@@ -220,29 +199,6 @@ static u32 chord_record(u32 chords, u32 id) {
     return NO_RECORD;
 }
 
-/* The first busy player of the chord effects, or 0. */
-static u32 busy_player(u32 chords) {
-    const u32 players = word(chords + CHORD_PLAYER_LIST);
-    for (u32 i = 0; i < CHORD_PLAYERS; i++) {
-        const u32 player = word(players + i * 4);
-        if (player && (byte(player + PLAYER_BUSY) || byte(player + PLAYER_WAITING)))
-            return player;
-    }
-    return 0;
-}
-
-/* The JAISound of the step that a chord effect's `player` plays, or 0 between steps. */
-static u32 step_sound(u32 player) {
-    const u32 object = word(player + PLAYER_SOUND_OBJECT);
-    const u32 handles = word(object);
-    for (u32 i = 0; i < word(object + 4); i++) {
-        const u32 sound = word(handles + i * 4);
-        if (sound)
-            return sound;
-    }
-    return 0;
-}
-
 /* Calls startChordSe at `fn` for `record` of `chords`, with no object, at the volume whose bits are at `volume`. The
    game's code passes the chord effects in r3, the record in r4, the object in r5, 0 in r6 and the volume in f1. The
    driver is built without floating point. A float that it passed would go in a general register. */
@@ -259,19 +215,20 @@ __attribute__((naked)) static u32 call_start_chord(u32 fn, const u32* volume, u3
 /* The bits of 1.0f: the full volume that the game gives its chord effects. */
 static const u32 full_volume = 0x3f800000u;
 
-/* One frame of the game with music, and the music's JAISound copied to `music`. The rhythm gives the chord effects
-   the music's beats. The game's scenes run the rhythm's frame process. The driver runs it after the audio manager's.
-   music_work does the frame's work, and music_frame waits for the next frame after it. */
-static void music_work(u32 manager, u32 music_player) {
+/* The two halves of a game frame with music. The game's scenes run the rhythm's frame process before the audio
+   manager's in each frame (0x80248784, then 0x8023f390). The rhythm gives the chord effects the music's beats. The
+   driver makes the objects' asks for chord effects between the two. A sound that the rhythm or an ask starts then
+   starts in the same frame's audio process. rhythm_work is the first half. audio_work is the second: the audio
+   manager's frame process, and the music's JAISound copied to `music`. */
+static void rhythm_work(u32 manager) {
     volatile struct Params* p = &driver_params;
-    ((fn1)p->audio_frame)(manager);
     ((fn1)p->rhythm_frame)(manager + p->rhythm_offset);
-    p->music = word(music_player + 4);
 }
 
-static void music_frame(u32 manager, u32 music_player) {
-    music_work(manager, music_player);
-    wait_frame();
+static void audio_work(u32 manager, u32 music_player) {
+    volatile struct Params* p = &driver_params;
+    ((fn1)p->audio_frame)(manager);
+    p->music = word(music_player + 4);
 }
 
 /* Each track's code 2, for set_track_states: off at once. The BGM player sets the track's volume to 0 and mutes it.
@@ -303,11 +260,13 @@ __attribute__((noreturn)) static void play_over_music(u32 manager, u32 id, u32 r
         fail(7);
     ((fn3)p->set_track_states)(music_player, (u32)tracks_off, (u32)-1);
 
-    /* The effect. The chord effects' code refuses an effect until the music's chords are in. */
+    /* The effect, started where the game's objects ask for it: after the rhythm's half of a frame. The chord effects'
+       code refuses an effect until the music's chords are in. */
     const u32 chords = word(manager + p->chord_offset);
     u32 player = 0;
     u32 handle = 0;
     for (u32 frames = 0;; frames++) {
+        rhythm_work(manager);
         if (record != NO_RECORD) {
             call_start_chord(p->start_chord_effect, &full_volume, chords, record);
             player = busy_player(chords);
@@ -320,30 +279,30 @@ __attribute__((noreturn)) static void play_over_music(u32 manager, u32 id, u32 r
         }
         if (frames > SETUP_FRAMES)
             fail(7);
-        music_frame(manager, music_player);
+        audio_work(manager, music_player);
+        wait_frame();
     }
 
-    /* The first step's sound. A step that waits for a beat starts its sound in the rhythm's frame process. The driver
-       reports the sound before the frame's wait. The sound's tracks start their notes after the wait. The ripper
-       watches the notes' waves from the report on. A report after the wait missed the notes of an effect whose tracks
-       all start at once. Its rip then loaded none of its waves and made no sound. */
+    /* The first step's sound. A step that waits for a beat starts its sound in a later frame's rhythm process. The
+       driver reports the sound before the frame's audio process. The sound's tracks start their notes after it. The
+       ripper watches the notes' waves from the report on. A report after the notes started missed the notes of an
+       effect whose tracks all start at once. Its rip then loaded none of its waves and made no sound. */
     u32 sound = player ? step_sound(player) : word(handle);
-    const int at_once = sound != 0;
     for (u32 frames = 0; !sound; frames++) {
         if (frames > SETUP_FRAMES)
             fail(7);
-        music_work(manager, music_player);
+        audio_work(manager, music_player);
+        wait_frame();
+        rhythm_work(manager);
         sound = player ? step_sound(player) : word(handle);
-        if (!sound)
-            wait_frame();
     }
     p->sound = sound;
     p->status = STATUS_PLAYING;
-    if (!at_once)
-        wait_frame();
 
     for (;;) {
-        music_frame(manager, music_player);
+        audio_work(manager, music_player);
+        wait_frame();
+        rhythm_work(manager);
         if (player) {
             const u32 now = step_sound(player);
             if (now)
@@ -403,6 +362,7 @@ __attribute__((noreturn)) static void play_chord_layer(u32 manager, u32 layer) {
 
     const u32 records[2] = {layer & 0xff, (layer >> 8) & 0xff};
     for (;;) {
+        rhythm_work(manager);
         for (u32 i = 0; i < 2; i++) {
             if (i && !records[i])
                 break;
@@ -412,7 +372,6 @@ __attribute__((noreturn)) static void play_chord_layer(u32 manager, u32 layer) {
                 ((fn2)p->start_chord_once)(records[i], 0);
         }
         ((fn1)p->audio_frame)(manager);
-        ((fn1)p->rhythm_frame)(manager + p->rhythm_offset);
         p->sound = word(music_player + 4);
         if (p->status == STATUS_PLAYING && p->sound == 0)
             p->status = STATUS_FINISHED;
@@ -420,32 +379,7 @@ __attribute__((noreturn)) static void play_chord_layer(u32 manager, u32 layer) {
     }
 }
 
-/* Sets the states of the variant `id` (STATE_BITS) on the music that `player` plays, at once. The game's code sets them
-   during play, through the same functions. A Helibird sets the player's flags while it carries DK. The flags pick a
-   state of the first table. A combo's count picks a state of the first table by the counts of the stage. The driver
-   uses the count at which the combo reaches the layer in `combo_stage`. A state of the second table comes from the code
-   of a boss, a stage or a scene. The game sets each state with a fade. The driver sets each one at once. */
-static void play_states(u32 manager, u32 player, u32 id) {
-    volatile struct Params* p = &driver_params;
-    if (id & HELIBIRD) {
-        *(volatile u32*)(player + p->flags_offset) = HELIBIRD_FLAGS;
-        ((fn2)p->flags_state)(player, 1);
-    }
-    const u32 layer = (id >> COMBO_SHIFT) & COMBO_MASK;
-    if (layer) {
-        const u32 stage = word(manager + p->stage_offset);
-        if (!stage)
-            fail(7);
-        *(volatile u32*)(stage + STAGE_NUMBER) = p->combo_stage;
-        const s32 count = (s32)((fn2)p->combo_threshold)(stage, layer);
-        if (count <= 0)
-            fail(7);
-        ((fn3)p->combo_state)(player, (u32)count, 1);
-    }
-    const u32 state = (id >> TABLE_STATE_SHIFT) & TABLE_STATE_MASK;
-    if (state)
-        ((fn3)p->set_music_state)(player, state, 1);
-}
+#include "jaudio/jungle_beat_steps.h"
 
 __attribute__((noreturn)) void driver_main(void) {
     volatile struct Params* p = &driver_params;
@@ -531,7 +465,7 @@ __attribute__((noreturn)) void driver_main(void) {
     /* The sound. The BGM player starts music and sets the tracks to the music's first states. Some tracks start off.
        The game turns them on later, or never. A BGM whose first state turns every track off gets its next state at
        once. The game turns that BGM's tracks on later. For a variant, the driver starts the piece and then sets the
-       states (see play_states). The sound manager starts other sounds. Its vtable gives
+       states (see jungle_beat_play_states). The sound manager starts other sounds. Its vtable gives
        startSound(JAISoundID*, JAISoundHandle*, const TVec3*) at 0xc. The player holds its sound's handle. The driver
        copies the handle to `sound` once a frame. An effect that reads a value at port 0xb starts with the value that
        the game's code gives it first. A chord layer plays a stage's music with effects beside it (see
@@ -557,7 +491,7 @@ __attribute__((noreturn)) void driver_main(void) {
             fail(7);
         if (starts_silent(piece))
             ((fn3)p->set_music_state)(player, 1, 1);
-        play_states(manager, player, id);
+        jungle_beat_play_states(manager, player, id);
     } else if (!(((fn4)virtual_function(manager, 0xc))(manager, (u32)&id, (u32)&p->sound, 0) & 0xff)) {
         fail(7);
     } else {

@@ -28,16 +28,6 @@ namespace gcsf::rip
 
 // What the files share (rip.cpp)
 
-// `number` in decimal, with zeros in front to make it at least `digits` digits long.
-std::string ZeroPadded(uint32_t number, std::size_t digits);
-
-// The text in `bytes` up to its first zero byte, or all of `bytes` if no zero byte ends it.
-std::string TextBeforeZero(std::span<const uint8_t> bytes);
-
-// The text in `bytes` up to its first zero byte. Throws xsflib::FormatError with the message `error` if no zero byte
-// ends it.
-std::string TerminatedText(std::span<const uint8_t> bytes, const char* error);
-
 // The bytes of the game's code and data from `address` to the end of its section (ntdlib::Dol::From). Throws
 // xsflib::FormatError if no section holds the address.
 std::span<const uint8_t> DolBytes(const ntdlib::Dol& dol, uint32_t address);
@@ -74,7 +64,7 @@ std::optional<std::string> ListJAudioSounds(const disc::GameFiles& game, const G
 // piece's label, a hyphen and the part's number. The index has a 32-byte header: "BARC", four bytes, a word, the
 // number of files and the sequence archive's name. Then comes a 32-byte entry for each file: its name in up to 14
 // bytes, two bytes, two words, and the file's offset and size in the archive. An empty file is a dummy. Throws
-// xsflib::FormatError if main.dol isn't a DOL, or if the index lies outside the game's code or isn't a BARC.
+// xsflib::FormatError if main.dol isn't a DOL, or if the index is outside the game's code or isn't a BARC.
 std::vector<Sound> JacPieces(const disc::GameFiles& game, const GameProfile& profile);
 
 // A Jac game's sound effects: those of its catalogue (GameProfile::jac_effects), then the profile's other effects,
@@ -83,7 +73,7 @@ std::vector<Sound> JacPieces(const disc::GameFiles& game, const GameProfile& pro
 // actions of several events play comes once, with its first row's name. The other effects' labels are their IDs in hex.
 // An effect of the profile's sounding event plays on an event of the quiet type instead, with the action of that type
 // that has the same entry in the table of actions. Throws xsflib::FormatError if main.dol isn't a DOL, or if the
-// catalogue or the table of actions lies outside the game's code or is damaged.
+// catalogue or the table of actions is outside the game's code or is damaged.
 std::vector<Sound> JacEffects(const disc::GameFiles& game, const GameProfile& profile);
 
 // The sound files of a Jac game: the bank file, the sequence archive and the wave archives that the bank file's wave
@@ -110,10 +100,13 @@ std::optional<std::string> AddJAudioFiles(ProgramBuilder& program, const disc::G
 // profile gives the groups of Pikmin 2's pieces that the game plays.
 std::optional<std::vector<uint32_t>> GameWaveGroups(const GameProfile& profile, uint32_t id);
 
-// The length of a JAudio or Jac sound that the driver has started, through ntdlib's AnalyzeGameSound with the
-// profile's watch (see LengthAnalyzer::Analyze). `found` and `lookups_sound` are as in LengthAnalyzer::Play.
+// The length of a JAudio or Jac sound that the driver has started, through ntdlib's AnalyzeGameSound with the profile's
+// watch (see LengthAnalyzer::Analyze), up to `limit` (GameRules). One of Pikmin 2's AutoBgm pieces never repeats: it
+// keeps the default limit, and plays to it by design with no warning (its timing has no `at_limit`). Its length runs
+// 600 s from its first sound. `found` and `lookups_sound` are as in LengthAnalyzer::Play.
 std::optional<Timing> MeasureJAudioSound(Player& player, const GameProfile& profile, uint32_t id,
-                                         std::set<jaudio::WaveUse>* found, bool lookups_sound);
+                                         std::set<jaudio::WaveUse>* found, bool lookups_sound,
+                                         xsflib::rip::Limit limit);
 
 // MusyX (musyx.cpp)
 
@@ -146,9 +139,9 @@ std::optional<std::string> AddMusyXFiles(ProgramBuilder& program, const disc::Ga
 
 // The length of a MusyX sound that the driver has started: a MusyXSong's, or a MusyXEffect's for an effect of the
 // catalogue in `library` or a sound ID with the profile's `musyx_effect_bit`. Returns nullopt for an effect of a
-// profile that gives no voices.
+// profile that gives no voices. A song's analysis runs up to `limit` (SoundRules). An effect's stops at 600 s.
 std::optional<Timing> MeasureMusyXSound(Player& player, const GameProfile& profile, const LoadedSet& library,
-                                        uint32_t id);
+                                        uint32_t id, xsflib::rip::Limit limit);
 
 // Hudson's sound manager over MusyX (msm.cpp)
 
@@ -163,7 +156,7 @@ std::optional<Timing> MeasureMusyXSound(Player& player, const GameProfile& profi
 // group. Its low 16 bits hold bit 15 and the effect's number. An effect is named after its number, such as "se-0042".
 // The game's list of character voices (GameProfile::sound_test_voices) names some effects. Such an effect's label adds
 // the name, such as "se-0054 Toad Happy". Throws xsflib::FormatError if the module, the message file or the sound
-// manager's file can't be read, or if a table or a message lies outside its file.
+// manager's file can't be read, or if a table or a message is outside its file.
 std::vector<Sound> MsmSounds(const disc::GameFiles& game, const GameProfile& profile);
 
 // The sound files of a game for driver/mario_party.c: the sound manager's file of sound data, and the stream file up to
@@ -191,8 +184,10 @@ std::vector<Sound> RedSounds(const disc::GameFiles& game, const GameProfile& pro
 std::optional<std::string> AddRedFiles(ProgramBuilder& program, const disc::GameFiles& game, const GameProfile& profile,
                                        const std::vector<uint32_t>* sounds);
 
-// The length of a Red sound that the driver has started: a RedPiece's, or a RedEffect's for an effect.
-std::optional<Timing> MeasureRedSound(Player& player, const GameProfile& profile, uint32_t id);
+// The length of a Red sound that the driver has started: a RedPiece's, or a RedEffect's for an effect. A piece's
+// analysis runs up to `limit` (SoundRules). An effect's stops at 600 s.
+std::optional<Timing> MeasureRedSound(Player& player, const GameProfile& profile, uint32_t id,
+                                      xsflib::rip::Limit limit);
 
 // HAL (hal.cpp)
 
@@ -224,7 +219,8 @@ std::optional<std::string> AddN64Files(ProgramBuilder& program, const disc::Game
                                        const GameProfile& profile);
 
 // The length of a sound of the Nintendo 64's sound library that the driver has started (see AnalyzeN64Sound). An
-// effect's ID has kind 1 in its top byte.
-std::optional<Timing> MeasureN64Sound(Player& player, const GameProfile& profile, uint32_t id);
+// effect's ID has kind 1 in its top byte. The analysis runs up to `limit` (GameRules).
+std::optional<Timing> MeasureN64Sound(Player& player, const GameProfile& profile, uint32_t id,
+                                      xsflib::rip::Limit limit);
 
 } // namespace gcsf::rip

@@ -7,7 +7,10 @@
 //                      folder). Only valid with a single input.
 //   --length T         override the length tag (seconds, m:s or h:m:s)
 //   --fade T           override the fade tag
-//   --default T        the length when there's no length tag (default and fade: PlaybackOptions)
+//   --fade-exponent P  the fade's curve, from 0.5 to 4 (default 2)
+//   --default T        the length when there's no length tag (default and fade: AlbumOptions)
+//   --raw              play the file as it is: no skip and no added silence. --help lists the other settings of an
+//                      album's track
 //   --info             print the tags and loaded files without rendering
 //   --version          print the version
 //

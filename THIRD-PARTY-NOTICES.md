@@ -4,9 +4,9 @@ GCSF is under the MIT licence (`LICENSE`). Its dependencies have the following l
 
 | Component | Licence | Use in GCSF |
 |---|---|---|
-| xsflib, Copyright (c) 2026 the xsflib authors | MIT | A library for players and rippers of PSF-family formats. GCSF takes from it the PSF container and the descriptors' checks, the player framework, and the frames of the ripper and the player tool. A Git submodule in `externals/xsflib`, built into GCSF's programs. It finds or downloads the libraries below. |
-| ntdlib, Copyright (c) 2026 the ntdlib authors | MIT | A library for the hardware and formats of Nintendo's consoles. GCSF takes from it the PowerPC interpreter, the DSP and its coefficient ROM, the GameCube's devices and the base of its machine, the readers of disc images, the readers of JAudio's sound files, and the length analysis of JAudio's sounds. Twilight Princess's driver includes ntdlib's start-up of the game's sound layer. A Git submodule in `externals/ntdlib`, built into GCSF's programs. |
-| Data from [Unicode](https://www.unicode.org), Copyright © 1991-2026 Unicode, Inc. | Unicode-3.0 | ntdlib's `src/disc/cp932.h`, a mapping of code page 932 (Windows' Shift-JIS) to Unicode. The mapping is derived from CP932.TXT, Microsoft's table of code page 932 as Unicode publishes it. ntdlib's disc readers decode the Shift-JIS text of GameCube discs with it: the titles of Japanese discs and the names in a disc's file system. Built into `gcsfrip`. |
+| xsflib, Copyright (c) 2026 the xsflib authors | MIT | A library for players and rippers of PSF-family formats. From it, GCSF uses the PSF container and the checks of the descriptors, the player framework, and the frames of the ripper and the player tool. A Git submodule in `externals/xsflib`, built into the GCSF programs. It finds or downloads the libraries below. |
+| ntdlib, Copyright (c) 2026 the ntdlib authors | MIT | A library for the hardware and formats of Nintendo's consoles. From it, GCSF uses the PowerPC interpreter, the DSP and its coefficient ROM, the GameCube devices and the base of the GameCube machine, the readers of disc images, the readers of the JAudio sound files, and the length analysis of JAudio sounds. The drivers for Twilight Princess, Pikmin, Pikmin 2 and Donkey Kong Jungle Beat include headers from ntdlib with the layouts and steps of the sound layer of each game. A Git submodule in `externals/ntdlib`, built into the GCSF programs. |
+| Data from [Unicode](https://www.unicode.org), Copyright © 1991-2026 Unicode, Inc. | Unicode-3.0 | `src/disc/cp932.h` in ntdlib, a mapping of code page 932 (the Shift-JIS of Windows) to Unicode. The mapping is derived from CP932.TXT, Microsoft's table of code page 932 as Unicode publishes it. The disc readers in ntdlib decode the Shift-JIS text of GameCube discs with it: the titles of Japanese discs and the names in the file system of a disc. Built into `gcsfrip`. |
 | seqlib, Copyright (c) 2026 the seqlib authors | MIT (`externals/xsflib/externals/seqlib/LICENSE`) | In `externals/xsflib/externals/seqlib`, a submodule of xsflib. Only the tests use it: their checks come from it, through `xsflib::testing`. |
 | [zlib](https://zlib.net), Copyright (C) 1995-2026 Jean-loup Gailly and Mark Adler | zlib | The PSF container, and GCZ disc images. The installed copy is used if there is one. Otherwise v1.4 is downloaded when configuring. |
 | [Zstandard](https://github.com/facebook/zstd), Copyright (c) Meta Platforms, Inc. and affiliates | BSD-3-Clause | RVZ disc images. The installed copy is used if there is one. Otherwise v1.5.7 is downloaded when configuring. |
@@ -14,34 +14,35 @@ GCSF is under the MIT licence (`LICENSE`). Its dependencies have the following l
 | [bzip2](https://sourceware.org/bzip2/), Copyright (C) 1996-2019 Julian R Seward | bzip2 (BSD-style) | bzip2 in WIA and RVZ disc images. The installed copy is used if there is one. Otherwise 1.0.8 is downloaded when configuring. |
 | [libFLAC](https://xiph.org/flac/), Copyright the Xiph.Org Foundation | BSD-3-Clause | FLAC output in `gcsfplay`. The installed copy is used if there is one. Otherwise 1.5.0 is downloaded when configuring. |
 | [foobar2000 SDK](https://www.foobar2000.org/SDK), Copyright Peter Pawlowski | BSD-style (the SDK's `sdk-license.txt`, and `pfc-license.txt` for its pfc library) | Only for `plugins/foobar2000`. Not included here. The SDK is supplied when building the component. |
-| [XMPlay plugin SDK](https://www.un4seen.com/xmplay.html), from Un4seen Developments | None stated | Only for `plugins/xmplay`. Not included here. The SDK is supplied when building the plugin. CI downloads it from un4seen.com. The plugin uses only the SDK's declarations of XMPlay's interface. |
+| [XMPlay plugin SDK](https://www.un4seen.com/xmplay.html), from Un4seen Developments | None stated | Only for `plugins/xmplay`. Not included here. The SDK is supplied when building the plugin. CI downloads it from un4seen.com. The plugin uses only the declarations of the XMPlay interface in the SDK. |
 
-Binary distributions must include the MIT notices of GCSF, xsflib and ntdlib. Every program contains xsflib and
-ntdlib. The Zstandard notice is required when Zstandard is linked in: `gcsfrip` links it, and `gcsfplay` and the
-foobar2000 component don't. The libFLAC notice is required when libFLAC is linked in: `gcsfplay` links it, and
-`gcsfrip` and the foobar2000 component don't. The Unicode License v3's notice is required where Unicode's data is linked
-in: `gcsfrip` contains it, and `gcsfplay` and the foobar2000 component don't. Shipping `LICENSE` and this file meets all
-six requirements. The licence texts are at the end of this file. The licences of zlib, liblzma and bzip2, and those of
-the foobar2000 SDK and its pfc library, require no notice in binaries. seqlib's checks go only into tests.
-No code from the XMPlay plugin SDK goes into the XMPlay plugin.
+Binary distributions must include the MIT notices of GCSF, xsflib and ntdlib. Every program contains xsflib and ntdlib.
+The Zstandard notice is required when Zstandard is linked in: `gcsfrip` links it, and `gcsfplay`, the foobar2000
+component and the XMPlay plugin don't. The libFLAC notice is required when libFLAC is linked in: `gcsfplay` links it,
+and `gcsfrip`, the foobar2000 component and the XMPlay plugin don't. The notice of the Unicode License v3 is required
+where the Unicode data is linked in: `gcsfrip` contains it, and `gcsfplay`, the foobar2000 component and the XMPlay
+plugin don't. Shipping `LICENSE` and this file meets all six requirements. The licence texts are at the end of this
+file. The licences of zlib, liblzma and bzip2, and those of the foobar2000 SDK and its pfc library, require no notice in
+binaries. Only the tests contain the checks from seqlib. The XMPlay plugin contains no code from the XMPlay plugin SDK.
 
 ## Reference material (no code taken)
 
 - [Dolphin](https://github.com/dolphin-emu/dolphin) (GPL-2.0-or-later) is the reference for how the DSP in ntdlib
-  behaves. No code is taken from it. Where GCSF follows Dolphin's behaviour, the code was written from a description of
-  that behaviour. The writer hadn't read Dolphin's source for that part. Dolphin's documentation of the WIA and RVZ
-  formats (`docs/WiaAndRvz.md`) describes those formats and the generator of the padding data on GameCube and Wii discs.
+  behaves. No code is taken from it. Where GCSF follows the behaviour of Dolphin, the code was written from a
+  description of that behaviour. The writer hadn't read Dolphin's source for that part. The documentation of the WIA and
+  RVZ formats in Dolphin (`docs/WiaAndRvz.md`) describes those formats and the generator of the padding data on GameCube
+  and Wii discs.
 - [Wiimm's ISO Tools](https://wit.wiimm.de) document the WDF and CISO formats.
-- YAGCD (Yet Another GameCube Documentation) documents the GameCube's hardware and disc format.
+- YAGCD (Yet Another GameCube Documentation) documents the hardware and the disc format of the GameCube.
 
 ## Game data
 
 Nothing in this repository licenses game data. Rips (`.gcsflib`) contain a game's code and sound files. These belong to
 their copyright holders.
 
-ntdlib's `include/ntdlib/dsp/coef_rom.h` holds the DSP's coefficient ROM. Every GameCube and Wii has the same ROM. It
-holds 4-tap filters: 128 phases for each of three cutoffs. The player uses the exact values to reproduce the console's
-output.
+`include/ntdlib/dsp/coef_rom.h` in ntdlib contains the coefficient ROM of the DSP. Every GameCube and Wii has the same
+ROM. It contains 4-tap filters: 128 phases for each of three cutoffs. The player uses the exact values to reproduce the
+output of the console.
 
 ## Licence texts
 

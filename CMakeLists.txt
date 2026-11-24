@@ -3,7 +3,7 @@
 cmake_minimum_required(VERSION 3.20)
 # Shared version for gcsfrip, gcsfplay, the foobar2000 component, the XMPlay plugin, Windows file properties and macOS
 # bundles (xsflib_add_version below). For a release, update it here and add notes in docs/release-notes/.
-project(gcsf VERSION 1.11.0 LANGUAGES C CXX)
+project(gcsf VERSION 1.12.0 LANGUAGES C CXX)
 
 # xsflib, a library for players and rippers of the PSF family, is the submodule externals/xsflib. Its
 # XsflibProject.cmake sets what a project built on it starts with: C++20, a release build by default, the static C
@@ -25,13 +25,6 @@ set(XSFLIB_CLI ON)
 set(XSFLIB_DISC_LIBRARIES ON)
 set(NTDLIB_DISC ON)
 xsflib_add_libraries(xsflib ntdlib)
-
-# GCSF's designated initializers name only the fields that differ from their defaults. Naming the others would copy
-# their default member initializers into each initializer, where the copies could drift. clang-cl's /W4 warns about the
-# fields left out.
-if (MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    list(APPEND GCSF_WARNINGS -Wno-missing-designated-field-initializers)
-endif()
 
 # The include directory for all of src, and xsflib's common helpers. The other GCSF libraries link it.
 add_library(gcsf_common INTERFACE)
@@ -116,7 +109,7 @@ add_library(gcsf_rip STATIC
     src/rip/sound_list.cpp
 )
 target_link_libraries(gcsf_rip PUBLIC gcsf_player ntdlib::common ntdlib::musyx_catalogue ntdlib::disc_containers
-                                       ntdlib::jaudio ntdlib::musyx xsflib::rip)
+                                       ntdlib::jaudio ntdlib::musyx ntdlib::red xsflib::rip)
 target_compile_options(gcsf_rip PRIVATE ${GCSF_WARNINGS})
 
 add_executable(gcsfplay src/cli/gcsfplay.cpp)
@@ -131,6 +124,8 @@ target_link_libraries(gcsfrip PRIVATE gcsf_rip xsflib::cli xsflib::rip Threads::
 target_compile_options(gcsfrip PRIVATE ${GCSF_WARNINGS})
 xsflib_add_version(gcsfrip VERSION ${gcsf_VERSION} DEFINE GCSF_VERSION DESCRIPTION "GCSF ripper" PRODUCT GCSF
                    COPYRIGHT "Copyright (c) 2026 the GCSF authors. MIT licence.")
+# 32-bit Windows: gcsfrip may use more than 2 GB of memory.
+xsflib_large_address_aware(gcsfrip)
 
 # Windows: UTF-8 as the tools' code page. macOS: a droplet app for each tool (gcsfrip.app, gcsfplay.app), so that files
 # can be dropped on it in the Finder.

@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "xsflib/player/playback.h"
 #include "xsflib/player/player.h"
 
 #include "gcsf/format.h"
@@ -45,6 +46,9 @@ public:
 
     // The rate players report, the audio interface's DMA rate rounded down: 32,028 Hz.
     static constexpr int kSampleRate = kPlayerSampleRate;
+
+    // A rip's length tags count from the first sound: the first sample that isn't 0.
+    static constexpr xsflib::player::LengthOrigin kLengthOrigin = xsflib::player::LengthOrigin::kFirstSound;
 
     Player();
     ~Player();

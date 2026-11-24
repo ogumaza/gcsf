@@ -66,19 +66,19 @@ bool StopsBeforeSound(Player& player)
     return false;
 }
 
-// Measures sound `id` of `library` while `player` plays it, by the analysis of the profile's sound library. `found` and
-// `lookups_sound` are as in LengthAnalyzer::Play. Returns nullopt when the analysis fails.
+// Measures sound `id` of `library` while `player` plays it, by the analysis of the profile's sound library, up to
+// `limit`. `found` and `lookups_sound` are as in LengthAnalyzer::Play. Returns nullopt when the analysis fails.
 std::optional<Timing> Measure(Player& player, const GameProfile& profile, const LoadedSet& library, uint32_t id,
-                              std::set<jaudio::WaveUse>* found, bool lookups_sound)
+                              std::set<jaudio::WaveUse>* found, bool lookups_sound, xsflib::rip::Limit limit)
 {
     switch (profile.library)
     {
     case SoundLibrary::kMusyX:
-        return MeasureMusyXSound(player, profile, library, id);
+        return MeasureMusyXSound(player, profile, library, id, limit);
     case SoundLibrary::kRed:
-        return MeasureRedSound(player, profile, id);
+        return MeasureRedSound(player, profile, id, limit);
     case SoundLibrary::kNintendo64:
-        return MeasureN64Sound(player, profile, id);
+        return MeasureN64Sound(player, profile, id, limit);
     case SoundLibrary::kHal:
         return MeasureHalEffect(player);
     case SoundLibrary::kJAudio2:
@@ -87,7 +87,7 @@ std::optional<Timing> Measure(Player& player, const GameProfile& profile, const 
         break;
     }
 
-    return MeasureJAudioSound(player, profile, id, found, lookups_sound);
+    return MeasureJAudioSound(player, profile, id, found, lookups_sound, limit);
 }
 
 } // namespace
@@ -104,10 +104,11 @@ LengthAnalyzer::~LengthAnalyzer() = default;
 std::optional<Timing> LengthAnalyzer::Analyze(uint32_t id, const FileChunk* file, const std::vector<uint32_t>* waves,
                                               std::vector<jaudio::WaveUse>* played, std::string* stop,
                                               const xsflib::psf::Variables* ports,
-                                              const ntdlib::flipper::z2::PieceState* state) const
+                                              const ntdlib::flipper::z2::PieceState* state,
+                                              xsflib::rip::Limit limit) const
 {
     std::set<jaudio::WaveUse> found;
-    std::optional<Timing> timing = Play(id, file, waves, played ? &found : nullptr, false, stop, ports, state);
+    std::optional<Timing> timing = Play(id, file, waves, played ? &found : nullptr, false, stop, ports, state, limit);
     if (played)
     {
         played->assign(found.begin(), found.end());
@@ -121,7 +122,7 @@ std::optional<std::vector<jaudio::WaveUse>> LengthAnalyzer::FindWaves(
     const ntdlib::flipper::z2::PieceState* state) const
 {
     std::set<jaudio::WaveUse> found;
-    if (!Play(id, file, nullptr, &found, true, nullptr, ports, state))
+    if (!Play(id, file, nullptr, &found, true, nullptr, ports, state, xsflib::rip::Limit::kDefault))
     {
         return std::nullopt;
     }
@@ -166,7 +167,7 @@ std::optional<std::vector<uint32_t>> LengthAnalyzer::FindWaveGroups(
 std::optional<Timing> LengthAnalyzer::Play(uint32_t id, const FileChunk* file, const std::vector<uint32_t>* waves,
                                            std::set<jaudio::WaveUse>* found, bool lookups_sound, std::string* stop,
                                            const xsflib::psf::Variables* ports,
-                                           const ntdlib::flipper::z2::PieceState* state) const
+                                           const ntdlib::flipper::z2::PieceState* state, xsflib::rip::Limit limit) const
 {
     Player player;
     if (!player.Load(SoundSet(impl_->library, id, file, waves, ports, state)) || !player.Start())
@@ -174,7 +175,8 @@ std::optional<Timing> LengthAnalyzer::Play(uint32_t id, const FileChunk* file, c
         return std::nullopt;
     }
 
-    const std::optional<Timing> timing = Measure(player, impl_->profile, impl_->library, id, found, lookups_sound);
+    const std::optional<Timing> timing =
+        Measure(player, impl_->profile, impl_->library, id, found, lookups_sound, limit);
     if (timing || player.GetState() != Player::State::kError)
     {
         return timing;

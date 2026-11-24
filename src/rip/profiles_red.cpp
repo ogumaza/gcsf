@@ -59,7 +59,6 @@ const GameProfile kCrystalChroniclesUsa = {
             0x800c6108, // load_se: CSound::LoadSe
             0x800c5c1c, // play_se: CSound::PlaySe
         },
-    .library_name = "CrystalChronicles",
     .patches = {{0x8001f764, 0x3c008170}}, // CMemory::Init: lis r0, 0x8170
     .music_folder = "dvd/sound/music/",
     .red_controls = 0x8032e3d0,

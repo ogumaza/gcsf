@@ -170,8 +170,8 @@ const GameProfile kWindWakerUsa = {
             0x802a965c,           // set_ship_sail_state
             0x802aba9c,           // set_link_on_board
             0x802a579c,           // set_sword_using: JAIZelBasic::bgmSetSwordUsing
-            0x802a5a40,           // change_bgm_status
-            0x802a5a78,           // change_sub_bgm_status
+            0x8027bc24,           // register_callback: JASystem::Kernel::registerSubFrameCallback
+            0x80283744,           // write_port: JASystem::TTrack::writePortAppDirect
             // sub_bgm: JA_BGM_MBOSS (0x19), JA_BGM_MBOSS_S (0x1a), JA_BGM_SEA_ENEMY (0x1c), JA_BGM_P_GANON_1 (0x41) and
             // JA_BGM_P_GANON_2 (0x47)
             0x16000000,
@@ -225,12 +225,13 @@ const GameProfile kWindWakerUsa = {
 // in and the line numbers of assertions differ. The sound library's structure offsets don't change. The game's machine
 // set-up (mDoMch_Create) gives smaller archive and game heaps. The music sequences are the American ones byte for byte.
 // The effects sequence holds the same code for the effects that read a port and for the effects that play a random key.
-// Their variants are the American ones. The sound layer (JAIZelBasic) lacks three of the American layer's fields: a
-// word at +0x28 and bytes at +0x62 and +0xbf. The fields after them lie 4 or 5 bytes lower. The main music's handle is
-// at +0x64 (American +0x68). The byte that the game sets once a scene has started is at +0x229 (American +0x22d). The
-// starters, the setters and the table m_bgm_mute_state are the American ones. bgmStart also clears the byte at +0xb7
-// (the American +0xbb) as it returns. subBgmStart and seStart set that byte, and the sound layer's constructor clears
-// it. The driver calls bgmStart only for the main music. Nothing that the driver starts before it sets the byte.
+// Their variants are the American ones. The sound layer (JAIZelBasic) has no copy of three fields of the American
+// layer: a word at +0x28 and bytes at +0x62 and +0xbf. The fields after them are 4 or 5 bytes lower. The main music's
+// handle is at +0x64 (American +0x68). The byte that the game sets once a scene has started is at +0x229 (American
+// +0x22d). The starters, the setters and the table m_bgm_mute_state are the American ones. bgmStart also clears the
+// byte at +0xb7 (the American +0xbb) as it returns. subBgmStart and seStart set that byte, and the sound layer's
+// constructor clears it. The driver calls bgmStart only for the main music. Nothing that the driver starts before it
+// sets the byte.
 const GameProfile kWindWakerJpn = {
     .name = "Zelda no Densetsu: Kaze no Takuto",
     .game_id = "GZLJ01",
@@ -294,8 +295,8 @@ const GameProfile kWindWakerJpn = {
             0x802a6d88,           // set_ship_sail_state
             0x802a91e8,           // set_link_on_board
             0x802a2f28,           // set_sword_using: JAIZelBasic::bgmSetSwordUsing
-            0x802a31cc,           // change_bgm_status
-            0x802a3204,           // change_sub_bgm_status
+            0x802793cc,           // register_callback: JASystem::Kernel::registerSubFrameCallback
+            0x80280eec,           // write_port: JASystem::TTrack::writePortAppDirect
             // sub_bgm: JA_BGM_MBOSS (0x19), JA_BGM_MBOSS_S (0x1a), JA_BGM_SEA_ENEMY (0x1c), JA_BGM_P_GANON_1 (0x41) and
             // JA_BGM_P_GANON_2 (0x47)
             0x16000000,

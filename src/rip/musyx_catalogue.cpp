@@ -433,7 +433,7 @@ MusyXFilesInUse FilesInUse(const MusyXCatalogue& catalogue, std::span<const uint
             }
         }
 
-        // An entry without a song holds kNoSong. That number lies past the last song.
+        // An entry without a song holds kNoSong. That number is past the last song.
         if (entry.song < use.songs.size())
         {
             use.songs[entry.song] = true;

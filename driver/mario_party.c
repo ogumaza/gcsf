@@ -87,15 +87,7 @@ static u32 msm_init[7];
  * The last word belongs to the structure's other form. */
 static u32 msm_aram[3];
 
-/* `size` bytes of the arena, at a 32-byte boundary: the DSP and the disc require that for their transfers. Returns 0
- * when the arena is used up. */
-static u32 heap_alloc(u32 size) {
-    const u32 at = (heap_next + 31) & ~31u;
-    if (at + size < at || at + size > heap_end)
-        return 0;
-    heap_next = at + size;
-    return at;
-}
+#include "arena.h"
 
 __attribute__((noreturn)) void driver_main(void) {
     volatile struct Params* p = &driver_params;

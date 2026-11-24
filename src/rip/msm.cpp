@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "ntdlib/disc/game.h"
+#include "ntdlib/zero_padded.h"
 #include "xsflib/binary.h"
 
 #include "gcsf/format.h"
@@ -60,7 +61,7 @@ std::vector<Sound> MsmEffects(std::span<const uint8_t> msm, const std::string& p
         const bool in_base = std::find(base.begin(), base.end(), *group) != base.end();
         const uint32_t load = in_base ? kNoGroupSet : kOneGroup | static_cast<uint32_t>(*group);
         const auto name = names.find(effect.number);
-        std::string label = "se-" + ZeroPadded(effect.number, 4);
+        std::string label = "se-" + ntdlib::ZeroPadded(effect.number, 4);
         if (name != names.end() && !name->second.empty())
         {
             label += " " + name->second;

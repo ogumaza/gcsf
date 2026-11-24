@@ -16,7 +16,7 @@ namespace gcsf::gc
 namespace
 {
 
-// The top of the OS's arena. GCSF's driver lies above it (at 0x81700000), and the disc's file system table above that.
+// The top of the OS's arena. GCSF's driver is above it (at 0x81700000), and the disc's file system table above that.
 constexpr uint32_t kArenaTop = 0x81700000;
 
 // The console type that the SDK's OSGetConsoleType reports for a retail console.

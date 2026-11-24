@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "ntdlib/disc/game.h"
+#include "ntdlib/zero_padded.h"
 #include "xsflib/binary.h"
 
 #include "gcsf/format.h"
@@ -93,7 +94,8 @@ std::vector<Sound> HalEffects(const disc::GameFiles& game, const GameProfile& pr
             const uint32_t id = group << 16 | place;
             const auto name = names.find(id);
             sounds.push_back(
-                {id, name != names.end() ? name->second : "se" + std::to_string(group) + "-" + ZeroPadded(place, 3),
+                {id,
+                 name != names.end() ? name->second : "se" + std::to_string(group) + "-" + ntdlib::ZeroPadded(place, 3),
                  false});
         }
     }

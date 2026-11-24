@@ -56,8 +56,9 @@
 #define SOUND_GROUP(id) (((id) >> 24) & 0x3fu)
 
 /* The wave groups that the game's set-up of its first scene of play loads for the effects: groups 1 to 3 of wave
-   system 0 (EFFECTS_SYSTEM), then group 0 of systems 14, 15 and 2 (Jac_SceneSetup, 0x80019be0). It loads the first three without
-   making them their system's scene. The ripper's profile names the same groups (effect_groups). */
+   system 0 (EFFECTS_SYSTEM), then group 0 of systems 14, 15 and 2 (Jac_SceneSetup, 0x80019be0). The set-up loads the
+   first three without making them the scene of their system. The ripper's profile names the same groups
+   (effect_groups). */
 #define EFFECTS_FIRST_GROUP 1u
 #define EFFECTS_LAST_GROUP 3u
 static const u32 scene_systems[] = {14, 15, 2};
@@ -114,21 +115,7 @@ struct Params {
     u32 part_track;          /* the name of the root track that a cutscene writes its part to */
     u32 get_track_handle;    /* seqp_* Jam_GetTrackHandle(u32 name) */
     u32 write_port;          /* u32 Jam_WritePortAppDirect(seqp_* track, u32 port, u16 value) */
-    /* the game profile for effects */
-    u32 load_wave_scene;    /* void WaveScene_Load(u32 system, u32 group) */
-    u32 scene;              /* the sound library's variable: the game's scene */
-    u32 menu;               /* the sound library's flag: the menu is open */
-    u32 play_system_effect; /* void Jac_PlaySystemSe(u32 number) */
-    u32 play_player_effect; /* void Jac_PlayOrimaSe(u32 number) */
-    u32 create_event;       /* s32 Jac_CreateEvent(u8 type, Vector3D* position) */
-    u32 play_event_action;  /* u32 Jac_PlayEventAction(s32 event, u32 action) */
-    u32 update_camera;      /* void Jac_UpdateCamera(void) */
-    u32 system_track;       /* the name of the track that plays the system's effects */
-    u32 player_track;       /* the name of the track that plays the player's effects */
-    u32 events_track;       /* the name of the events' root track. Its children play the events */
-    /* the game profile for the formation */
-    u32 move_formation;  /* void Jac_Orima_Formation(s32 x, s32 y) */
-    u32 formation_track; /* the name of the effects sequence's track for the formation */
+    struct EffectCalls effects; /* the game profile for effects and the formation (jaudio/pikmin.h) */
     /* the ports that the player sets: (port << 16) | value */
     u32 port_count;
     u32 ports[MAX_PORTS];
@@ -143,44 +130,7 @@ __attribute__((section(".params"), used)) volatile struct Params driver_params =
 };
 
 #include "frames.h"
-
-/* The flag that the disc task's pass sets once the disc has read everything before it, and the sound's track: the
-   piece's root track, or the track that plays the part. The length analysis reads that track through `sound`. */
-static volatile u32 piece_read;
-static volatile u32 piece_root;
-
-/* The end of the sound: once its track is free again. */
-static void check_end(volatile struct Params* p) {
-    if (p->status == STATUS_PLAYING && byte(piece_root + TRACK_STATE) == TRACK_FREE) {
-        p->sound = 0;
-        p->status = STATUS_FINISHED;
-    }
-}
-
-/* The wait for ever. */
-__attribute__((noreturn)) static void watch_piece(volatile struct Params* p) {
-    for (;;) {
-        check_end(p);
-        wait_frame();
-    }
-}
-
-/* An event's place against the camera, as Jac_CreateEvent takes it: three floats. An event at the camera gets the full
-   volume and the pan of the middle. */
-static const u32 at_camera[3];
-
-/* The first child of the `count` tracks at `parents` that plays, or 0. */
-static u32 playing_child(const u32* parents, u32 count) {
-    for (u32 i = 0; i < count; i++) {
-        for (u32 n = 0; n < TRACK_CHILDREN; n++) {
-            const u32 child = word(parents[i] + TRACK_FIRST_CHILD + 4 * n);
-            if (child && byte(child + TRACK_STATE) != TRACK_FREE)
-                return child;
-        }
-    }
-
-    return 0;
-}
+#include "jaudio/pikmin_piece.h"
 
 /* The value of `port` in the port list, sign-extended from 16 bits, or 0. */
 static s32 listed_port(volatile struct Params* p, u32 port) {
@@ -194,14 +144,14 @@ static s32 listed_port(volatile struct Params* p, u32 port) {
 
 /* One frame of a move of the formation by the port list's x and y, as the game's frame passes the player's move. */
 static void move_formation(volatile struct Params* p) {
-    ((fn2)p->move_formation)((u32)listed_port(p, FORMATION_X_PORT), (u32)listed_port(p, FORMATION_Y_PORT));
+    ((fn2)p->effects.move_formation)((u32)listed_port(p, FORMATION_X_PORT), (u32)listed_port(p, FORMATION_Y_PORT));
 }
 
 /* Steps 8 to 11: an effect. */
 __attribute__((noreturn)) static void play_effect(volatile struct Params* p) {
     /* The effects' other wave groups, then a pass on the disc after them. */
     for (u32 group = EFFECTS_FIRST_GROUP; group <= EFFECTS_LAST_GROUP; group++)
-        ((fn2)p->load_wave_scene)(EFFECTS_SYSTEM, group);
+        ((fn2)p->effects.load_wave_scene)(EFFECTS_SYSTEM, group);
     for (u32 i = 0; i < sizeof(scene_systems) / sizeof(scene_systems[0]); i++)
         ((fn2)p->set_wave_scene)(scene_systems[i], 0);
     ((fn3)p->check_pass)(PASS_OF_EFFECTS, (u32)&piece_read, 0);
@@ -218,14 +168,14 @@ __attribute__((noreturn)) static void play_effect(volatile struct Params* p) {
         if (frames > SETUP_FRAMES)
             fail(9);
         wait_frame();
-        system_track = ((fn1)p->get_track_handle)(p->system_track);
-        player_track = ((fn1)p->get_track_handle)(p->player_track);
-        events_track = ((fn1)p->get_track_handle)(p->events_track);
+        system_track = ((fn1)p->get_track_handle)(p->effects.system_track);
+        player_track = ((fn1)p->get_track_handle)(p->effects.player_track);
+        events_track = ((fn1)p->get_track_handle)(p->effects.events_track);
     }
 
     /* The effect. The track that plays it becomes a child of the track for its kind. One of the system's effects plays
        one of the player's. */
-    *(volatile u32*)p->scene = SCENE_OF_PLAY;
+    *(volatile u32*)p->effects.scene = SCENE_OF_PLAY;
     const u32 number = EFFECT_NUMBER(p->sound_id);
     const u32 kind = EFFECT_KIND(p->sound_id);
     u32 parents[2] = {system_track, player_track};
@@ -233,17 +183,17 @@ __attribute__((noreturn)) static void play_effect(volatile struct Params* p) {
     switch (kind) {
     case EFFECT_SYSTEM:
         if (number == EFFECT_CLOSES_MENU)
-            *(volatile u32*)p->menu = 1;
-        ((fn1)p->play_system_effect)(number);
+            *(volatile u32*)p->effects.menu = 1;
+        ((fn1)p->effects.play_system_effect)(number);
         break;
     case EFFECT_PLAYER:
-        ((fn1)p->play_player_effect)(number);
+        ((fn1)p->effects.play_player_effect)(number);
         break;
     case EFFECT_EVENT: {
-        const u32 event = ((fn2)p->create_event)(EVENT_TYPE(number), (u32)at_camera);
+        const u32 event = ((fn2)p->effects.create_event)(EVENT_TYPE(number), (u32)at_camera);
         if (event >= TRACK_CHILDREN)
             fail(10);
-        ((fn2)p->play_event_action)(event, EVENT_ACTION(number));
+        ((fn2)p->effects.play_event_action)(event, EVENT_ACTION(number));
         parents[0] = word(events_track + TRACK_FIRST_CHILD + 4 * event);
         count = 1;
         break;
@@ -255,7 +205,7 @@ __attribute__((noreturn)) static void play_effect(volatile struct Params* p) {
             for (;;)
                 wait_frame();
         }
-        parents[0] = ((fn1)p->get_track_handle)(p->formation_track);
+        parents[0] = ((fn1)p->get_track_handle)(p->effects.formation_track);
         if (!parents[0])
             fail(10);
         move_formation(p);
@@ -271,7 +221,7 @@ __attribute__((noreturn)) static void play_effect(volatile struct Params* p) {
             fail(11);
         if (kind == EFFECT_FORMATION)
             move_formation(p);
-        ((fn0)p->update_camera)();
+        ((fn0)p->effects.update_camera)();
         wait_frame();
     }
 
@@ -279,7 +229,7 @@ __attribute__((noreturn)) static void play_effect(volatile struct Params* p) {
     for (;;) {
         if (kind == EFFECT_FORMATION)
             move_formation(p);
-        ((fn0)p->update_camera)();
+        ((fn0)p->effects.update_camera)();
         check_end(p);
         wait_frame();
     }

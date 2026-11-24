@@ -32,21 +32,21 @@ __attribute__((section(".params"), used)) volatile struct Params driver_params =
 };
 
 static void z2_init_machine(volatile struct Z2Params* p) {
-    ((z2_fn0)p->vi_init)();
+    ((fn0)p->vi_init)();
 }
 
 static void z2_wait_frame(volatile struct Z2Params* p) {
     for (u32 i = 0; i < p->frame_retraces; i++)
-        ((z2_fn0)p->vi_wait_for_retrace)();
+        ((fn0)p->vi_wait_for_retrace)();
 }
 
 static void z2_create_aram(volatile struct Z2Params* p) {
-    ((z2_fn5)p->create_aram)(p->aram_audio_size, p->aram_graph_size, (p->aram_priorities >> 16) & 0xff,
-                             (p->aram_priorities >> 8) & 0xff, p->aram_priorities & 0xff);
+    ((fn5)p->create_aram)(p->aram_audio_size, p->aram_graph_size, (p->aram_priorities >> 16) & 0xff,
+                          (p->aram_priorities >> 8) & 0xff, p->aram_priorities & 0xff);
 }
 
 static void z2_set_aram_buffer(volatile struct Z2Params* p, u32 system_heap) {
-    ((z2_fn3)p->set_aram_buffer)(0, p->aram_buffer_size, system_heap);
+    ((fn3)p->set_aram_buffer)(0, p->aram_buffer_size, system_heap);
 }
 
 __attribute__((noreturn)) void driver_main(void) {

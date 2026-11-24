@@ -15,7 +15,7 @@
 //                    code (rip::UseSoundFiles)
 //   --jobs N         the number of length analyses run in parallel (default: the number of CPU threads, at most 8 in
 //                    a 32-bit build)
-//   --game NAME      game tag (default: the profile's name)
+//   --game NAME      game tag (default: the title in the disc header, or else the name of the image or folder)
 //   --artist NAME, --year YEAR, --copyright TEXT, --by NAME (gcsfby)
 //   --version        print the version
 //
@@ -42,10 +42,12 @@
 #include "ntdlib/disc/game.h"
 #include "ntdlib/jaudio/wave_system.h"
 #include "xsflib/binary.h"
+#include "xsflib/cli/length_analysis.h"
 #include "xsflib/cli/rip.h"
 #include "xsflib/files.h"
 #include "xsflib/psf/psf.h"
 #include "xsflib/rip/file_names.h"
+#include "xsflib/rip/length_tags.h"
 #include "xsflib/rip/tool.h"
 
 #include "gcsf/format.h"
@@ -80,7 +82,8 @@ constexpr char kUsage[] =
     "  --jobs N             the number of length analyses that run at once (default: the number\n"
     "                       of CPU threads, and at most 8 in a 32-bit build)\n"
     "  --game NAME, --artist NAME, --year YEAR, --copyright TEXT, --by NAME\n"
-    "                       tags (the game defaults to the profile's name)\n"
+    "                       tags (the game defaults to the title in the disc header, or else to\n"
+    "                       the input's name)\n"
     "  --version            show the version\n"
     "  -h, --help           show this help\n";
 
@@ -104,6 +107,7 @@ struct Job
     std::vector<uint32_t> waves;  // the waves that the driver loads, for a profile whose driver NamesWaves
     xsflib::psf::Variables ports; // the ports that the driver sets (rip::Sound::ports)
     ntdlib::flipper::z2::PieceState piece_state; // the state that the driver gives a piece (rip::Sound::piece_state)
+    bool music = false; // music (rip::Sound::music): its length analysis runs to the long limit
 
     // The seconds that the search for the sound's waves took, or infinity if no search played the sound
     // (FindWaveGroups). The length analysis starts the sounds whose search took longest first.
@@ -234,8 +238,8 @@ std::vector<std::string> JobArchives(const std::vector<jaudio::WaveSystem>& syst
 }
 
 // Takes the wave groups whose archives `game` can't read out of the jobs' lists. The sounds then play without those
-// waves. Another release can lack an archive that its start-up archive names: Twilight Princess HD has no
-// HomeMenu_0.aw.
+// waves. Another release may not have every archive that its start-up archive names: Twilight Princess HD has
+// no HomeMenu_0.aw.
 void DropMissingWaveArchives(const disc::GameFiles& game, const rip::GameProfile& profile,
                              const std::vector<jaudio::WaveSystem>& systems, std::vector<Job>& jobs)
 {
@@ -353,7 +357,8 @@ std::vector<Job> PickJobs(const std::vector<rip::Sound>& sounds, std::vector<rip
                             .sound_id = sounds[i].id,
                             .label = sounds[i].label,
                             .ports = sounds[i].ports,
-                            .piece_state = sounds[i].piece_state});
+                            .piece_state = sounds[i].piece_state,
+                            .music = sounds[i].music});
         }
     }
 
@@ -374,7 +379,8 @@ std::vector<Job> PickJobs(const std::vector<rip::Sound>& sounds, std::vector<rip
                             .sound_id = sound.id,
                             .label = sound.label,
                             .file_name = u.file_name,
-                            .archive = FileChunk{profile.sound_archive, std::move(u.sound_archive)}});
+                            .archive = FileChunk{profile.sound_archive, std::move(u.sound_archive)},
+                            .music = sound.music});
         }
     }
 
@@ -458,7 +464,8 @@ std::size_t MeasureJobs(std::vector<Job>& jobs, const GameLibrary& library, cons
         std::vector<jaudio::WaveUse> played;
         job.timing =
             analyzer.Analyze(job.sound_id, job.archive ? &*job.archive : nullptr, names_waves ? &job.waves : nullptr,
-                             finds_waves ? &played : nullptr, &job.stop, &job.ports, &job.piece_state);
+                             finds_waves ? &played : nullptr, &job.stop, &job.ports, &job.piece_state,
+                             job.music ? xsflib::rip::Limit::kLong : xsflib::rip::Limit::kDefault);
         if (const std::size_t outside = jaudio::MissingWaves(library.systems, job.waves, played))
         {
             std::fprintf(stderr, "warning: %s looked up %zu waves outside its wave groups\n", job.label.c_str(),
@@ -476,31 +483,23 @@ std::size_t MeasureJobs(std::vector<Job>& jobs, const GameLibrary& library, cons
 
     xsflib::cli::AnalyzeLengths(jobs, threads, analyze, settings);
 
-    std::size_t silent = 0;
-    const auto is_silent = [&silent](const Job& job)
+    // A sound that stopped the emulated machine before it made a sound gives the emulation's error. xsflib's SkipSilent
+    // takes the other silent sounds out.
+    const auto stopped_silent = [](const Job& job)
     {
-        if (!job.timing || !job.timing->silent)
+        if (!job.timing || !job.timing->silent || job.stop.empty())
         {
             return false;
         }
 
-        if (job.stop.empty())
-        {
-            std::fprintf(stderr, "skipped %s: it makes no sound\n", job.label.c_str());
-        }
-        else
-        {
-            std::fprintf(stderr, "skipped %s: the game's code stops before it makes a sound (%s)\n", job.label.c_str(),
-                         job.stop.c_str());
-        }
-
-        silent++;
+        std::fprintf(stderr, "skipped %s: the game's code stops before it makes a sound (%s)\n", job.label.c_str(),
+                     job.stop.c_str());
 
         return true;
     };
-    std::erase_if(jobs, is_silent);
+    const std::size_t stopped = std::erase_if(jobs, stopped_silent);
 
-    return silent;
+    return stopped + xsflib::cli::SkipSilent(jobs);
 }
 
 // Writes the library, then one .minigcsf per job, into the output folder. An earlier rip's library there stays (see
@@ -513,12 +512,11 @@ int WriteRip(const std::string& input, const Options& o, xsflib::cli::FileNameRe
     std::error_code ec;
     fs::create_directories(out_dir, ec);
     xsflib::rip::FileNames& names = xsflib::cli::NamesIn(registries, out_dir, ".gcsflib", ".minigcsf");
-    std::string library_base =
-        profile.library_name ? profile.library_name : fs::path(profile.sound_archive).stem().string();
+    std::string library_base = common.at("game");
     if (profile.library_per_disc && game.boot.size() > 6)
     {
         // The disc's number is byte 6 of its header, from 0.
-        library_base += "Disc" + std::to_string(game.boot[6] + 1);
+        library_base += " Disc " + std::to_string(game.boot[6] + 1);
     }
 
     const std::string lib_name = names.LibraryIn(out_dir, library_base, library);
@@ -546,7 +544,8 @@ int WriteRip(const std::string& input, const Options& o, xsflib::cli::FileNameRe
         return rip::BuildMini(job.sound_id, lib_name, std::move(tags), &*job.archive, waves, &job.ports,
                               &job.piece_state);
     };
-    if (xsflib::cli::WriteMinis(out_dir, names, jobs, common, "gcsf_sound", build) < 0)
+    if (xsflib::cli::WriteMinis(out_dir, names, jobs, common, xsflib::rip::LengthFrom::kFirstSound, "gcsf_sound",
+                                build) < 0)
     {
         return 1;
     }
@@ -603,7 +602,13 @@ int RipInput(const std::string& input, const Options& o, xsflib::cli::FileNameRe
         return 1;
     }
 
-    const std::string game_name = o.game_name.empty() ? profile->name : o.game_name;
+    // The game tag: --game, or else the title in the disc header, or else the input's name.
+    std::string game_name = o.game_name.empty() ? game.Title() : o.game_name;
+    if (game_name.empty())
+    {
+        game_name = xsflib::rip::NameOfInput(input);
+    }
+
     const Tags common = xsflib::cli::RipTags(o, game_name, "gcsf", "game");
     std::optional<GameLibrary> library = BuildGameLibrary(game, *profile, o, common, listed->sound_archive, jobs);
     if (!library)

@@ -5,7 +5,6 @@
 // release's sound files, and jaudio_analysis.cpp holds the length analysis.
 
 #include <algorithm>
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -23,10 +22,11 @@
 #include "ntdlib/dol.h"
 #include "ntdlib/jaudio/aaf.h"
 #include "ntdlib/jaudio/archive.h"
+#include "ntdlib/jaudio/barc.h"
 #include "ntdlib/jaudio/jac_effects.h"
 #include "ntdlib/jaudio/pikmin2_pieces.h"
 #include "ntdlib/jaudio/rarc.h"
-#include "ntdlib/jaudio/sequence_commands.h"
+#include "ntdlib/jaudio/sequence_walk.h"
 #include "ntdlib/jaudio/wave_system.h"
 #include "ntdlib/yaz0.h"
 #include "xsflib/ascii.h"
@@ -47,7 +47,7 @@ namespace
 
 // The sounds of Pikmin 2's pieces. A piece is named by its file in the sequence archive, without the extension, and a
 // variant by its label. The archive may be compressed with Yaz0. Throws xsflib::FormatError if the
-// archive is damaged or lacks a piece's file.
+// archive is damaged or has no file for a piece.
 std::vector<jaudio::SoundEntry> PieceSounds(const std::vector<uint8_t>& sequence_archive)
 {
     std::vector<uint8_t> decoded;
@@ -124,14 +124,21 @@ std::vector<jaudio::ArchiveFile> SequenceFiles(const GameProfile& profile, const
 namespace
 {
 
-// The key under which a sound's name is found: its ID without an effect's bits 10 and 11, and without the category of
-// a sequence or a stream. Those bits set how long an effect plays. The sound table gives a sequence category 0, and the
-// names give it the table's category for sequences.
+// The key under which a sound's name is found: an effect's key in the name file (jaudio::AsnNameKey), or the ID of a
+// sequence or a stream without its category. The sound table gives a sequence category 0, and the names give it the
+// table's category for sequences.
 uint32_t NameKey(uint32_t id)
 {
     const uint32_t type = id & jaudio::kAafTypeMask;
-    return type == jaudio::kAafEffect ? id & ~(jaudio::kAafToEnd | jaudio::kAafToEnd >> 1)
-                                      : type | (id & jaudio::kAafIndexMask);
+    return type == jaudio::kAafEffect ? jaudio::AsnNameKey(id) : type | (id & jaudio::kAafIndexMask);
+}
+
+// The label of a sound with no name: its ID in eight hex digits.
+std::string IdLabel(uint32_t id)
+{
+    char label[16];
+    std::snprintf(label, sizeof(label), "%08X", static_cast<unsigned>(id));
+    return label;
 }
 
 // The sounds that a JAudio1 sound name table (.asn, jaudio::ReadAsnSounds) names, by NameKey: each sound's name and ID.
@@ -245,20 +252,12 @@ bool IsMusic(const jaudio::SoundEntry& sound)
 
 Sound SoundOf(const jaudio::SoundEntry& entry)
 {
-    std::string label = entry.name;
-    if (label.empty())
-    {
-        char id[16];
-        std::snprintf(id, sizeof(id), "%08X", static_cast<unsigned>(entry.Id()));
-        label = id;
-    }
-
-    return {entry.Id(), std::move(label), IsMusic(entry), entry.stream};
+    return {entry.Id(), entry.name.empty() ? IdLabel(entry.Id()) : entry.name, IsMusic(entry), entry.stream};
 }
 
 std::vector<Sound> JacPieces(const disc::GameFiles& game, const GameProfile& profile)
 {
-    constexpr std::size_t kHeader = 0x20, kEntry = 0x20, kNameSize = 14, kSize = 0x1c;
+    constexpr std::size_t kHeader = 0x20;
     const ntdlib::Dol dol = ntdlib::Dol::ParseMain(game.dol);
     const std::span<const uint8_t> index = DolBytes(dol, profile.sequence_index);
     if (index.size() < kHeader || !std::equal(index.begin(), index.begin() + 4, "BARC"))
@@ -266,18 +265,15 @@ std::vector<Sound> JacPieces(const disc::GameFiles& game, const GameProfile& pro
         throw xsflib::FormatError("main.dol has no sequence index at " + xsflib::Hex(profile.sequence_index, 8));
     }
 
-    const uint32_t count = xsflib::LoadBe32(index.data() + 0xc);
-    if (index.size() < kHeader + std::size_t{count} * kEntry)
-    {
-        throw xsflib::FormatError("main.dol's sequence index ends early");
-    }
-
     // A sound's ID holds the piece's number in a byte.
     constexpr uint32_t kMaxPieces = 0x100;
+    const uint32_t count = xsflib::LoadBe32(index.data() + 0xc);
     if (count > kMaxPieces)
     {
         throw xsflib::FormatError("main.dol's sequence index has " + std::to_string(count) + " files");
     }
+
+    const std::vector<ntdlib::jaudio::BarcEntry> entries = ntdlib::jaudio::ReadBarcEntries(index);
 
     const auto id = [](uint32_t piece, uint32_t part, uint32_t system, uint32_t group)
     {
@@ -286,14 +282,12 @@ std::vector<Sound> JacPieces(const disc::GameFiles& game, const GameProfile& pro
     std::vector<Sound> pieces;
     for (uint32_t number = kJacFirstPiece; number < count; number++)
     {
-        const uint8_t* entry = index.data() + kHeader + number * kEntry;
-        if (xsflib::LoadBe32(entry + kSize) == 0)
+        if (entries[number].size == 0)
         {
             continue;
         }
 
-        std::string label = TextBeforeZero(std::span(entry, kNameSize));
-        label = label.substr(0, label.rfind('.'));
+        std::string label = entries[number].name.substr(0, entries[number].name.rfind('.'));
         if (number != profile.parted_piece)
         {
             pieces.push_back({id(number, 0, number, 0), std::move(label), true});
@@ -317,15 +311,9 @@ std::vector<Sound> JacEffects(const disc::GameFiles& game, const GameProfile& pr
         return {};
     }
 
-    const auto label_of_other = [](uint32_t id)
-    {
-        char label[16];
-        std::snprintf(label, sizeof(label), "%08X", static_cast<unsigned>(id));
-        return std::string(label);
-    };
     std::vector<Sound> effects;
     const ntdlib::Dol dol = ntdlib::Dol::ParseMain(game.dol);
-    for (jaudio::JacEffectSound& effect : jaudio::ListJacEffects(dol, profile.jac_effects, label_of_other))
+    for (jaudio::JacEffectSound& effect : jaudio::ListJacEffects(dol, profile.jac_effects, IdLabel))
     {
         effects.push_back({effect.id, std::move(effect.name), false});
     }
@@ -415,154 +403,48 @@ std::vector<UnplayedSequence> UnplayedSequences(const GameProfile& profile, cons
 namespace
 {
 
-// The argument types that a register prefix (0x90 to 0x97) gives a command. The top bits of `mask`, one for each of
-// the first `count` arguments, mark those that come from registers.
-uint16_t RegisterTypes(uint8_t mask, int count)
-{
-    uint16_t types = 0;
-    for (int i = 0; i < count; i++)
-    {
-        if (mask & (0x80 >> i))
-        {
-            types = static_cast<uint16_t>(types | 3u << (2 * i));
-        }
-    }
-
-    return types;
-}
-
-// Skips a MIDI value: bytes with the top bit set, then one without it.
-std::size_t SkipMidiValue(const xsflib::Reader& r, std::size_t at)
-{
-    while (r.U8(at) & 0x80)
-    {
-        at++;
-    }
-
-    return at + 1;
-}
-
-// Reads the `count` arguments of a command at `at` in `r`, of the types in `types` (two bits each, the first argument
-// in the lowest bits: 0 a byte, 1 a 16-bit value, 2 a 24-bit value, 3 a register's number). Moves `at` past them. An
-// argument that comes from a register has no value here.
-std::array<std::optional<uint32_t>, 8> ReadArguments(const xsflib::Reader& r, std::size_t& at, uint16_t types,
-                                                     std::size_t count)
-{
-    std::array<std::optional<uint32_t>, 8> a;
-    for (std::size_t i = 0; i < count; i++, types = static_cast<uint16_t>(types >> 2))
-    {
-        switch (types & 3)
-        {
-        case 0:
-            a[i] = r.U8(at);
-            at += 1;
-            break;
-        case 1:
-            a[i] = r.U16(at);
-            at += 2;
-            break;
-        case 2:
-            a[i] = uint32_t{r.U16(at)} << 8 | r.U8(at + 2);
-            at += 3;
-            break;
-        default:
-            at += 1;
-            break;
-        }
-    }
-
-    return a;
-}
-
-// The banks that a JAudio2 sequence selects with commands 0xE1 and 0xE2, along every path from `start` in `data`
-// through the tracks that it opens, its calls and its jumps. Returns nothing if a path meets a command that isn't
-// known, a target or a bank that comes from a register, a jump or a call through a table, or the data's end.
+// The banks that a JAudio2 sequence selects with commands 0xE1 and 0xE2 at the commands that jaudio::WalkSequence
+// passes from `start` in `data`. The walk lists only the banks that notes play. A bank that the sequence selects
+// and never plays counts here too. Returns nothing for an incomplete walk, or for a bank that comes from a register.
 std::optional<std::set<uint32_t>> SequenceBanks(std::span<const uint8_t> data, uint32_t start)
 {
-    const xsflib::Reader r(data, true);
-    std::set<uint32_t> banks;
-    std::set<std::size_t> seen;
-    std::vector<std::size_t> paths = {start};
-    try
-    {
-        while (!paths.empty())
-        {
-            std::size_t at = paths.back();
-            paths.pop_back();
-            bool ends = false;
-            while (!ends && seen.insert(at).second)
-            {
-                const uint8_t b = r.U8(at++);
-                if (b < 0x80)
-                {
-                    // A note: its flags, its velocity, and a gate note's length.
-                    const uint8_t flags = r.U8(at);
-                    at = (flags & 7) == 0 ? SkipMidiValue(r, at + 2) : at + 2;
-                    continue;
-                }
-
-                if ((b & 0xf0) == 0x80)
-                {
-                    continue; // a note's end
-                }
-
-                uint8_t command = b;
-                uint16_t from_registers = 0;
-                if ((b & 0xf0) == 0x90)
-                {
-                    from_registers = RegisterTypes(r.U8(at), (b & 7) + 1);
-                    command = r.U8(at + 1);
-                    at += 2;
-                }
-
-                if (command == 0xf0)
-                {
-                    at = SkipMidiValue(r, at);
-                    continue;
-                }
-
-                if (command < jaudio::kFirstSequenceCommand ||
-                    !jaudio::kSequenceCommands[command - jaudio::kFirstSequenceCommand].known || command == 0xc9 ||
-                    command == 0xca)
-                {
-                    return std::nullopt;
-                }
-
-                const jaudio::SequenceCommand& info =
-                    jaudio::kSequenceCommands[command - jaudio::kFirstSequenceCommand];
-                const std::array<std::optional<uint32_t>, 8> a =
-                    ReadArguments(r, at, static_cast<uint16_t>(info.types | from_registers), info.count);
-
-                const bool selects = command == 0xe1 || command == 0xe2;
-                const bool goes =
-                    command == 0xc1 || command == 0xc3 || command == 0xc4 || command == 0xc7 || command == 0xc8;
-                const std::optional<uint32_t> value = command == 0xc3 || command == 0xc7 || selects ? a[0] : a[1];
-                if ((selects || goes) && !value)
-                {
-                    return std::nullopt;
-                }
-
-                if (command == 0xe1)
-                {
-                    banks.insert(*value >> 8);
-                }
-                else if (command == 0xe2)
-                {
-                    banks.insert(*value);
-                }
-                else if (goes)
-                {
-                    paths.push_back(*value);
-                }
-
-                // A jump, a return and the sequence's end end the path.
-                ends = command == 0xc7 || command == 0xc5 || command == 0xff;
-            }
-        }
-    }
-    catch (const xsflib::FormatError&)
+    const jaudio::SequenceInstruments walk = jaudio::WalkSequence(data, start);
+    if (!walk.complete)
     {
         return std::nullopt;
+    }
+
+    // A byte past the end reads 0xff, as in the walk.
+    const auto byte = [data](std::size_t at)
+    {
+        return at < data.size() ? data[at] : uint8_t{0xff};
+    };
+
+    // A register prefix (0x90 to 0x9F) gives the command after a mask. The mask's top bit marks a first argument that
+    // comes from a register. The bank is the byte after the command: 0xE1's bank and program, or 0xE2's bank.
+    std::set<uint32_t> banks;
+    for (std::size_t at : walk.commands)
+    {
+        uint8_t command = byte(at);
+        bool from_register = false;
+        if ((command & 0xf0) == 0x90)
+        {
+            from_register = (byte(at + 1) & 0x80) != 0;
+            command = byte(at + 2);
+            at += 2;
+        }
+
+        if (command != 0xe1 && command != 0xe2)
+        {
+            continue;
+        }
+
+        if (from_register)
+        {
+            return std::nullopt;
+        }
+
+        banks.insert(byte(at + 1));
     }
 
     return banks;

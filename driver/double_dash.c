@@ -95,6 +95,7 @@ __attribute__((section(".params"), used)) volatile struct Params driver_params =
 
 #include "aram_manager.h"
 #include "frames.h"
+#include "jsystem_heaps.h"
 #include "section_waves.h"
 
 __attribute__((noreturn)) void driver_main(void) {
@@ -108,10 +109,8 @@ __attribute__((noreturn)) void driver_main(void) {
     /* What JSystem's framework sets up first. The new heap becomes JKRHeap's system heap and the current heap. */
     ((fn0)p->os_init)();
     ((fn0)p->dvd_init)();
-    const u32 root = ((fn2)p->create_root_heap)(p->max_heaps, 0);
-    const u32 system = root ? ((fn3)p->create_exp_heap)(p->system_heap_size, root, 0) : 0;
-    if (!system)
-        fail(2);
+    u32 system;
+    const u32 root = create_jsystem_heaps(&system);
 
     /* The ARAM manager, the main thread's JKRThread and the ARAM streams' transfer buffer. The buffer comes from the
        system heap. Then the game's audio heap, from the root heap. */

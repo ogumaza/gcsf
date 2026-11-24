@@ -230,7 +230,7 @@ const GameProfile kFourSwordsJpn = {
 
 // Four Swords Adventures' European release. The sound library and the functions that the driver calls are the American
 // code at other addresses. Beyond the fields that the linker fills in, two functions that a rip reaches differ. One is
-// the audio set-up (see below). The other is the disc library's stateReady, which leaves out a store of -1 that the
+// the audio set-up (see below). The other is the disc library's stateReady. It leaves out a store of -1 that the
 // American build makes. The game's main makes one more heap than the American main: 0x142800 bytes from the game heap,
 // for the languages' files. It keeps that heap at +0xC of the game's variables, and the audio object at +0x10. The
 // driver keeps the American places, with the audio object at +0xC. Of the code that the driver reaches, only the audio
@@ -687,6 +687,8 @@ const GameProfile kJungleBeatUsa = {
     .track_parent_offset = 0x12c, // JASTrack::connectChild (0x80007cec) stores the parent there
     .layer_states = jaudio::kJungleBeatStates,
     .chord_layers = jaudio::kJungleBeatChordLayers,
+    .state_table = jaudio::kJungleBeatStateTable,
+    .stage_table = jaudio::kJungleBeatStageTable,
 };
 
 // Mario Kart: Double Dash!! (USA). Its sound library is the earliest known build of JAudio2, under the game's audio

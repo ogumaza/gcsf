@@ -201,7 +201,6 @@ const GameProfile kMetroidPrimeUsa = {
             .snd_volume = 0x8039d36c,
         }
             .Words(),
-    .library_name = "MetroidPrime",
     .musyx_files = MusyXFiles::kRetro,
     .song_lists = {0x805aaab4, 0x805aaab0},
     .section_loops = 0x80545f6c,
@@ -282,7 +281,6 @@ const GameProfile kTalesOfSymphoniaUsa = {
         }
             .Words(),
     .bank_files = {"S/inst.snd"},
-    .library_name = "TalesOfSymphonia",
     .musyx_files = MusyXFiles::kTales,
     .musyx_songs = 0x801f9830,
     .reverbs =
@@ -372,7 +370,6 @@ const GameProfile kStarFoxAdventuresUsa = {
             .song_fade_in = 500, // every song (0x8000B4B4)
         }
             .Words(),
-    .library_name = "StarFoxAdventures",
     .musyx_files = MusyXFiles::kStarFox,
     .musyx_songs = 0x802c5e80,
     .musyx_song_count = 99,
@@ -468,7 +465,6 @@ const GameProfile kRogueLeaderUsa = {
             .snd_volume = 0x80011f90,
         }
             .Words(),
-    .library_name = "RogueLeader",
     .patches = {{0x80006b2c, 0x4800003c},  // the start-up of the user's code: on from DVDInit to its end
                 {0x80027cb8, 0x3863e3e0},  // OSInit: the arena from 0x800AE3E0
                 {0x80027cf0, 0x3863e3e0},  // and without a debugger too
@@ -572,7 +568,6 @@ const GameProfile kColosseumUsa = {
             .aux_midi = {0xff, 0xff},        // no MIDI channel controls aux A or aux B
         }
             .Words(),
-    .library_name = "PokémonColosseum",
     .musyx_files = MusyXFiles::kColosseum,
     .musyx_songs = 0x141654,
     .musyx_song_count = 1236,
@@ -674,7 +669,6 @@ const GameProfile kResidentEvilUsa = {
             .song_control_delay = 10125000, // 250 ms at 40.5 MHz. The time base counts the bus clock / 4.
         }
             .Words(),
-    .library_name = "ResidentEvil",
     .musyx_files = MusyXFiles::kResidentEvilSnd,
     .reverbs =
         {{{.block = 0x8022737c,
@@ -768,7 +762,6 @@ const GameProfile kResidentEvilZeroUsa = {
             .snd_volume = 0x801cf2f8,
         }
             .Words(),
-    .library_name = "ResidentEvilZero",
     .library_per_disc = true,
     .musyx_files = MusyXFiles::kResidentEvil,
     .musyx_songs = 0x80243bcc,
@@ -867,7 +860,6 @@ const GameProfile kPuzzleCollectionJpn = {
             .snd_master_volume = 0x800229c8, // for Yoshi's Cookie's sounds alone (see AddYoshisCookie)
         }
             .Words(),
-    .library_name = "PuzzleCollection",
     .musyx_files = MusyXFiles::kPuzzleCollection,
     // The settings that the menu, Dr. Mario and Panel de Pon give aux A's reverb.
     .reverbs = {{{.block = 0x80100000,
@@ -910,7 +902,7 @@ const GameProfile kPuzzleCollectionJpn = {
 // Before the game pushes a group, it adds a pool of ARAM for the samples of the group's audio group set (sndPoolAdd,
 // 0x80397B80) and selects the pool (0x80397C4C). MusyX then uploads the samples into the pool through the game's
 // callback (0x803077C0). The samples of the title music don't fit in MusyX's 0x7D200 bytes. A rip gives MusyX 0x400000
-// bytes of ARAM instead. MusyX uploads each set's samples there. Where the samples lie in ARAM changes nothing that a
+// bytes of ARAM instead. MusyX uploads each set's samples there. Where the samples are in ARAM changes nothing that a
 // listener hears.
 const GameProfile kMetroidPrime2Usa = {
     .name = "Metroid Prime 2: Echoes",
@@ -953,7 +945,6 @@ const GameProfile kMetroidPrime2Usa = {
             .snd_volume = 0x80389964,
         }
             .Words(),
-    .library_name = "MetroidPrime2",
     .musyx_files = MusyXFiles::kRetro,
     .musyx_voices = {.count = 48,
                      .synth = 0x8041a228,
@@ -1026,7 +1017,6 @@ const GameProfile kPaperMarioUsa = {
             .snd_fx_ctrl14 = 0x8027a034,
         }
             .Words(),
-    .library_name = "PaperMario",
     .musyx_files = MusyXFiles::kPaperMario,
     .musyx_writes = {{0x803e17ec, 10}, {0x803e17f0, 0}, {0x803e17f4, 500}},
     .reverbs = {{{.block = 0x803e194c,
@@ -1115,7 +1105,6 @@ const GameProfile kPokemonChannelUsa = {
             .aram_sync = 0x8012f090,
         }
             .Words(),
-    .library_name = "PokémonChannel",
     .musyx_files = MusyXFiles::kPokemonChannel,
     .musyx_songs = 0x8015eb50,
     .musyx_song_count = 38,
@@ -1136,7 +1125,7 @@ const GameProfile kPokemonChannelUsa = {
 // second DOL that main.dol holds packed at 0x80200000. The loader's start-up (0x800040BC, before main) unpacks that DOL
 // into ARAM and runs it from 0x7F200000 through the CPU's page table, a page at a time. The rip places the game's DOL
 // 16 MB above its addresses, from 0x80200000 to 0x8086EAA0. It replaces that start-up with code that maps 0x7F000000 to
-// 0x7FFFFFFF there with IBAT3 and DBAT3. MusyX's state lies in the loader's memory. The rip leaves it at the game's
+// 0x7FFFFFFF there with IBAT3 and DBAT3. MusyX keeps its state in the loader's memory. The rip leaves it at the game's
 // addresses. The arena starts at 0x81000000. The disc's library takes only paths in the 8.3 form unless bi2.bin allows
 // long names. The rip lets it take the driver's long names.
 //
@@ -1187,7 +1176,6 @@ const GameProfile kRebelStrikeUsa = {
             .snd_volume = 0x7f644ac8,
         }
             .Words(),
-    .library_name = "RebelStrike",
     // The loader's start-up maps the game's DOL with IBAT3 and DBAT3 instead of its page table: the 16 MB from
     // 0x7F000000 to 0, cached, read and write.
     .patches = {{0x800040bc, 0x3c607f00},  // lis r3, 0x7f00
@@ -1278,7 +1266,6 @@ const GameProfile kNdDemoDisc = {
             .snd_volume = 0x80047e98,
         }
             .Words(),
-    .library_name = "NDDEMO",
     .patches = {{0x800311d4, 0x480000ac}}, // the disc's paths: long names
     .musyx_files = MusyXFiles::kNdDemo,
     .musyx_songs = 0x80065394,

@@ -95,7 +95,7 @@ MusyXCatalogue GatherMusyX(const disc::GameFiles& game, const GameProfile& profi
 // The catalogue's path in the library.
 inline constexpr char kMusyXCatalogue[] = "MusyX/sounds.bin";
 
-// The catalogue's file, which the library holds at kMusyXCatalogue. The driver reads a sound's entry from it.
+// The catalogue's file, at kMusyXCatalogue in the library. The driver reads a sound's entry from it.
 std::vector<uint8_t> CatalogueFile(const MusyXCatalogue& catalogue);
 
 // What the length analysis reads of a sound in the catalogue's file: its kind, and the number of its song's file

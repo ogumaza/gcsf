@@ -16,7 +16,6 @@
 #include "ntdlib/disc/game.h"
 #include "ntdlib/jaudio/rarc.h"
 #include "ntdlib/testing/jaudio_files.h"
-#include "xsflib/bytes.h"
 #include "xsflib/testing/check.h"
 #include "xsflib/testing/temp_folder.h"
 
@@ -90,7 +89,7 @@ void TestTitle(const fs::path& dir)
     XSFLIB_CHECK(Read(game, "Audiores/Seqs/Z2SoundSeqs.arc") == "arc");
     XSFLIB_CHECK(Read(game, "Audiores/Waves/A.aw") == "a");
 
-    // A wave archive that the folder lacks belongs to the other release. The disc's isn't read in its place.
+    // A wave archive that isn't in the folder belongs to the other release. The disc's isn't read in its place.
     XSFLIB_CHECK(Read(game, "Audiores/Waves/B.aw") == "none");
 
     // The game's other files still come from the disc, those next to the sound files included.
@@ -184,21 +183,6 @@ std::vector<uint8_t> SequenceArchive()
         {{2, "se.bms", bytes("old se")}, {0, "field.bms", bytes("old field")}, {1, "b.bms", bytes("b")}});
 }
 
-// A sequence table as The Wind Waker HD has one: the count, zeros up to 0x20, then each sequence's offset and size.
-std::vector<uint8_t> SequenceTable(const std::vector<std::string>& sequences)
-{
-    std::vector<uint8_t> table(0x20 + sequences.size() * 8);
-    xsflib::StoreBe32(table.data(), static_cast<uint32_t>(sequences.size()));
-    for (std::size_t i = 0; i < sequences.size(); i++)
-    {
-        xsflib::StoreBe32(table.data() + 0x20 + i * 8, static_cast<uint32_t>(table.size()));
-        xsflib::StoreBe32(table.data() + 0x24 + i * 8, static_cast<uint32_t>(sequences[i].size()));
-        table.insert(table.end(), sequences[i].begin(), sequences[i].end());
-    }
-
-    return table;
-}
-
 rip::GameProfile WindWakerProfile()
 {
     rip::GameProfile profile{};
@@ -234,7 +218,7 @@ disc::GameFiles WindWakerGame()
 // archive is then the disc's, with the table's sequences.
 void TestSequenceTable(const fs::path& dir)
 {
-    const std::vector<uint8_t> table = SequenceTable({"the field sequence from the table", "boss", "se"});
+    const std::vector<uint8_t> table = files::SequenceTable({"the field sequence from the table", "boss", "se"});
     const fs::path sounds = dir / "hd" / "content" / "Cafe" / "US" / "AudioRes" / "JAudioRes";
     WriteText(sounds / "JaiInit.aaf", "aaf");
     WriteText(sounds / "Seqs" / "JaiSeq.bdt", std::string(table.begin(), table.end()));

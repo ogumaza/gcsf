@@ -25,7 +25,7 @@ jobs:
         with:
           component: foo_input_gcsf
 
-  # This job puts the package together. zip keeps the bundle's file permissions. An artifact wouldn't.
+  # This job puts the package together. zip keeps the file permissions of the bundle. An artifact wouldn't.
   macos:
     needs: windows
     runs-on: macos-15

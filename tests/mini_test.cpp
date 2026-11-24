@@ -13,6 +13,7 @@
 
 #include "ntdlib/flipper/z2_params.h"
 #include "ntdlib/jaudio/jungle_beat_states.h"
+#include "ntdlib/testing/jungle_beat_checks.h"
 #include "xsflib/bytes.h"
 #include "xsflib/psf/psf.h"
 #include "xsflib/testing/check.h"
@@ -241,9 +242,8 @@ void TestLayerStates()
 
 void TestChordLayers()
 {
-    // Only Donkey Kong Jungle Beat's profile lists chord layers, at most as many as the driver's table holds. Each
-    // belongs to a piece of music, 0x01000000 plus an index below 0x100, and names a stage and one or two records of the
-    // chord database below 0x100. A piece's layers have different suffixes, and none is the suffix of a layer state.
+    // Only Donkey Kong Jungle Beat's profile lists chord layers. ntdlib's CheckChordLayers checks the list and its
+    // suffixes against the profile's layer states.
     for (const rip::GameProfile& profile : rip::KnownProfiles())
     {
         if (profile.chord_layers.empty())
@@ -252,37 +252,82 @@ void TestChordLayers()
         }
 
         Check(profile.driver == rip::Driver::kJungleBeat, std::string(profile.name) + ": the driver of chord layers");
-        Check(profile.chord_layers.size() <= ntdlib::jaudio::kMaxChordLayers,
-              std::string(profile.name) + ": the number of chord layers");
-        for (std::size_t i = 0; i < profile.chord_layers.size(); i++)
+        ntdlib::testing::CheckChordLayers(std::string(profile.name), profile.chord_layers, profile.layer_states);
+    }
+}
+
+// Tests the chord layers of boss fights (AddFightMusic): only Donkey Kong Jungle Beat's profile names the stage table,
+// and only the layers of a fight (the final fight's and the GoroPig fights') write their piece over the music of the
+// row of their stage in their mini file.
+void TestFightMusic()
+{
+    const rip::GameProfile* jungle_beat = nullptr;
+    for (const rip::GameProfile& profile : rip::KnownProfiles())
+    {
+        Check((profile.stage_table != 0) == (profile.game_id == "GYBE01"),
+              std::string(profile.name) + ": only Jungle Beat has a stage table");
+        if (profile.stage_table != 0)
         {
-            const ntdlib::jaudio::JungleBeatChordLayer& layer = profile.chord_layers[i];
-            const std::string name = std::string(profile.name) + ": chord layer " + std::to_string(i);
-            Check((layer.piece & 0xffffff00) == 0x01000000 && layer.stage != 0 && layer.stage < 0x100 &&
-                      layer.record != 0 && layer.record < 0x100 && layer.second < 0x100 && layer.suffix &&
-                      *layer.suffix,
-                  name);
-
-            // The sound ID gives the index back, in bits 16 to 22 and bit 15, and the piece's ID.
-            const uint32_t id = ntdlib::jaudio::ChordLayerId(layer.piece, static_cast<uint32_t>(i));
-            Check(
-                ((id >> 16 & 0x7f) | (id >> 8 & 0x80)) == i &&
-                    (id & ~(ntdlib::jaudio::kChordLayer | 0x7f0000u | ntdlib::jaudio::kChordLayerHigh)) == layer.piece,
-                name + ": its sound ID");
-            for (std::size_t j = 0; j < i; j++)
-            {
-                Check(profile.chord_layers[j].piece != layer.piece ||
-                          std::string(profile.chord_layers[j].suffix) != layer.suffix,
-                      name + ": its suffix");
-            }
-
-            for (const ntdlib::jaudio::JungleBeatState& state : profile.layer_states)
-            {
-                Check(state.piece != layer.piece || std::string(state.suffix) != layer.suffix,
-                      name + ": its suffix and the states'");
-            }
+            jungle_beat = &profile;
         }
     }
+    if (!Check(jungle_beat != nullptr && jungle_beat->stage_table == 0x803b3978, "Jungle Beat's stage table"))
+    {
+        return;
+    }
+
+    // The piece JA_BGM_BOSS_FINAL, then every layer.
+    std::vector<rip::Sound> sounds = {{.id = 0x0100004b, .label = "JA_BGM_BOSS_FINAL", .music = true}};
+    for (std::size_t i = 0; i < jungle_beat->chord_layers.size(); i++)
+    {
+        sounds.push_back(
+            {.id = ntdlib::jaudio::ChordLayerId(jungle_beat->chord_layers[i].piece, static_cast<uint32_t>(i)),
+             .label = "",
+             .music = true});
+    }
+    std::vector<rip::Sound> unpatched = sounds;
+
+    rip::AddFightMusic(*jungle_beat, sounds);
+    rip::GameProfile without = *jungle_beat;
+    without.stage_table = 0;
+    rip::AddFightMusic(without, unpatched);
+
+    // The final fight's layer writes JA_BGM_BOSS_FINAL over the music of row 0x56, and the GoroPig fights' layer
+    // writes JA_BGM_BOSS_GOROPY_B over the music of row 0x2e.
+    struct Fight
+    {
+        std::size_t layer = 0;
+        uint32_t address = 0;
+        std::vector<uint8_t> music;
+    };
+    const std::vector<Fight> kFights = {{129, 0x803b3ed8, {0x01, 0x00, 0x00, 0x4b}},
+                                        {134, 0x803b3c58, {0x01, 0x00, 0x00, 0x44}}};
+    std::size_t patched = 0;
+    for (std::size_t i = 0; i < sounds.size(); i++)
+    {
+        const auto fight =
+            std::ranges::find_if(kFights, [i](const Fight& entry) { return i > 0 && entry.layer == i - 1; });
+        const bool in_fight = fight != kFights.end();
+        const std::vector<ntdlib::flipper::z2::PieceState::Memory>& memory = sounds[i].piece_state.memory;
+        Check(memory.size() == (in_fight ? 1u : 0u), "sound " + std::to_string(i) + ": a row only for a fight's layer");
+        if (!in_fight || memory.size() != 1)
+        {
+            continue;
+        }
+
+        patched++;
+        Check(memory[0].address == fight->address && memory[0].data == fight->music,
+              "layer " + std::to_string(fight->layer) + ": the fight's music at the row of its stage");
+        const std::vector<uint32_t> kWaves = {0x00010000};
+        const Mini mini =
+            Parse(rip::BuildMini(sounds[i].id, "game.gcsflib", {}, nullptr, &kWaves, nullptr, &sounds[i].piece_state));
+        Check(mini.chunks.memory.size() == 3 && mini.chunks.memory[2].address == fight->address &&
+                  mini.chunks.memory[2].data == fight->music,
+              "layer " + std::to_string(fight->layer) + ": the layer's mini writes the row");
+    }
+    Check(patched == 2 && sounds.size() == 136, "two layers of a fight");
+    Check(std::ranges::all_of(unpatched, [](const rip::Sound& sound) { return sound.piece_state.memory.empty(); }),
+          "no row without the profile's table");
 }
 
 void TestMutedChildren()
@@ -319,6 +364,15 @@ void TestMutedChildren()
     XSFLIB_CHECK(state.chunks.memory[2].address == DriverBlock::kAddress + 0x1fc);
     XSFLIB_CHECK(Words(state.chunks.memory[2]) == state_words);
 
+    // A Jungle Beat chord layer whose piece starts silent writes the piece's second state over its first, after the
+    // waves. The piece's state has no words. No chunk goes in the block for them.
+    const ntdlib::flipper::z2::PieceState kSilent = {.memory = {{0x803533bc, {0x13, 0x33, 0, 0, 0, 0, 0, 0}}}};
+    const Mini silent = Parse(rip::BuildMini(ntdlib::jaudio::ChordLayerId(0x01000006, 128), "game.gcsflib", {}, nullptr,
+                                             &kWaves, nullptr, &kSilent));
+    XSFLIB_CHECK(silent.chunks.memory.size() == 3);
+    XSFLIB_CHECK(silent.chunks.memory[2].address == 0x803533bc);
+    XSFLIB_CHECK(silent.chunks.memory[2].data == kSilent.memory[0].data);
+
     // The profiles that set tracks run Twilight Princess's driver, and name the music manager, setChildTrackVolume
     // and setPortData. The profiles with states also mute tracks.
     for (const rip::GameProfile& profile : rip::KnownProfiles())
@@ -352,6 +406,7 @@ int main()
     TestMusicStates();
     TestLayerStates();
     TestChordLayers();
+    TestFightMusic();
     TestMutedChildren();
 
     return xsflib::testing::Summary("mini");

@@ -17,7 +17,8 @@
 
 #include "ntdlib/disc/game.h"
 #include "ntdlib/ppc/cpu.h"
-#include "xsflib/ascii.h"
+#include "ntdlib/red/files.h"
+#include "ntdlib/zero_padded.h"
 #include "xsflib/binary.h"
 #include "xsflib/bytes.h"
 
@@ -33,76 +34,11 @@ namespace gcsf::rip
 namespace
 {
 
-// A Red game's names of its files: a prefix, the number in `digits` digits or more, and the extension. The game writes
-// them with sprintf.
-struct RedName
-{
-    std::string_view prefix;
-    std::size_t digits;
-    std::string_view extension;
-};
-
-constexpr RedName kRedPiece = {"music", 3, ".bgm"};
-constexpr RedName kRedBank = {"wave", 4, ".wd"};
-constexpr RedName kRedBlock = {"se", 3, ".seb"};
-constexpr RedName kRedEffect = {"se", 6, ".sep"};
-
 // A Red effect's sound ID is this plus the game's number of the effect (see RedSounds). A piece's is its number.
 constexpr uint32_t kRedEffectId = 0x1000000;
 
 // The game numbers a block's effect by the block's number times this, plus the effect's place in the block.
 constexpr uint32_t kRedBlockStride = 1000;
-
-// A Red game's files in `folder` that have the form of `name`, by their numbers. The game's disc library matches paths
-// in any case. The match therefore ignores case. A file whose number has other digits than the game's sprintf writes
-// is left out. A further leading zero is one example. The game never reads such a file.
-std::map<uint32_t, std::string> RedFiles(const disc::GameFiles& game, std::string_view folder, const RedName& name)
-{
-    constexpr std::size_t kMaxDigits = 8;
-    std::map<uint32_t, std::string> found;
-    for (const disc::GameFile& file : game.files)
-    {
-        const std::string path = xsflib::AsciiLower(file.path);
-        if (!path.starts_with(folder) || !path.ends_with(name.extension))
-        {
-            continue;
-        }
-
-        const std::string_view rest = std::string_view(path).substr(folder.size());
-        if (!rest.starts_with(name.prefix) || rest.size() < name.prefix.size() + name.extension.size())
-        {
-            continue;
-        }
-
-        const std::string_view digits =
-            rest.substr(name.prefix.size(), rest.size() - name.prefix.size() - name.extension.size());
-        const auto is_digit = [](char c)
-        {
-            return c >= '0' && c <= '9';
-        };
-        if (digits.empty() || digits.size() > kMaxDigits || !std::all_of(digits.begin(), digits.end(), is_digit))
-        {
-            continue;
-        }
-
-        const uint32_t number = static_cast<uint32_t>(std::stoul(std::string(digits)));
-        if (ZeroPadded(number, name.digits) == digits)
-        {
-            found.emplace(number, file.path);
-        }
-    }
-
-    return found;
-}
-
-// The name of a Red game's file without its folder and extension.
-std::string RedLabel(const std::string& path, const RedName& name)
-{
-    std::string label = path.substr(path.rfind('/') + 1);
-    label.resize(label.size() - name.extension.size());
-
-    return label;
-}
 
 // The wave bank of a Red sound: a little-endian half at `offset` in its information.
 uint32_t RedInfoBank(std::span<const uint8_t> info, std::size_t offset)
@@ -165,7 +101,7 @@ std::optional<std::vector<RedBlockEffect>> RedBlockEffects(std::span<const uint8
 // A Red game's blocks of effects that the game loads, by number.
 std::map<uint32_t, std::string> RedBlocks(const disc::GameFiles& game, const GameProfile& profile)
 {
-    std::map<uint32_t, std::string> blocks = RedFiles(game, profile.block_folder, kRedBlock);
+    std::map<uint32_t, std::string> blocks = ntdlib::red::Files(game, profile.block_folder, ntdlib::red::kBlock);
     std::erase_if(blocks, [&profile](const auto& block) { return block.first >= profile.red_blocks; });
 
     return blocks;
@@ -174,7 +110,7 @@ std::map<uint32_t, std::string> RedBlocks(const disc::GameFiles& game, const Gam
 // A Red game's effects in SEP files that the game can play, by number.
 std::map<uint32_t, std::string> RedSeps(const disc::GameFiles& game, const GameProfile& profile)
 {
-    std::map<uint32_t, std::string> seps = RedFiles(game, profile.effect_folder, kRedEffect);
+    std::map<uint32_t, std::string> seps = ntdlib::red::Files(game, profile.effect_folder, ntdlib::red::kEffect);
     std::erase_if(seps, [](const auto& sep) { return sep.first < kRedFirstSep; });
 
     return seps;
@@ -185,9 +121,9 @@ std::map<uint32_t, std::string> RedSeps(const disc::GameFiles& game, const GameP
 std::vector<Sound> RedSounds(const disc::GameFiles& game, const GameProfile& profile)
 {
     std::vector<Sound> sounds;
-    for (const auto& [number, path] : RedFiles(game, profile.music_folder, kRedPiece))
+    for (const auto& [number, path] : ntdlib::red::Files(game, profile.music_folder, ntdlib::red::kPiece))
     {
-        sounds.push_back({number, RedLabel(path, kRedPiece), true});
+        sounds.push_back({number, ntdlib::red::Label(path, ntdlib::red::kPiece), true});
     }
 
     if (!profile.effect_folder)
@@ -207,13 +143,14 @@ std::vector<Sound> RedSounds(const disc::GameFiles& game, const GameProfile& pro
         for (const RedBlockEffect& effect : *effects)
         {
             sounds.push_back({kRedEffectId + number * kRedBlockStride + effect.place,
-                              RedLabel(path, kRedBlock) + "-" + ZeroPadded(effect.place, 3), false});
+                              ntdlib::red::Label(path, ntdlib::red::kBlock) + "-" + ntdlib::ZeroPadded(effect.place, 3),
+                              false});
         }
     }
 
     for (const auto& [number, path] : RedSeps(game, profile))
     {
-        sounds.push_back({kRedEffectId + number, RedLabel(path, kRedEffect), false});
+        sounds.push_back({kRedEffectId + number, ntdlib::red::Label(path, ntdlib::red::kEffect), false});
     }
 
     return sounds;
@@ -260,8 +197,7 @@ std::optional<std::string> AddRedPieces(ProgramBuilder& program, const disc::Gam
                                         const GameProfile& profile, const std::vector<uint32_t>* sounds,
                                         RedBankUse& use)
 {
-    constexpr std::size_t kBankOffset = 6;
-    for (const auto& [number, path] : RedFiles(game, profile.music_folder, kRedPiece))
+    for (const auto& [number, path] : ntdlib::red::Files(game, profile.music_folder, ntdlib::red::kPiece))
     {
         std::vector<uint8_t> bytes;
         const bool read = Plays(sounds, number);
@@ -270,12 +206,13 @@ std::optional<std::string> AddRedPieces(ProgramBuilder& program, const disc::Gam
             return error;
         }
 
-        if (bytes.size() < kBankOffset + 2 || !std::equal(bytes.begin(), bytes.begin() + 4, "BGM "))
+        const std::optional<uint32_t> bank = ntdlib::red::PieceBank(bytes);
+        if (!bank)
         {
             return path + " isn't a piece of music";
         }
 
-        if (const std::optional<std::string> error = use.Name(path, xsflib::LoadBe16(bytes.data() + kBankOffset), read))
+        if (const std::optional<std::string> error = use.Name(path, *bank, read))
         {
             return error;
         }
@@ -348,7 +285,7 @@ std::optional<std::string> AddRedSeps(ProgramBuilder& program, const disc::GameF
 std::optional<std::string> AddRedFiles(ProgramBuilder& program, const disc::GameFiles& game, const GameProfile& profile,
                                        const std::vector<uint32_t>* sounds)
 {
-    RedBankUse use{.banks = RedFiles(game, profile.wave_folder, kRedBank)};
+    RedBankUse use{.banks = ntdlib::red::Files(game, profile.wave_folder, ntdlib::red::kBank)};
     if (const std::optional<std::string> error = AddRedPieces(program, game, profile, sounds, use))
     {
         return error;
@@ -530,7 +467,7 @@ private:
 
 } // namespace
 
-std::optional<Timing> MeasureRedSound(Player& player, const GameProfile& profile, uint32_t id)
+std::optional<Timing> MeasureRedSound(Player& player, const GameProfile& profile, uint32_t id, xsflib::rip::Limit limit)
 {
     if (id >= kRedEffectId)
     {
@@ -539,7 +476,7 @@ std::optional<Timing> MeasureRedSound(Player& player, const GameProfile& profile
     }
 
     RedPiece piece(player, profile);
-    return MeasureSound(piece);
+    return MeasureSound(piece, limit);
 }
 
 } // namespace gcsf::rip

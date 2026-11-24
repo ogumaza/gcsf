@@ -13,12 +13,12 @@
 #include <utility>
 #include <vector>
 
+#include "ntdlib/first_sample.h"
+#include "ntdlib/flipper/game_source.h"
 #include "ntdlib/jaudio/game_lengths.h"
 #include "ntdlib/ppc/cpu.h"
-#include "xsflib/bytes.h"
 #include "xsflib/rip/length.h"
 
-#include "gc/memory.h"
 #include "gc/system.h"
 #include "gcsf/format.h"
 #include "gcsf/player.h"
@@ -27,8 +27,8 @@
 namespace gcsf::rip
 {
 
-// The length analysis's rules: ntdlib's defaults (a 600 s limit, a 0.5 s tail, two loops and a 10 s fade) at GCSF's
-// output rate, 1 ms at a time.
+// The length analysis's rules: ntdlib's defaults (a 600 s limit, two loops and a 7 s fade) at GCSF's output rate, 1 ms
+// at a time.
 inline constexpr ntdlib::jaudio::GameLengthRules kLengthRules{.sample_rate = kPlayerSampleRate, .block_frames = 32};
 
 // What the shared length analysis reads of GCSF's player (see ntdlib::jaudio::AnalyzeGameSound).
@@ -46,14 +46,12 @@ public:
 
     uint32_t Word(uint32_t address) const
     {
-        const uint8_t* p = system_.Memory().At(ToPhysical(address), 4);
-        return p != nullptr ? xsflib::LoadBe32(p) : 0;
+        return ntdlib::flipper::WordAt(system_.Memory(), address).value_or(0);
     }
 
     std::optional<uint8_t> Byte(uint32_t address) const
     {
-        const uint8_t* p = system_.Memory().At(ToPhysical(address), 1);
-        return p != nullptr ? std::optional<uint8_t>(*p) : std::nullopt;
+        return ntdlib::flipper::ByteAt(system_.Memory(), address);
     }
 
     ppc::Cpu& Cpu()
@@ -96,7 +94,8 @@ private:
 // as sound when it differs by more than xsflib's kSilenceLevel from its channel's recent level. That level is a running
 // average over about 50 ms. An output that rests at 0 (`rests_at_zero`) counts a sample louder than kSilenceLevel as
 // sound, as the other analyses do. The sound rings while it has sounded in the last 0.5 s. The analysis therefore keeps
-// the end of a release. The adapter follows no voices and finds no steady state. A derived class that follows voices
+// the end of a release. The first sample that isn't 0 on either channel is the first sound that a player hears
+// (FirstSampleMs). The adapter follows no voices and finds no steady state. A derived class that follows voices
 // overrides VoiceCount, Voice, Settled, Stuck, ChangedAt and ActiveChannels.
 class MeasuredSound
 {
@@ -115,6 +114,7 @@ public:
             return false;
         }
 
+        first_sample_ms_ = ntdlib::FirstSampleMs(block, kPairMs);
         sounded_ = false;
         for (std::size_t i = 0; i < 2 * kLengthRules.block_frames; i++)
         {
@@ -143,6 +143,13 @@ public:
     bool Sounded() const
     {
         return sounded_;
+    }
+
+    // The milliseconds from the start of the last frame to its first sample that isn't 0, or nothing if every sample
+    // of the frame is 0.
+    std::optional<double> FirstSampleMs() const
+    {
+        return first_sample_ms_;
     }
 
     bool Ringing() const
@@ -241,9 +248,12 @@ private:
     // The output's running average takes a sample with this weight's inverse: about 50 ms.
     static constexpr double kLevelSamples = 1600.0;
 
+    // A pair of samples lasts this long.
+    static constexpr double kPairMs = 1000.0 / kLengthRules.sample_rate;
+
     // The sound rings for 0.5 s after its last sound. A sound that hasn't started in 5 s never will.
     static constexpr uint64_t kRingingFrames =
-        kLengthRules.tail_ms * kLengthRules.sample_rate / 1000 / kLengthRules.block_frames;
+        kLengthRules.ring_ms * kLengthRules.sample_rate / 1000 / kLengthRules.block_frames;
     static constexpr uint64_t kStartFrames = 5000 * kLengthRules.sample_rate / 1000 / kLengthRules.block_frames;
 
     AnalysisMachine machine_;
@@ -251,6 +261,7 @@ private:
     double levels_[2] = {0.0, 0.0};
     std::function<void(int, uint32_t)> on_loop_;
     std::optional<uint64_t> last_sound_;
+    std::optional<double> first_sample_ms_;
     uint64_t frame_ = 0;
     bool sounded_ = false;
     bool started_ = false;
@@ -299,8 +310,9 @@ private:
     bool looped_ = false;           // whether that part has looped since the last call of Looped
 };
 
-// The rules of a sound's length: two loops and a 10 s fade, or its last sound and a 0.5 s tail.
-inline xsflib::rip::LengthRules SoundRules()
+// The rules of a sound's length: two loops and a 7 s fade, or its last sound. The analysis stops at 600 s, or with
+// `limit` kLong at 3,600 s. A sound at either limit gets 600 s and the fade.
+inline xsflib::rip::LengthRules SoundRules(xsflib::rip::Limit limit = xsflib::rip::Limit::kDefault)
 {
     xsflib::rip::LengthRules rules;
     rules.frame_ms = 1000.0 * kLengthRules.block_frames / kLengthRules.sample_rate;
@@ -308,15 +320,14 @@ inline xsflib::rip::LengthRules SoundRules()
     rules.silent_frames = static_cast<uint64_t>(kLengthRules.silence_ms / rules.frame_ms);
     rules.max_ms = static_cast<double>(kLengthRules.limit_ms);
     rules.fade_ms = static_cast<double>(kLengthRules.loop_fade_ms);
-    rules.tail_ms = static_cast<double>(kLengthRules.tail_ms);
 
-    return rules;
+    return limit == xsflib::rip::Limit::kLong ? xsflib::rip::WithLongLimit(rules) : rules;
 }
 
-// The length of the sound that `sound` follows (see SoundRules).
-inline std::optional<Timing> MeasureSound(MeasuredSound& sound)
+// The length of the sound that `sound` follows, up to `limit` (see SoundRules).
+inline std::optional<Timing> MeasureSound(MeasuredSound& sound, xsflib::rip::Limit limit = xsflib::rip::Limit::kDefault)
 {
-    return xsflib::rip::MeasureLength(sound, SoundRules());
+    return xsflib::rip::MeasureLength(sound, SoundRules(limit));
 }
 
 } // namespace gcsf::rip
