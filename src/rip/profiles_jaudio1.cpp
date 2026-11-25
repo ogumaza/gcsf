@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "ntdlib/jaudio/jac_effects.h"
+#include "ntdlib/jaudio/luigis_mansion_states.h"
 #include "ntdlib/jaudio/wind_waker_ports.h"
 
 #include "rip/profiles.h"
@@ -58,47 +59,11 @@ constexpr MusicState kWindWakerMusicStates[] = {
     {0x8000004a, 0x80000151, "80000151"}, // JA_BGM_PAST_BKM
 };
 
-// A room's sound information in Luigi's Mansion (USA): the room's sound_echo_parameter, sound_room_size << 6 and
-// sound_room_code << 8. They are fields of the game's table of rooms (roominfo). 0x8002d90c reads the table, and the
-// game packs the fields so at 0x8018d48c.
-constexpr uint32_t RoomSound(uint32_t echo, uint32_t size, uint32_t code)
-{
-    return echo | size << 6 | code << 8;
-}
-
-// The states in which Luigi's Mansion (USA) plays LuigiSings. The game's start of the piece (0x8018c274) and its frame
-// (0x8018bd84) pick the tracks. Children 4 to 7 of the root track hold the tune. One of them plays at a time. Child 4
-// plays while Luigi has more than 70 of his 100 points of health, child 5 while he has more than 40, and child 6 below
-// that. Child 7 plays alone while the room's lights are on, unless the room's sound_room_size is 2. The other children
-// accompany the tune by the room (0x80189488): children 0 to 3 and 11 in a room whose sound_room_code is 6 or 7 and in
-// room 35 while it's dark, child 9 in a room whose sound_room_size is 2, and children 8 and 10 in the other rooms.
-// Rooms 19, 32 and 65 get no accompaniment. The frame also sets the piece's tempo: 0.6 + 0.4 x the health / 100. With
-// the lights on, it scales that by the time between Luigi's steps, to 0.9 while he stands still. A state's rip takes
-// the most health of its band and the first room of the room table that gives its tracks. A poison mushroom
-// (EnNegativeItem) shrinks Luigi for a time. It puts Luigi in state 56 (0x800d0e4c). That state starts effect 0x847
-// and calls 0x80189468 with 1 (0x800b13e0 to 0x800b1424). The call sets the float at 0x804d783c to 2.0. The frame gives
-// children 4 to 6 the float through 0x801991b4, and the tune plays an octave higher. Child 7 doesn't take it. Once the
-// state's timer runs out, the game calls 0x80189468 with 0 (0x800b4848 to 0x800b48a0). The shrunk states take 100 HP in
-// each place but the lit room.
-constexpr SingingState kLuigiSingsStates[] = {
-    {"hallway 100 HP", 100, false, 6, RoomSound(10, 0, 7)},
-    {"hallway 70 HP", 70, false, 6, RoomSound(10, 0, 7)},
-    {"hallway 40 HP", 40, false, 6, RoomSound(10, 0, 7)},
-    {"room 100 HP", 100, false, 0, RoomSound(10, 1, 0)},
-    {"room 70 HP", 70, false, 0, RoomSound(10, 1, 0)},
-    {"room 40 HP", 40, false, 0, RoomSound(10, 1, 0)},
-    {"outdoors 100 HP", 100, false, 11, RoomSound(0, 2, 1)},
-    {"outdoors 70 HP", 70, false, 11, RoomSound(0, 2, 1)},
-    {"outdoors 40 HP", 40, false, 11, RoomSound(0, 2, 1)},
-    {"unaccompanied 100 HP", 100, false, 19, RoomSound(10, 0, 6)},
-    {"unaccompanied 70 HP", 70, false, 19, RoomSound(10, 0, 6)},
-    {"unaccompanied 40 HP", 40, false, 19, RoomSound(10, 0, 6)},
-    {"lit room", 100, true, 0, RoomSound(10, 1, 0)},
-    {"hallway 100 HP shrunk", 100, false, 6, RoomSound(10, 0, 7), true},
-    {"room 100 HP shrunk", 100, false, 0, RoomSound(10, 1, 0), true},
-    {"outdoors 100 HP shrunk", 100, false, 11, RoomSound(0, 2, 1), true},
-    {"unaccompanied 100 HP shrunk", 100, false, 19, RoomSound(10, 0, 6), true},
-};
+// The effects that Luigi's Mansion (USA) plays as music. se1-0169 is the piano piece that the mansion plays while Luigi
+// is in room 18, next to the pianist's room 21. The pianist's code starts it (0x8018a138 with 0x10a9 at 0x800cbce8)
+// while Luigi's room isn't hers. The game looks an effect up by its category and index alone, so 0x10a9 names the
+// entry of 0x18a9.
+constexpr uint32_t kLuigisMansionMusicEffects[] = {0x18a9};
 
 } // namespace
 
@@ -333,8 +298,9 @@ const GameProfile kWindWakerJpn = {
 
 // Luigi's Mansion (USA). Its sound library is an early JAudio1. The start-up archive is an AAF. The sequences are one
 // file, and a table in the AAF divides it. The sound library loads all four wave systems at start-up. The parameters
-// follow driver/luigis_mansion.c's Params from frame_retraces to set_shrunk. The table of LuigiSings's states
-// (kLuigiSingsStates) follows them.
+// follow driver/luigis_mansion.c's Params from frame_retraces to singing_piece. The table of states follows them:
+// LuigiSings's states, then the boss pieces' later states (ntdlib's luigis_mansion_states.h). The game's state function
+// of the boss pieces is 0x80188898: (u32 id, u8 state).
 const GameProfile kLuigisMansionUsa = {
     .name = "Luigi's Mansion",
     .game_id = "GLME01",
@@ -373,14 +339,17 @@ const GameProfile kLuigisMansionUsa = {
             0x80,                 // wave_systems_offset
             0x60,                 // last_load_offset
             0x8018d6c0,           // start_sound
-            0x8018c274,           // singing_start
+            0x80188760,           // music_start
             0x804d91a4,           // music
+            0x804d91a8,           // second_music
             0x80188d04,           // set_health
             0x80188ce4,           // set_lights
             0x80188cec,           // set_room_lights
             0x804d91d0,           // room
             0x804d7830,           // room_sound
             0x80189468,           // set_shrunk
+            0x80189378,           // set_humming_muted
+            0x80000007,           // singing_piece
         },
     .watch =
         {
@@ -405,8 +374,11 @@ const GameProfile kLuigisMansionUsa = {
             // 96 ticks a second, that's 2 min 47 s or 5 min 33 s.
             .endless_wait = 0x2000,
         },
-    .singing_piece = 0x80000007,
-    .singing_states = kLuigiSingsStates,
+    .singing_piece = ntdlib::jaudio::luigis_mansion::kLuigiSings,
+    .singing_states = ntdlib::jaudio::luigis_mansion::kSingingStates,
+    .boss_states = ntdlib::jaudio::luigis_mansion::kBossStates,
+    .boss_state_call = 0x80188898,
+    .music_effects = kLuigisMansionMusicEffects,
 };
 
 // Super Mario Sunshine (USA). Its sound library is JAudio1, under the game's sound object (MSound). The game keeps its

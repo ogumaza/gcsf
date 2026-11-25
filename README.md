@@ -56,6 +56,12 @@ and a variant for each other state.
   picks the tracks of its piece `LuigiSings` by Luigi's health and by the room. His health also sets the tempo. A rip
   contains the piece once for each state, named after the piece, the place and Luigi's health. A poison mushroom shrinks
   Luigi, and the tune then plays an octave higher. A rip contains that state too, with "shrunk" at the end of its name.
+  While a message window is open, the game mutes Luigi's humming and the accompaniment plays alone. A rip contains
+  that at 100 HP in the hallway, a room and outdoors, with "no humming" at the end of its name. The music of four boss
+  fights (`BabyBattle`, `BlueBattle`, `TelesaBattle` and `KuppaBattle`) changes its tracks, and for some of them its
+  tempo, as the fight goes on. Each piece's file plays the music as the fight starts, and a variant such as
+  `BabyBattle state 1` plays each later state. `se1-0169` is the piano piece that plays in the hallway next to the
+  pianist's room. It's an effect in the game's sound table, and `--bgm` rips it with the music.
 - **Super Mario Sunshine** (USA). The game keeps a table of the names of its sounds. A rip names each sound as that
   table does, for example `MSD_BGM_DOLPIC`.
 - **Pikmin** (USA). The code of the game lists its pieces of music by the names of their files, and a rip names a piece

@@ -26,6 +26,7 @@
 #include "ntdlib/jaudio/game_lengths.h"
 #include "ntdlib/jaudio/jac_effects.h"
 #include "ntdlib/jaudio/jungle_beat_states.h"
+#include "ntdlib/jaudio/luigis_mansion_states.h"
 #include "ntdlib/jaudio/wave_system.h"
 #include "ntdlib/jaudio/wind_waker_ports.h"
 #include "ntdlib/jaudio/z2_starts.h"
@@ -223,19 +224,14 @@ using jaudio::PortEffect;
 // piece through a function of its own. That function reads Luigi's health, the room's lights, the room and the room's
 // sound information. It then picks the tracks that play and sets the piece's tempo. The driver gives the game the
 // state and calls the function.
-struct SingingState
-{
-    const char* name;    // the state's rip is named after the piece, a space and this name
-    uint32_t health;     // Luigi's health, 0 to 100
-    bool lights;         // whether the room's lights are on
-    uint32_t room;       // the room's number
-    uint32_t room_sound; // the room's sound information: the room's sound_echo_parameter, sound_room_size << 6 and
-                         // sound_room_code << 8
-    bool shrunk = false; // whether a poison mushroom has shrunk Luigi. The tune then plays an octave higher.
-};
+using SingingState = ntdlib::jaudio::luigis_mansion::SingingState;
 
-// The first bit of a sound ID that gives a singing state, from 1 (GameProfile::singing_states). A JAudio1 game's
-// music ID uses only bit 31 and its low 16 bits.
+// A later state of one of Luigi's Mansion's boss pieces (GameProfile::boss_states).
+using BossState = ntdlib::jaudio::luigis_mansion::BossState;
+
+// The first bit of a sound ID that gives a row of the driver's table of states, from 1: a singing state
+// (GameProfile::singing_states), then a later state of a boss piece (GameProfile::boss_states). A JAudio1 game's music
+// ID uses only bit 31 and its low 16 bits.
 inline constexpr uint32_t kSingingStateShift = 16;
 
 // The first bit of a sound's value that gives the random numbers that the driver draws before it starts the sound
@@ -395,6 +391,17 @@ struct GameProfile
     // kSingingStateShift. The list of sounds gives the states in place of the piece. Other profiles leave the ID 0.
     uint32_t singing_piece = 0;
     std::span<const SingingState> singing_states = {};
+
+    // Luigi's Mansion's boss pieces and their states, from ntdlib's kBossStates. A rip of the piece plays state 0: the
+    // game's start of the music applies it. The list of sounds gives each later state after its piece. The driver
+    // takes the later states as rows of its table of states, after the singing states. A row calls the game's
+    // `boss_state_call` with the piece and the state after the start.
+    std::span<const BossState> boss_states = {};
+    uint32_t boss_state_call = 0;
+
+    // Effects that the game plays as music, by their JAudio sound IDs. The list of sounds marks them as music, and
+    // gcsfrip's --bgm rips them.
+    std::span<const uint32_t> music_effects = {};
 
     // A piece that the game plays with two sets of tracks, by its JAudio sound ID. Four Swords Adventures mutes some of
     // JA_BGM_SELECT's tracks and switches between the sets. The driver plays the second set for the ID
@@ -711,6 +718,10 @@ std::vector<jaudio::WaveSystem> WaveSystems(const GameProfile& profile, const st
 // Whether a sound is music: whether its section in the sound table is named BGM. JAudio2 games name the music's section
 // that way. Mario Kart: Double Dash!! names it TYPE_BGM.
 bool IsMusic(const jaudio::SoundEntry& sound);
+
+// The later states of the profile's boss pieces (GameProfile::boss_states), in the order of the driver's table of
+// states: each state but state 0. Row i of the list is row singing_states.size() + i of the table.
+std::vector<BossState> LaterBossStates(const GameProfile& profile);
 
 // A sound as gcsfrip lists and rips it: the value that the driver's parameter block takes as the sound, the label for
 // the sound's files and tags, and whether the sound is music.

@@ -193,15 +193,20 @@ scene at 0x229, not 0x22D.
 The driver for Luigi's Mansion is `driver/luigis_mansion.c`. It sets up the video interface, the disc with long file
 names, the heaps and ARAM manager of JSystem, and the sound set-up of the game. It loads the wave systems that the game
 loads before its first frame. Then it calls the game's sound frame until the sound library is up and every wave system
-that stays loaded is in ARAM. Then it starts the sound by its JAudio sound ID. From then on it calls the sound frame
-once a frame. A frame is two video retraces. The game uses the same frame. The game starts one piece, LuigiSings,
-through a function of its own. That function reads the state of the game: Luigi's health, the lights of the room, the
-room and its sound information. It picks the tracks that play and sets the tempo of the piece. The sound frame of the
-game keeps them up to date. A sound ID of LuigiSings contains a state in bits 16 to 23, from 1. The game profile
-contains a table of the states. For a state, the driver passes the state to the game and calls that function. For a
-state in which a poison mushroom has shrunk Luigi, the driver then calls the game's setter that raises the tune by an
-octave. The function stores the JAISound of the piece in a word of the game. The driver copies that word to the handle
-of the sound once a frame.
+that stays loaded is in ARAM. Then it starts the sound. From then on it calls the sound frame once a frame. A frame is
+two video retraces. The game uses the same frame. An effect starts through the sound library by its JAudio sound ID. A
+piece of music starts through the game's start of its music (0x80188760). That function reads the flags of the piece's
+entry in the sound table. The flags can send the piece to a second slot, and can make the start set the piece's first
+state. The start refuses a piece whose flags keep it out, and the driver then starts that piece through the sound
+library. The start sends one piece, LuigiSings, to a function of its own. That function reads the state of the game:
+Luigi's health, the lights of the room, the room and its sound information. It picks the tracks that play and sets the
+tempo of the piece. The sound frame of the game keeps them up to date. A sound ID of a piece can contain a row of the
+profile's table of states in bits 16 to 23, from 1. For a state of LuigiSings, the driver passes the state to the game
+before the start. For a state in which a poison mushroom has shrunk Luigi, the driver then calls the game's setter that
+raises the tune by an octave. For a state in which a message window mutes Luigi's humming, it calls the game's setter
+for that. For a state of another piece, the row gives the game's function that sets the state, and the driver calls it
+after the start. The start stores the JAISound of the piece in a word of the game. The driver copies that word to the
+handle of the sound once a frame.
 
 The driver for Super Mario Sunshine is `driver/super_mario_sunshine.c`. It sets up the video interface, the disc with
 long file names, the heaps and ARAM manager of JSystem, and the sound object of the game. The sound object sets up the
@@ -957,8 +962,22 @@ place of the piece: the hallways, the other rooms, outdoors and the rooms withou
 points of health, and a lit room at 100 points while Luigi stands still. A poison mushroom shrinks Luigi for a time. The
 game then plays the three tunes of his health an octave higher. A rip contains that state in each place but the lit
 room, at 100 points. The title of a state is the name of the piece followed by the place and Luigi's health. The title
-of a state in which Luigi is shrunk ends in "shrunk". The title of the lit room names the place alone. The file of each
-state shares the number of the piece. The profile lists the states (`GameProfile::singing_states`).
+of a state in which Luigi is shrunk ends in "shrunk". The title of the lit room names the place alone. While a message
+window is open, the game mutes the four tracks of the tune, and the accompaniment plays alone. A rip contains that state
+at 100 points in the hallways, the other rooms and outdoors, with "no humming" at the end of its title. The file of each
+state shares the number of the piece. ntdlib's `jaudio/luigis_mansion_states.h` lists the states
+(`GameProfile::singing_states`).
+
+Four boss pieces of Luigi's Mansion change their tracks as the fight goes on: `BabyBattle`, `BlueBattle`, `TelesaBattle`
+and `KuppaBattle`. A function of the game sets the volume of each of the 16 children of the root track to 0 or 1 for a
+state, and for three of the pieces the tempo. State 0 is the start of the fight: the game's start of the music applies
+it, and the file of the piece plays it. A rip contains each later state as a variant named after the piece and the
+number of the state, for example `BabyBattle state 1`. BabyBattle and BlueBattle have states 1 and 2, and TelesaBattle
+and KuppaBattle state 1. The driver starts the piece and then calls the game's function that sets the state. The
+variants share the number of the piece. The same header lists the states (`GameProfile::boss_states`).
+
+Luigi's Mansion plays one effect as music: `se1-0169`, a piano piece that the mansion plays while Luigi is in the
+hallway next to the pianist's room. `--bgm` rips it with the music (`GameProfile::music_effects`).
 
 Mario Kart: Double Dash!! keeps the sequences of its music in the start-up archive. It has no sequence archive. Its
 voices play the banks of three more start-up archives in the `baac` block of the first one. The game loads one of those

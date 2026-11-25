@@ -19,6 +19,7 @@
 #include "ntdlib/flipper/piece_variants.h"
 #include "ntdlib/flipper/z2_params.h"
 #include "ntdlib/jaudio/jungle_beat_states.h"
+#include "ntdlib/jaudio/luigis_mansion_states.h"
 #include "xsflib/binary.h"
 #include "xsflib/psf/psf.h"
 
@@ -154,8 +155,8 @@ void AddRandomVariants(const GameProfile& profile, std::vector<Sound>& sounds)
 }
 
 // Puts the profile's singing states in place of their piece in `sounds` (GameProfile::singing_states). A state's label
-// is the piece's, a space and the state's name, such as "LuigiSings hallway 100 HP". The states share the piece's
-// number.
+// is the piece's, a space and ntdlib's label of the state, such as "LuigiSings hallway 100 HP". The states share the
+// piece's number.
 void AddSingingStates(const GameProfile& profile, std::vector<Sound>& sounds)
 {
     const auto piece = std::find_if(sounds.begin(), sounds.end(),
@@ -171,7 +172,7 @@ void AddSingingStates(const GameProfile& profile, std::vector<Sound>& sounds)
     {
         Sound state = base;
         state.id = base.id | static_cast<uint32_t>(i + 1) << kSingingStateShift;
-        state.label = base.label + " " + profile.singing_states[i].name;
+        state.label = base.label + " " + ntdlib::jaudio::luigis_mansion::LabelOf(profile.singing_states[i]);
         state.shares_number = i > 0;
         states.push_back(std::move(state));
     }
@@ -238,6 +239,46 @@ void AddStatesOfPieces(std::span<const State> states, std::vector<Sound>& sounds
         return added;
     };
     ntdlib::flipper::AddVariantsAfterEach(sounds, states_of);
+}
+
+// Adds the later states of the profile's boss pieces to `sounds`, each after its piece (GameProfile::boss_states). A
+// state's label is the piece's, a space and ntdlib's label of the state, such as "BabyBattle state 1". Its sound ID
+// gives the state's row in the driver's table of states, after the singing states (LaterBossStates). The states share
+// the piece's number.
+void AddBossStates(const GameProfile& profile, std::vector<Sound>& sounds)
+{
+    const std::vector<BossState> states = LaterBossStates(profile);
+    const auto states_of = [&profile, &states](const Sound& piece)
+    {
+        std::vector<Sound> added;
+        for (std::size_t i = 0; i < states.size(); i++)
+        {
+            if (states[i].sound != piece.id)
+            {
+                continue;
+            }
+
+            Sound sound = VariantOf(piece, " " + ntdlib::jaudio::luigis_mansion::LabelOf(states[i]));
+            const auto row = static_cast<uint32_t>(profile.singing_states.size() + i + 1);
+            sound.id = piece.id | row << kSingingStateShift;
+            added.push_back(std::move(sound));
+        }
+
+        return added;
+    };
+    ntdlib::flipper::AddVariantsAfterEach(sounds, states_of);
+}
+
+// Marks the effects that the profile lists as music (GameProfile::music_effects). gcsfrip's --bgm then rips them.
+void MarkMusicEffects(const GameProfile& profile, std::vector<Sound>& sounds)
+{
+    for (Sound& sound : sounds)
+    {
+        if (std::ranges::find(profile.music_effects, sound.id) != profile.music_effects.end())
+        {
+            sound.music = true;
+        }
+    }
 }
 
 // Adds the profile's states of pieces of music to `sounds`, each after its piece (GameProfile::music_states). A state's
@@ -364,6 +405,8 @@ std::optional<GameSounds> ListGameSounds(const disc::GameFiles& game, const Game
     AddPortVariants(profile, listed.sounds);
     AddRandomVariants(profile, listed.sounds);
     AddSingingStates(profile, listed.sounds);
+    AddBossStates(profile, listed.sounds);
+    MarkMusicEffects(profile, listed.sounds);
     AddSecondSet(profile, listed.sounds);
     ntdlib::flipper::AddMutedStarts(profile.muted_starts, listed.sounds, VariantOf);
     ntdlib::flipper::AddPieceStates(profile.piece_states, listed.sounds, VariantOf);

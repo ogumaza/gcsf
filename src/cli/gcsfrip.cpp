@@ -8,7 +8,8 @@
 //                    added)
 //   --list           only list the game's sounds and whether it has a driver profile
 //   --only REGEX     rip only the sounds whose label matches (ECMAScript regex)
-//   --bgm            rip only the music: the sounds of the sound table's BGM section
+//   --bgm            rip only the music: the sounds of the sound table's BGM section, and the effects that a game
+//                    plays as music (GameProfile::music_effects)
 //   --no-length      skip length analysis (no length or fade tags, and no sound is found to be silent)
 //   --sound-files DIR
 //                    take the sound files from another release of the game in DIR, and play them with the input's
@@ -72,7 +73,8 @@ constexpr char kUsage[] =
     "  -o, --output DIR     put the rips in DIR\n"
     "  --list               only list a game's sounds and whether it has a driver profile\n"
     "  --only REGEX         rip only the sounds whose label matches\n"
-    "  --bgm                rip only the music: the sounds in the sound table's BGM section\n"
+    "  --bgm                rip only the music: the sounds in the sound table's BGM section, and\n"
+    "                       the effects that a game plays as music\n"
     "  --no-length          skip length analysis and omit length and fade tags. The analysis also\n"
     "                       finds the sounds that make no sound.\n"
     "  --sound-files DIR    play another release's sound files with the input's code. DIR holds\n"

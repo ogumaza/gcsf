@@ -250,6 +250,20 @@ bool IsMusic(const jaudio::SoundEntry& sound)
     return section == "bgm" || section == "type_bgm";
 }
 
+std::vector<BossState> LaterBossStates(const GameProfile& profile)
+{
+    std::vector<BossState> states;
+    for (const BossState& state : profile.boss_states)
+    {
+        if (state.state != 0)
+        {
+            states.push_back(state);
+        }
+    }
+
+    return states;
+}
+
 Sound SoundOf(const jaudio::SoundEntry& entry)
 {
     return {entry.Id(), entry.name.empty() ? IdLabel(entry.Id()) : entry.name, IsMusic(entry), entry.stream};

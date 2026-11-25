@@ -152,19 +152,39 @@ static_assert(DriverBlock::kMaxWaves == ntdlib::flipper::kMaxWaves);
 static_assert(DriverBlock::kListedProfileOffset - DriverBlock::kSoundOffset == ntdlib::flipper::z2::kProfileOffset);
 static_assert(DriverBlock::kWaveListOffset - DriverBlock::kSoundOffset == ntdlib::flipper::z2::kWaveCountOffset);
 
+// The most rows of driver/luigis_mansion.c's table of states (MAX_STATES).
+constexpr std::size_t kMaxStateRows = 32;
+
+// The table of states in the driver has room for every row of Luigi's Mansion: one for each singing state and for each
+// boss state but state 0 (LaterBossStates). The check counts state 0 too.
+static_assert(ntdlib::jaudio::luigis_mansion::kSingingStates.size() +
+                  ntdlib::jaudio::luigis_mansion::kBossStates.size() <=
+              kMaxStateRows);
+
 // The profile's driver parameters, in the order of the driver's parameter block: `params`, then for a profile with
-// singing states their number and the states (driver/luigis_mansion.c's State), and for Pikmin 2 the table of its
-// pieces (driver/pikmin2.c's Piece), and for Donkey Kong Jungle Beat the table of its chord layers.
+// singing states or boss states the table of states (driver/luigis_mansion.c's State: the number of rows, then the
+// singing states and the boss pieces' later states), and for Pikmin 2 the table of its pieces (driver/pikmin2.c's
+// Piece), and for Donkey Kong Jungle Beat the table of its chord layers.
 std::vector<uint32_t> DriverParameters(const GameProfile& p)
 {
     std::vector<uint32_t> words = p.params;
-    if (!p.singing_states.empty())
+    const std::vector<BossState> boss_states = LaterBossStates(p);
+    if (!p.singing_states.empty() || !boss_states.empty())
     {
-        words.push_back(static_cast<uint32_t>(p.singing_states.size()));
+        words.push_back(static_cast<uint32_t>(p.singing_states.size() + boss_states.size()));
         for (const SingingState& state : p.singing_states)
         {
+            const ntdlib::jaudio::luigis_mansion::SingingRoom room =
+                ntdlib::jaudio::luigis_mansion::RoomOf(state.place);
+            const bool lights = state.place == ntdlib::jaudio::luigis_mansion::SingingPlace::kLitRoom;
             words.insert(words.end(),
-                         {state.health, state.lights ? 1u : 0u, state.room, state.room_sound, state.shrunk ? 1u : 0u});
+                         {state.health, lights ? 1u : 0u, room.room, ntdlib::jaudio::luigis_mansion::RoomSound(room),
+                          state.shrunk ? 1u : 0u, state.humming_muted ? 1u : 0u, 0u, 0u, 0u});
+        }
+
+        for (const BossState& state : boss_states)
+        {
+            words.insert(words.end(), {0u, 0u, 0u, 0u, 0u, 0u, p.boss_state_call, state.sound, state.state});
         }
     }
 
