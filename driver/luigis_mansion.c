@@ -23,9 +23,9 @@
  *      sound ID with a state in bits 16 to 23 picks a row of the profile's table. For LuigiSings, the row gives the
  *      game that state before the start. After the start, a row can give the game's calls that raise the tune by an
  *      octave and that mute the humming. For another piece, the row gives the game's call that sets one of the piece's
- *      later states. The game puts the piece's JAISound in its word for music. The driver copies that word to the
- *      sound's handle once a frame. The game's start refuses a piece whose flags keep it out, and the driver then
- *      starts that piece through the sound library.
+ *      later states. The driver makes the call again once the piece's track is open. The game puts the piece's
+ *      JAISound in its word for music. The driver copies that word to the sound's handle once a frame. The game's
+ *      start refuses a piece whose flags keep it out, and the driver then starts that piece through the sound library.
  * Then the game's sound frame runs once a frame, forever. A step that fails stops the driver with its number in the
  * status word (step 1 is the driver's check of its parameter block). `driver_params.status` reports the driver's
  * progress to the player (see docs/gcsf.md).
@@ -38,6 +38,9 @@
 
 /* The sound library's state once it's up and its effects sequence plays. */
 #define STATE_RUNNING 4u
+
+/* A JAISound's state (its byte +1) once the sound frame has opened the sound's track. */
+#define SOUND_OPEN 3u
 
 /* The load type of a wave system that a scene loads. The others stay loaded. */
 #define WAVES_FOR_SCENE 2u
@@ -233,12 +236,21 @@ __attribute__((noreturn)) void driver_main(void) {
         ((fn1)p->set_humming_muted)(1);
     if (s && s->call)
         ((fn2)s->call)(s->arg0, s->arg1);
+    u32 call_again = s && s->call;
     p->status = STATUS_PLAYING;
 
     for (;;) {
         ((fn0)p->audio_frame)();
         if (handle)
             p->sound = word(handle);
+
+        /* The row's call again, once, after the first frame in which the piece's track is open. The sound frame that
+           opens the track writes 1.0 over the root track's tempo. A tempo that the call set before then is lost. The
+           call at the start still gives the state's tracks from the first sample. */
+        if (call_again && p->sound && byte(p->sound + 1) >= SOUND_OPEN) {
+            ((fn2)s->call)(s->arg0, s->arg1);
+            call_again = 0;
+        }
         if (p->status == STATUS_PLAYING && p->sound == 0)
             p->status = STATUS_FINISHED;
         wait_frame();

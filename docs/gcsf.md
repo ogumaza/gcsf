@@ -973,8 +973,9 @@ and `KuppaBattle`. A function of the game sets the volume of each of the 16 chil
 state, and for three of the pieces the tempo. State 0 is the start of the fight: the game's start of the music applies
 it, and the file of the piece plays it. A rip contains each later state as a variant named after the piece and the
 number of the state, for example `BabyBattle state 1`. BabyBattle and BlueBattle have states 1 and 2, and TelesaBattle
-and KuppaBattle state 1. The driver starts the piece and then calls the game's function that sets the state. The
-variants share the number of the piece. The same header lists the states (`GameProfile::boss_states`).
+and KuppaBattle state 1. The driver starts the piece and then calls the game's function that sets the state. It makes
+the call again once the piece's track is open. The game sets the tempo of the root track to 1.0 when it opens the
+track. The variants share the number of the piece. The same header lists the states (`GameProfile::boss_states`).
 
 Luigi's Mansion plays one effect as music: `se1-0169`, a piano piece that the mansion plays while Luigi is in the
 hallway next to the pianist's room. `--bgm` rips it with the music (`GameProfile::music_effects`).

@@ -395,7 +395,7 @@ struct GameProfile
     // Luigi's Mansion's boss pieces and their states, from ntdlib's kBossStates. A rip of the piece plays state 0: the
     // game's start of the music applies it. The list of sounds gives each later state after its piece. The driver
     // takes the later states as rows of its table of states, after the singing states. A row calls the game's
-    // `boss_state_call` with the piece and the state after the start.
+    // `boss_state_call` with the piece and the state after the start, and again once the piece's track is open.
     std::span<const BossState> boss_states = {};
     uint32_t boss_state_call = 0;
 
